@@ -6,7 +6,7 @@ extends Node3D
 const G := 9.81
 const JUMP_V := 3.96  # ergibt ca. 0,80 m Sprunghoehe
 const SPIKE_REACH := 2.45  # Handhoehe im Stand beim Angriff
-const BLOCK_REACH := 2.55  # Handhoehe im Stand beim Block
+const BLOCK_REACH := 2.45  # Handhoehe im Stand beim Block
 
 var team := 0
 var role := ""
@@ -20,10 +20,18 @@ var jump_v := 0.0
 var airborne := false
 var has_jumped := false
 var dive_timer := 0.0
+## Block: seitliche Verschiebung der Haende (m, Welt-z) und wie weit sie ueber das Netz greifen.
+var hand_shift := 0.0
+var hand_reach := 0.0
+var block_jump_at := -1.0
+var block_pose := false
+## Blickrichtung beim Angriff (Welt-z der Schulter), damit der Gegner lesen kann.
+var lean := 0.0
 
 var _rig: Node3D
 var _tag: Label3D
 var _ring: MeshInstance3D
+var _arms: Array = []
 
 
 func setup(p_team: int, p_role: String, tag_letter: String, p_number: int, color: Color) -> void:
@@ -52,6 +60,16 @@ func setup(p_team: int, p_role: String, tag_letter: String, p_number: int, color
 	head.material_override = _mat(Color(0.93, 0.76, 0.62))
 	head.position.y = 1.80
 	_rig.add_child(head)
+
+	for i in 2:
+		var arm := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.09, 0.95, 0.09)
+		arm.mesh = box
+		arm.material_override = _mat(color.darkened(0.15))
+		_rig.add_child(arm)
+		_arms.append(arm)
+	_pose_arms()
 
 	_tag = Label3D.new()
 	_tag.text = "%s%d" % [tag_letter, number]
@@ -92,6 +110,11 @@ func reset_state() -> void:
 	has_jumped = false
 	dive_timer = 0.0
 	manual_dir = Vector3.ZERO
+	hand_shift = 0.0
+	hand_reach = 0.0
+	block_jump_at = -1.0
+	block_pose = false
+	lean = 0.0
 
 
 func jump() -> void:
@@ -111,7 +134,29 @@ func spike_hand() -> float:
 
 
 func block_top() -> float:
-	return jump_h + BLOCK_REACH
+	return jump_h + BLOCK_REACH + hand_reach
+
+
+## Mitte der Blockhaende (Welt-z).
+func hands_z() -> float:
+	return position.z + hand_shift
+
+
+func _pose_arms() -> void:
+	for i in 2:
+		var arm: MeshInstance3D = _arms[i]
+		var sz := -0.22 if i == 0 else 0.22
+		if airborne and block_pose:
+			# Beide Arme hoch, Haende seitlich verschoben und leicht ueber das Netz.
+			arm.position = Vector3(-side * hand_reach * 0.8, 1.95, sz * 0.85 + hand_shift)
+			arm.rotation = Vector3(-hand_shift * 0.6, 0.0, side * hand_reach * 1.2)
+		elif airborne:
+			# Schlagarm hoch, anderer Arm vorn.
+			arm.position = Vector3(0.0, 1.95 if i == 1 else 1.4, sz + (lean * 0.15 if i == 1 else 0.0))
+			arm.rotation = Vector3(lean * 0.3 if i == 1 else 0.0, 0.0, 0.0 if i == 1 else -side * 1.0)
+		else:
+			arm.position = Vector3(0.0, 1.0, sz * 1.45)
+			arm.rotation = Vector3.ZERO
 
 
 func set_controlled(on: bool) -> void:
@@ -143,6 +188,7 @@ func tick(delta: float) -> void:
 		position.x = maxf(position.x, 0.15)
 
 	_rig.position.y = jump_h
+	_pose_arms()
 	if dive_timer > 0.0:
 		dive_timer -= delta
 		var k := clampf(dive_timer / 0.7, 0.0, 1.0)

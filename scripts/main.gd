@@ -8,6 +8,8 @@ var camera: Camera3D
 var match_node
 var _shake := 0.0
 var _cam_base := Vector3(-18.5, 9.5, 0.0)
+var _cam_pos := Vector3(-18.5, 9.5, 0.0)
+var _cam_look := Vector3(1.5, 1.0, 0.0)
 
 
 func _ready() -> void:
@@ -34,22 +36,44 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("quit"):
 		get_tree().quit()
+	# Kamera in Echtzeit bewegen, auch waehrend der Zeitlupe.
+	var rd := delta / maxf(Engine.time_scale, 0.01)
 	var bz: float = match_node.ball.position.z if match_node and match_node.ball else 0.0
-	var base := _cam_base + Vector3(0.0, 0.0, bz * 0.25)
+	var want_pos := _cam_base + Vector3(0.0, 0.0, bz * 0.25)
+	var want_look := Vector3(1.5, 1.0, bz * 0.2)
+	var want_fov := 52.0
+	var subj = match_node.cam_subject if match_node else null
+	if subj != null:
+		var s: float = subj.side
+		var p: Vector3 = subj.position
+		match match_node.cam_mode:
+			"serve":
+				# Hinter der Schulter des Aufschlaegers.
+				want_pos = p + Vector3(s * 4.4, 3.3, 2.4)
+				want_look = Vector3(-s * 4.0, 2.6, p.z * 0.4)
+				want_fov = 55.0
+			"attack":
+				want_pos = Vector3(s * 5.2, 3.3, p.z * 0.75 + 0.6)
+				want_look = Vector3(-s * 2.0, 2.4, p.z * 0.6)
+				want_fov = 56.0
+			"block":
+				want_pos = Vector3(s * 5.6, 3.6, p.z * 0.7)
+				want_look = Vector3(-s * 3.0, 2.2, p.z * 0.6)
+				want_fov = 56.0
+	var k := clampf(rd * 4.0, 0.0, 1.0)
+	_cam_pos = _cam_pos.lerp(want_pos, k)
+	_cam_look = _cam_look.lerp(want_look, k)
+	camera.fov = lerpf(camera.fov, want_fov, k)
 	var off := Vector3.ZERO
 	if _shake > 0.0:
-		_shake = maxf(0.0, _shake - delta * 2.5)
+		_shake = maxf(0.0, _shake - rd * 2.5)
 		off = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * _shake * 0.25
-	camera.position = base + off
-	camera.look_at(Vector3(1.5, 1.0, bz * 0.2) + off * 0.5)
+	camera.position = _cam_pos + off
+	camera.look_at(_cam_look + off * 0.5)
 
 
 func _on_big_hit(strength: float) -> void:
 	_shake = maxf(_shake, strength)
-	if strength >= 1.0:
-		Engine.time_scale = 0.3
-		await get_tree().create_timer(0.18, true, false, true).timeout
-		Engine.time_scale = 1.0
 
 
 ## Testhilfe: --shot=bild.png@2,4.5 speichert Bilder nach 2 und 4,5 Sekunden.
@@ -76,12 +100,19 @@ func _setup_input() -> void:
 	_action("move_right", [KEY_D, KEY_RIGHT], [JOY_BUTTON_DPAD_RIGHT], [[JOY_AXIS_LEFT_X, 1.0]])
 	_action("move_up", [KEY_W, KEY_UP], [JOY_BUTTON_DPAD_UP], [[JOY_AXIS_LEFT_Y, -1.0]])
 	_action("move_down", [KEY_S, KEY_DOWN], [JOY_BUTTON_DPAD_DOWN], [[JOY_AXIS_LEFT_Y, 1.0]])
-	_action("action", [KEY_SPACE, KEY_ENTER], [JOY_BUTTON_A])
-	_action("set_left", [KEY_J], [JOY_BUTTON_X])
-	_action("set_mid", [KEY_K], [JOY_BUTTON_Y])
-	_action("set_right", [KEY_L], [JOY_BUTTON_B])
-	_action("tip", [KEY_SHIFT], [JOY_BUTTON_RIGHT_SHOULDER])
+	# Rechter Stick = Trefferpunkt am Ball (Tastatur: Maus oder I J K L)
+	_action("aim_left", [KEY_J], [], [[JOY_AXIS_RIGHT_X, -1.0]])
+	_action("aim_right", [KEY_L], [], [[JOY_AXIS_RIGHT_X, 1.0]])
+	_action("aim_up", [KEY_I], [], [[JOY_AXIS_RIGHT_Y, -1.0]])
+	_action("aim_down", [KEY_K], [], [[JOY_AXIS_RIGHT_Y, 1.0]])
+	_action("bump", [KEY_SPACE, KEY_ENTER], [JOY_BUTTON_A])
+	_action("overhand", [KEY_Q], [JOY_BUTTON_X])
+	_action("hit", [KEY_E], [], [[JOY_AXIS_TRIGGER_RIGHT, 1.0]])
+	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])
+	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])
 	_action("toggle_assist", [KEY_F1], [JOY_BUTTON_BACK])
+	_action("toggle_slowmo", [KEY_F2], [JOY_BUTTON_START])
+	_action("toggle_zoom", [KEY_F3], [])
 	_action("quit", [KEY_ESCAPE], [])
 
 
