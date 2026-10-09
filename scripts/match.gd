@@ -344,11 +344,24 @@ func _make_ball() -> void:
 	var s := SphereMesh.new()
 	s.radius = 0.14  # etwas groesser gezeichnet, damit man ihn gut sieht
 	s.height = 0.28
+	s.radial_segments = 14
+	s.rings = 8
 	ball_mesh.mesh = s
+	# Volleyball-Muster: geschwungene Streifen in Gelb, Blau und Weiss
+	var img := Image.create(64, 32, false, Image.FORMAT_RGB8)
+	var cols := [Color(1.0, 0.85, 0.15), Color(0.12, 0.3, 0.75), Color(0.97, 0.97, 0.97)]
+	for y in 32:
+		for x in 64:
+			var u := x / 64.0
+			var v := y / 32.0
+			var band := int(floor((v + 0.12 * sin(u * TAU * 3.0)) * 6.0)) % 3
+			img.set_pixel(x, y, cols[band])
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(1.0, 0.92, 0.35)
+	m.albedo_texture = ImageTexture.create_from_image(img)
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	m.roughness = 0.6
 	m.emission_enabled = true
-	m.emission = Color(0.35, 0.3, 0.05)
+	m.emission = Color(0.12, 0.1, 0.03)
 	ball_mesh.material_override = m
 	ball.add_child(ball_mesh)
 
@@ -495,7 +508,7 @@ func ai_e(kind: String) -> float:
 
 
 func popup(pl: VPlayer, text: String, color: Color) -> void:
-	if autoplay:
+	if autoplay or attract:
 		return
 	var l := Label3D.new()
 	l.text = text
@@ -1981,6 +1994,9 @@ func _do_free(o: Opp, q: int) -> void:
 
 func _step_ball(delta: float) -> void:
 	var prev := ball.position
+	var spin_axis := Vector3.UP.cross(ball_vel)
+	if spin_axis.length() > 0.05:
+		ball_mesh.rotate(spin_axis.normalized(), ball_vel.length() * delta / 0.14 * 0.4)
 	var res := Ballistics.advance(prev, ball_vel, delta, ball_g)
 	var nxt: Vector3 = res[0]
 	ball_vel = res[1]
@@ -2197,6 +2213,8 @@ func _end_rally(winner: int, reason: String) -> void:
 	var over: bool = score[winner] >= set_target() and score[winner] - score[1 - winner] >= 2
 	if over and trace:
 		print("SATZENDE Satz %d: %d:%d (deciding=%s)" % [set_no, score[0], score[1], deciding])
+	for pl in players[winner]:
+		pl.celebrate_until = clock + 1.6
 	var highlight := _is_highlight(reason)
 	_rally_end = clock
 	point_won.emit(winner, reason, highlight)
@@ -2376,6 +2394,22 @@ func _update_players(delta: float) -> void:
 			pl.target = opp.start_pos + (p - opp.start_pos).limit_length(opp.max_run)
 		else:
 			pl.target = p
+	# Posen: wer gerade den Ball spielt, wer aufschlaegt, wohin alle schauen.
+	var rally_on := phase == Phase.RALLY or phase == Phase.TOSS or phase == Phase.PRE_SERVE
+	for t in 2:
+		for pl in players[t]:
+			pl.now = clock
+			pl.look_target = ball.position
+			pl.alert = rally_on
+	if opp != null and not opp.done:
+		opp.player.anim_kind = opp.kind
+		opp.player.anim_tech = opp.tech
+		opp.player.anim_t = opp.t
+	if phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done):
+		var sv := server()
+		sv.anim_kind = "serve_hold" if phase == Phase.PRE_SERVE else "serve"
+		sv.anim_tech = "jump" if serve_kind == 1 else "stand"
+		sv.anim_t = serve_ideal if phase == Phase.TOSS else clock + 5.0
 	for t in 2:
 		for pl in players[t]:
 			pl.tick(delta)

@@ -10,6 +10,7 @@ var _subs: VBoxContainer
 var _replay: Control
 var _score_tw: Tween
 var _attract := false
+signal whistled
 var _info: Label
 var _pad: Control
 var _sets: Label
@@ -234,7 +235,7 @@ func show_replay(on: bool) -> void:
 ## Startmenue: nur der Spielstand des Hintergrundspiels bleibt sichtbar.
 func set_attract(on: bool) -> void:
 	_attract = on
-	for c in [_lineup, _info, _hint, _notice, _subs]:
+	for c in [_lineup, _info, _hint, _notice, _subs, _score, _sets]:
 		c.visible = not on
 	_ref.modulate.a = 0.0 if on else 1.0
 	_banner.visible = false
@@ -242,6 +243,12 @@ func set_attract(on: bool) -> void:
 
 func whistle(long: bool) -> void:
 	_ref.whistle(long)
+	whistled.emit()
+
+
+## Aktuelles Handzeichen (fuer den 3D-Schiedsrichter).
+func ref_pose_name() -> String:
+	return _ref._pose
 
 
 func ref_signal(seq: Array) -> void:

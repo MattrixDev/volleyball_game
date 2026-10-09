@@ -10,7 +10,9 @@ var _shake := 0.0
 var _cam_base := Vector3(-18.5, 9.5, 0.0)
 var _cam_pos := Vector3(-18.5, 9.5, 0.0)
 var _cam_look := Vector3(1.5, 1.0, 0.0)
+var arena: Arena
 var fx: HitFx
+var _air := {}  # Spieler -> war in der Luft (fuer Schuhquietschen)
 var sfx: SoundBank
 var crowd: CrowdView
 var hud
@@ -22,7 +24,8 @@ var _shot_phase_t := 0.0
 
 func _ready() -> void:
 	_setup_input()
-	_build_hall()
+	arena = Arena.new()
+	add_child(arena)
 	camera = Camera3D.new()
 	camera.fov = 52.0
 	add_child(camera)
@@ -39,6 +42,7 @@ func _ready() -> void:
 	add_child(hud)
 	match_node = MatchScript.new()
 	match_node.hud = hud
+	hud.whistled.connect(func(): arena.referee_whistle())
 	match_node.big_hit.connect(_on_big_hit)
 	match_node.contact.connect(_on_contact)
 	match_node.point_won.connect(_on_point)
@@ -136,6 +140,7 @@ func _process(delta: float) -> void:
 			if OS.get_cmdline_user_args().has("--quit-after-shot"):
 				get_tree().quit()
 	if match_node:
+		_update_hall()
 		sfx.sfx_volume = match_node.cfg.get_v("sfx")
 		sfx.crowd_volume = match_node.cfg.get_v("crowd") * (0.6 if match_node.attract else 1.0)
 
@@ -256,86 +261,22 @@ func _action(name: String, keys: Array, buttons: Array, axes: Array = []) -> voi
 		InputMap.action_add_event(name, jm)
 
 
-# ---------------------------------------------------------------- Halle
-
-func _mat(c: Color, unshaded := false) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = c
-	m.roughness = 0.9
-	if unshaded:
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	if c.a < 1.0:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	return m
-
-
-func _box(size: Vector3, pos: Vector3, c: Color, unshaded := false) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var b := BoxMesh.new()
-	b.size = size
-	mi.mesh = b
-	mi.material_override = _mat(c, unshaded)
-	mi.position = pos
-	add_child(mi)
-	return mi
-
-
-func _cyl(radius: float, height: float, pos: Vector3, c: Color) -> void:
-	var mi := MeshInstance3D.new()
-	var cy := CylinderMesh.new()
-	cy.top_radius = radius
-	cy.bottom_radius = radius
-	cy.height = height
-	mi.mesh = cy
-	mi.material_override = _mat(c)
-	mi.position = pos
-	add_child(mi)
-
-
-func _build_hall() -> void:
-	var env := WorldEnvironment.new()
-	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.08, 0.09, 0.12)
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.75, 0.78, 0.85)
-	e.ambient_light_energy = 0.55
-	env.environment = e
-	add_child(env)
-
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-60.0, -35.0, 0.0)
-	sun.light_energy = 1.0
-	sun.shadow_enabled = true
-	add_child(sun)
-
-	# Boden: Freizone und Spielfeld (18 x 9 m)
-	_box(Vector3(34.0, 0.1, 24.0), Vector3(0, -0.05, 0), Color(0.16, 0.32, 0.5))
-	_box(Vector3(18.0, 0.01, 9.0), Vector3(0, 0.003, 0), Color(0.86, 0.5, 0.24))
-	var white := Color(0.97, 0.97, 0.97)
-	var lw := 0.05
-	for x in [-9.0, 9.0]:
-		_box(Vector3(lw, 0.012, 9.0 + lw), Vector3(x, 0.006, 0), white, true)
-	for z in [-4.5, 4.5]:
-		_box(Vector3(18.0 + lw, 0.012, lw), Vector3(0, 0.006, z), white, true)
-	for x in [-3.0, 0.0, 3.0]:
-		_box(Vector3(lw, 0.012, 9.0), Vector3(x, 0.006, 0), white, true)
-
-	# Netz (Maenner 2,43 m), Antennen, Pfosten
-	_box(Vector3(0.02, 1.0, 9.8), Vector3(0, 1.93, 0), Color(0.05, 0.05, 0.05, 0.55))
-	_box(Vector3(0.04, 0.07, 9.8), Vector3(0, 2.395, 0), white)
-	for z in [-4.5, 4.5]:
-		_cyl(0.012, 1.8, Vector3(0, 2.33, z), Color(0.9, 0.15, 0.15))
-	for z in [-5.6, 5.6]:
-		_cyl(0.05, 2.6, Vector3(0, 1.3, z), Color(0.6, 0.6, 0.65))
-
-	# Hallenwaende und Tribuenen fuer etwas Atmosphaere
-	var wall := Color(0.22, 0.24, 0.3)
-	_box(Vector3(0.5, 8.0, 40.0), Vector3(22.0, 4.0, 0), wall)
-	_box(Vector3(0.5, 8.0, 40.0), Vector3(-22.0, 4.0, 0), wall)
-	_box(Vector3(48.0, 8.0, 0.5), Vector3(0, 4.0, 16.0), wall)
-	_box(Vector3(48.0, 8.0, 0.5), Vector3(0, 4.0, -16.0), wall)
-	for i in 4:
-		var h := 0.6 + i * 0.6
-		_box(Vector3(30.0, h, 1.2), Vector3(0, h / 2.0, 13.0 + i * 1.2), Color(0.3, 0.32, 0.4))
-		_box(Vector3(30.0, h, 1.2), Vector3(0, h / 2.0, -13.0 - i * 1.2), Color(0.3, 0.32, 0.4))
+## Anzeigetafel, 3D-Schiedsrichter und Schuhquietschen beim Absprung und Hechten.
+func _update_hall() -> void:
+	var m = match_node
+	arena.set_scoreboard("%s  %d : %d  %s\nSATZ %d   ·   SÄTZE %d : %d" % ["NORDHAFEN", m.score[0], m.score[1], "EICHENBERG",
+		maxi(m.set_no, 1), m.sets_won[0], m.sets_won[1]])
+	var sig: String = hud.ref_pose_name()
+	var team: int = m.serving_team
+	if sig == "serve_0":
+		team = 0
+	elif sig == "serve_1":
+		team = 1
+	arena.referee_signal(sig, m.side_of(team))
+	for t in 2:
+		for pl in m.players[t]:
+			var was: bool = _air.get(pl, false)
+			var now_air: bool = pl.airborne or pl.dive_timer > 0.0
+			if now_air != was and m.phase == m.Phase.RALLY and randf() < 0.55:
+				sfx.play("squeak", randf_range(0.3, 0.8))
+			_air[pl] = now_air

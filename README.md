@@ -4,7 +4,15 @@ Hallenvolleyball 6 gegen 6 für den PC, nach den FIVB-Regeln 2025–2028 (Männe
 
 Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/code/artifact/7f883522-0f38-4b3f-ad4d-9c40c197b89f).
 
-## Stand: Phase 2 – Spielgefühl
+## Stand: Phase 2b – Sounds und Low-Poly-Look
+
+- Neue Geräusche: Pfiff, Ballkontakte, Netz, Boden, Schuhquietschen und Publikum klingen näher an einer echten Halle (mit Hall). Erzeugt mit `tools/make_sounds.py`, liegen als WAV in `assets/sounds/`
+- Eigene Low-Poly-Spieler mit Armen, Händen, Beinen, Trikotnummern, Knieschonern und Schuhen; Bewegungen für Laufen, Bereitschaft, Baggern, Pritschen, Angriff, Block, Hechten, Aufschlag und Jubel
+- Ganze Arena: Hallenboden mit Freizone, Tribünen mit Stufen, Deckenlampen, Werbebanden, Anzeigetafeln, Schiedsrichter als 3D-Figur auf dem Stuhl, Kampfgericht und Ersatzbänke
+- Helle, kräftige Farben; Ball mit Streifen, der sich dreht
+- Keine Namensschilder über den Köpfen, nur der eigene Spieler hat den gelben Ring
+
+## Phase 2 – Spielgefühl
 
 - Startmenü (Spielen, Einstellungen, Steuerung, Beenden), dahinter läuft ein Spiel KI gegen KI
 - Neues Pausenmenü (Esc / Start): Regler in Gruppen (Zeitlupe, Ton, Hilfen und Gegner, Regeln), Weg zurück ins Hauptmenü
@@ -17,7 +25,7 @@ Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/cod
 - Lautstärke für Pfiff, Ball und Publikum im Menü
 
 Aus Phase 1 (Regeln): Rotation, Kader mit 12 Spielern, Libero, Trainerbank (T / Y), Sätze mit Entscheidungssatz, Schiedsrichter mit Handzeichen, Team-KI, Doppelblock mit beiden Sticks, Commit-Block.
-Noch nicht drin: Profi-Option mit eigenem Angriffssprung, Spielerwerte, lokaler Mehrspieler, animierter Schiedsrichter als 3D-Figur.
+Noch nicht drin: Profi-Option mit eigenem Angriffssprung, Spielerwerte, lokaler Mehrspieler.
 
 ## Spielen
 
@@ -58,9 +66,12 @@ godot res://scenes/main.tscn -- --botplay --shot-phase=REPLAY:bild.png --quit-af
 | --- | --- |
 | `scripts/match.gd` | Spielablauf, Regeln, KI, Ballberührungen |
 | `scripts/ballistics.gd` | Flugbahnen und Vorhersage |
-| `scripts/player.gd` | Spielerfigur, Laufen, Springen, Hechten |
+| `scripts/player.gd` | Spieler: Laufen, Springen, Hechten, Posen |
+| `scripts/figure.gd` | Low-Poly-Körper mit Gelenken |
+| `scripts/arena.gd` | Halle, Tribünen, Anzeigetafel, Schiedsrichter, Bänke |
 | `scripts/main.gd` | Halle, Kamera, Steuerung, verbindet Geräusche und Effekte |
-| `scripts/sfx.gd` | Selbst erzeugte Geräusche und Publikumsklänge |
+| `scripts/sfx.gd` | Spielt Geräusche und Publikumsklänge ab |
+| `tools/make_sounds.py` | Erzeugt die Geräusche in `assets/sounds/` |
 | `scripts/fx.gd` | Staub, Abdruck, Lichtblitz |
 | `scripts/crowd.gd` | Zuschauer auf den Tribünen |
 | `scripts/start_menu.gd` | Startmenü und Steuerungsseite |

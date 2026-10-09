@@ -24,8 +24,8 @@ var _seq: Array = []
 var _until := 0.0
 var _pose := ""
 var _caption: Label
-var _whistle_short: AudioStreamWAV
-var _whistle_long: AudioStreamWAV
+var _whistle_short: AudioStream
+var _whistle_long: AudioStream
 var _player: AudioStreamPlayer
 var _time := 0.0
 var volume := 35.0  # 0 bis 100, aus den Einstellungen
@@ -45,8 +45,8 @@ func _ready() -> void:
 	_caption.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	_caption.add_theme_constant_override("outline_size", 5)
 	add_child(_caption)
-	_whistle_short = _make_whistle(0.16)
-	_whistle_long = _make_whistle(0.32)
+	_whistle_short = load("res://assets/sounds/whistle_short.wav")
+	_whistle_long = load("res://assets/sounds/whistle_long.wav")
 	_player = AudioStreamPlayer.new()
 	add_child(_player)
 
@@ -78,7 +78,7 @@ func _next() -> void:
 func whistle(long: bool) -> void:
 	if volume <= 0.0:
 		return
-	_player.volume_db = linear_to_db(volume / 100.0 * 0.35)
+	_player.volume_db = linear_to_db(volume / 100.0 * 0.6)
 	_player.stream = _whistle_long if long else _whistle_short
 	_player.play()
 
@@ -131,25 +131,3 @@ func _draw() -> void:
 			draw_arc(SHOULDER + Vector2(0, 8), 34.0, ph + PI, ph + PI + 2.4, 16, Color(1, 0.85, 0.3), 3.0)
 		"timeout":
 			draw_line(SHOULDER + Vector2(-34, -26), SHOULDER + Vector2(6, -26), Color(1, 0.85, 0.3), 3.0)
-
-
-## Pfeifton selbst erzeugen: ein weicher, tiefer Ton (2 kHz, kaum Triller) mit sanftem Ein- und Ausblenden.
-func _make_whistle(seconds: float) -> AudioStreamWAV:
-	var rate := 22050
-	var n := int(seconds * rate)
-	var data := PackedByteArray()
-	data.resize(n * 2)
-	var phase := 0.0
-	for i in n:
-		var t := float(i) / rate
-		var f := 1950.0 + 40.0 * sin(TAU * 14.0 * t)
-		phase += TAU * f / rate
-		var env := minf(t / 0.05, 1.0) * minf((seconds - t) / 0.1, 1.0)
-		var v := sin(phase) * env
-		data.encode_s16(i * 2, int(clampf(v, -1.0, 1.0) * 16000.0))
-	var w := AudioStreamWAV.new()
-	w.format = AudioStreamWAV.FORMAT_16_BITS
-	w.mix_rate = rate
-	w.stereo = false
-	w.data = data
-	return w
