@@ -20,6 +20,7 @@ const H_SET := 2.35
 const H_ATTACK := 3.25
 const JUMP_RISE := 0.404
 const SET_POINTS := 25
+const DECIDING_POINTS := 15
 
 const SLOW := 0.35  # Tempo in der Zeitlupe
 const CHARGE_FULL := 0.6  # Sekunden (Echtzeit) bis zur vollen Kraft
@@ -30,22 +31,28 @@ const OVER_RISKY := 17.0  # darueber droht "Ball gehalten"
 const TEAM_NAMES := ["SV Nordhafen", "TSV Eichenberg"]
 const TEAM_COLORS := [Color(0.16, 0.38, 0.86), Color(0.85, 0.2, 0.18)]
 const LIBERO_COLORS := [Color(0.98, 0.82, 0.15), Color(0.95, 0.95, 0.95)]
-const ROLES := ["S", "OH1", "MB", "OP", "OH2", "L"]
-const ROLE_TAG := {"S": "Z", "OH1": "A", "MB": "M", "OP": "D", "OH2": "A", "L": "L"}
-const NUMBERS := [[7, 10, 14, 3, 5, 1], [9, 4, 12, 18, 11, 2]]
-const FRONT_ROW := ["OH1", "MB", "OP"]
-
-## Grundpositionen je Spielsituation (lokal: Abstand zum Netz, seitlich).
-const LAYOUT := {
-	"serve": {"S": Vector2(10.0, 2.5), "OH1": Vector2(2.0, -3.0), "MB": Vector2(2.0, 0.0), "OP": Vector2(2.0, 3.0), "OH2": Vector2(6.5, -3.0), "L": Vector2(7.0, 0.0)},
-	"receive": {"S": Vector2(2.5, 2.2), "OH1": Vector2(5.0, -2.8), "MB": Vector2(1.5, -0.6), "OP": Vector2(1.5, 3.4), "OH2": Vector2(5.0, 2.8), "L": Vector2(5.8, 0.0)},
-	"defense": {"S": Vector2(6.5, 3.2), "OH1": Vector2(0.6, -3.0), "MB": Vector2(0.6, 0.0), "OP": Vector2(0.6, 3.0), "OH2": Vector2(6.5, -3.2), "L": Vector2(7.8, 0.0)},
-	"build": {"S": Vector2(0.9, 1.0), "OH1": Vector2(3.5, -3.8), "MB": Vector2(2.6, 0.2), "OP": Vector2(3.5, 3.8), "OH2": Vector2(5.5, -2.0), "L": Vector2(5.5, 1.5)},
-	"cover": {"S": Vector2(1.6, 1.0), "OH1": Vector2(2.5, -3.0), "MB": Vector2(2.2, 0.0), "OP": Vector2(2.5, 3.0), "OH2": Vector2(4.2, -1.5), "L": Vector2(4.2, 1.5)},
+## Positionen je Spielsituation (lokal: Abstand zum Netz, seitlich; negativ = links).
+## Beim Aufschlag und der Annahme stehen alle in Rotationsreihenfolge (Position 1 bis 6),
+## damit die Aufstellung regelgerecht ist (keine Ueberlappung). Danach laufen die
+## Vorderspieler auf ihre Angriffsbahn (links Aussen, Mitte, rechts Diagonal/Zuspieler).
+const GRID := {
+	"serve": {1: Vector2(10.0, 2.5), 2: Vector2(2.0, 3.0), 3: Vector2(2.0, 0.0), 4: Vector2(2.0, -3.0), 5: Vector2(6.5, -3.0), 6: Vector2(7.0, 0.0)},
+	"receive": {1: Vector2(6.0, 3.0), 2: Vector2(1.8, 3.4), 3: Vector2(1.6, -0.4), 4: Vector2(3.0, -3.4), 5: Vector2(6.0, -3.0), 6: Vector2(6.4, 0.0)},
 }
+## Zuspieler im Hinterfeld versteckt sich bei der Annahme hinter dem Vorderspieler.
+const SETTER_HIDE := {1: Vector2(3.2, 4.1), 6: Vector2(3.4, 1.4), 5: Vector2(3.4, -1.4)}
+const FORM := {
+	"defense": {"front": {"left": Vector2(0.6, -3.0), "mid": Vector2(0.6, 0.0), "right": Vector2(0.6, 3.0)},
+		"back": {5: Vector2(6.5, -3.2), 6: Vector2(7.8, 0.0), 1: Vector2(6.5, 3.2)}},
+	"build": {"front": {"left": Vector2(3.5, -3.8), "mid": Vector2(2.6, 0.2), "right": Vector2(3.5, 3.8)},
+		"back": {5: Vector2(5.5, -2.0), 6: Vector2(5.5, 0.8), 1: Vector2(5.5, 3.0)}, "S": Vector2(0.9, 1.0)},
+	"cover": {"front": {"left": Vector2(2.5, -3.0), "mid": Vector2(2.2, 0.0), "right": Vector2(2.5, 3.0)},
+		"back": {5: Vector2(4.2, -2.0), 6: Vector2(4.6, 0.0), 1: Vector2(4.2, 2.0)}, "S": Vector2(1.6, 1.0)},
+}
+const LANE_PREF := {"OH": -1.0, "MB": 0.0, "OP": 1.0, "S": 2.0, "L": 0.5}
 const SETTER_TARGET := Vector2(1.2, 1.0)
 
-enum Phase { INTRO, PRE_SERVE, TOSS, RALLY, POINT_PAUSE, SET_OVER }
+enum Phase { INTRO, PRE_SERVE, TOSS, RALLY, POINT_PAUSE, TIMEOUT, SET_OVER, MATCH_OVER }
 enum Q { PERFECT, GOOD, WEAK, MISS }
 const Q_TEXT := ["PERFEKT!", "Gut", "Schwach", "Daneben"]
 const Q_COLOR := [Color(1.0, 0.85, 0.1), Color(0.55, 1.0, 0.55), Color(1.0, 0.6, 0.3), Color(1.0, 0.3, 0.3)]
@@ -112,9 +119,34 @@ var assist := true
 var slowmo_on := true
 var zoom_on := true
 var human_team := 0
+var rosters: Array = []  # TeamRoster je Team
+var sets_to_win := 2
+var set_no := 0
+var sets_won := [0, 0]
+var set_scores: Array = []  # fertige Saetze, z.B. [[25, 21], [22, 25]]
+var sides := [-1.0, 1.0]  # Spielhaelfte je Team (x-Richtung), wechselt nach jedem Satz
+var match_first_server := 0
+var deciding := false
+var side_change_pending := false
+var side_changed_deciding := false
+var streak := [0, 0]  # Punkte in Folge
+var timeout_team := -1
+var ai_timeout_wanted := [false, false]
+var whistle_done := false
+var serve_deadline := -1.0
+var commit_miss := [false, false]  # Commit war falsch: Block kommt aussen zu spaet
+var commit_block := [false, false]  # Commit-Block: Mitte gegen den Schnellangriff
+var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
+var trainer_wanted := false
+var notice := ""  # kurzer Hinweis fuer die Anzeige (z.B. "Libero muss raus")
+var notice_until := 0.0
+var match_wins := [0, 0]
+var matches_done := 0
 var autoplay := false
 var autoplay_rallies := 200
 var trace := false
+var test_score := []  # Test: Startstand des ersten Satzes, z.B. --score=24:10
+var check_rules := false  # Test: prueft bei jedem Aufschlag die Aufstellung
 var autopress := false  # Test: drueckt fuer den Menschen automatisch
 var hud = null
 var cfg := GameSettings.new()
@@ -170,8 +202,14 @@ func _ready() -> void:
 			autopress = true  # wie --autopress, aber mit Kamera, Zeitlupe und Anzeigen
 		elif a == "--trace":
 			trace = true
+		elif a == "--check":
+			check_rules = true
 		elif a.begins_with("--seed="):
 			rng.seed = int(a.get_slice("=", 1))
+		elif a.begins_with("--score="):
+			test_score = [int(a.get_slice("=", 1).get_slice(":", 0)), int(a.get_slice("=", 1).get_slice(":", 1))]
+		elif a.begins_with("--sets="):
+			cfg.sets_to_win = clampi(int(a.get_slice("=", 1)), 1, 3)
 		elif a.begins_with("--stufe="):
 			cfg.apply_preset(a.get_slice("=", 1))
 	if autoplay:
@@ -193,16 +231,79 @@ func _input(event: InputEvent) -> void:
 # ---------------------------------------------------------------- Aufbau
 
 func _spawn_team(team: int) -> void:
-	for i in ROLES.size():
-		var role: String = ROLES[i]
+	var r := TeamRoster.new(team)
+	rosters.append(r)
+	for i in 6:
+		var mm: Dictionary = r.m(r.lineup[i])
 		var pl := VPlayer.new()
-		var col: Color = LIBERO_COLORS[team] if role == "L" else TEAM_COLORS[team]
-		pl.setup(team, role, ROLE_TAG[role], NUMBERS[team][i], col)
+		pl.setup(team, mm.role, TeamRoster.ROLE_TAG[mm.role], mm.number, _jersey(team, mm.role))
+		pl.member_id = mm.id
+		pl.slot = i + 1
+		pl.set_side(side_of(team))
 		add_child(pl)
 		players[team].append(pl)
-		var p := court_pos(team, LAYOUT["receive"][role])
+		var p := court_pos(team, GRID["receive"][i + 1])
 		pl.position = p
 		pl.target = p
+	_assign_lanes(team)
+
+
+func _jersey(team: int, role: String) -> Color:
+	return LIBERO_COLORS[team] if role == "L" else TEAM_COLORS[team]
+
+
+## Spielerfigur bekommt einen anderen Spieler aus dem Kader (Wechsel, Libero).
+func _apply_identity(pl: VPlayer, member_id: int) -> void:
+	var mm: Dictionary = rosters[pl.team].m(member_id)
+	pl.member_id = member_id
+	pl.change_identity(mm.role, TeamRoster.ROLE_TAG[mm.role], mm.number, _jersey(pl.team, mm.role))
+
+
+## Positionsnummern und Angriffsbahnen aus der Aufstellung uebernehmen.
+func _sync_slots(t: int) -> void:
+	for pl in players[t]:
+		pl.slot = rosters[t].slot_of(pl.member_id)
+	_assign_lanes(t)
+
+
+## Vorderspieler von links nach rechts: Aussen, Mitte, Diagonal. Der Zuspieler hat eine eigene
+## Bahn. Hinterfeldspieler (ausser Libero) koennen aus dem Hinterfeld angreifen.
+func _assign_lanes(t: int) -> void:
+	var r: TeamRoster = rosters[t]
+	var front: Array = []
+	for pl in players[t]:
+		pl.lane = ""
+		if r.is_front(pl.slot):
+			front.append(pl)
+	front.sort_custom(func(a, b): return LANE_PREF[a.role] < LANE_PREF[b.role])
+	var hitters: Array = front.filter(func(p): return p.role != "S")
+	var names := ["left", "mid", "right"] if hitters.size() >= 3 else ["left", "mid"]
+	for i in hitters.size():
+		hitters[i].lane = names[mini(i, names.size() - 1)]
+	for pl in players[t]:
+		if pl.role == "S":
+			pl.lane = "setter"
+		elif pl.lane == "" and pl.role != "L" and not r.is_front(pl.slot):
+			pl.lane = "back"
+
+
+func player_at_slot(team: int, slot: int) -> VPlayer:
+	for pl in players[team]:
+		if pl.slot == slot:
+			return pl
+	return null
+
+
+func _lane_player(team: int, lane: String) -> VPlayer:
+	var best: VPlayer = null
+	for pl in players[team]:
+		if pl.lane == lane and (best == null or (lane == "back" and pl.role == "OP")):
+			best = pl
+	return best
+
+
+func is_front_row(pl: VPlayer) -> bool:
+	return rosters[pl.team].is_front(pl.slot)
 
 
 func _unshaded(c: Color) -> StandardMaterial3D:
@@ -269,7 +370,17 @@ func _make_markers() -> void:
 # ---------------------------------------------------------------- Hilfen
 
 func side_of(team: int) -> float:
-	return -1.0 if team == 0 else 1.0
+	return sides[team]
+
+
+## Auf welcher Seite die Kamera steht: hinter dem Team des Spielers.
+func camera_side() -> float:
+	return side_of(human_team if human_team >= 0 else 0)
+
+
+## Welches Team spielt auf der Seite, auf der x liegt?
+func team_at_x(x: float) -> int:
+	return 0 if (x < 0.0) == (sides[0] < 0.0) else 1
 
 
 func court_pos(team: int, v: Vector2) -> Vector3:
@@ -290,7 +401,7 @@ func player_by_role(team: int, role: String) -> VPlayer:
 
 
 func server() -> VPlayer:
-	return player_by_role(serving_team, "S")
+	return player_at_slot(serving_team, 1)
 
 
 func flat_dist(a: Vector3, b: Vector3) -> float:
@@ -384,8 +495,46 @@ func popup(pl: VPlayer, text: String, color: Color) -> void:
 # ---------------------------------------------------------------- Ablauf
 
 func new_match() -> void:
+	sets_to_win = cfg.sets_to_win
+	sets_won = [0, 0]
+	set_scores = []
+	set_no = 0
+	sides = [-1.0, 1.0]
+	match_first_server = rng.randi() % 2  # Auslosung
+	_start_set()
+
+
+func set_target() -> int:
+	return DECIDING_POINTS if deciding else SET_POINTS
+
+
+func _start_set() -> void:
+	set_no += 1
+	deciding = sets_to_win >= 2 and sets_won[0] == sets_to_win - 1 and sets_won[1] == sets_to_win - 1
+	if set_no > 1:
+		sides = [-sides[0], -sides[1]]  # Seitenwechsel nach jedem Satz
+	var first := match_first_server if set_no % 2 == 1 else 1 - match_first_server
+	if deciding:
+		first = rng.randi() % 2  # neue Auslosung im Entscheidungssatz
 	score = [0, 0]
-	serving_team = 0
+	if set_no == 1 and test_score.size() == 2:
+		score = test_score.duplicate()
+	serving_team = first
+	streak = [0, 0]
+	side_change_pending = false
+	side_changed_deciding = false
+	ai_timeout_wanted = [false, false]
+	libero_set_front = [false, false]
+	for t in 2:
+		rosters[t].new_set()
+		for j in 6:
+			_apply_identity(players[t][j], rosters[t].lineup[j])
+			players[t][j].set_side(side_of(t))
+		_sync_slots(t)
+		_libero_auto_in(t)  # der Libero steht zu Satzbeginn auf dem Feld
+	if hud:
+		hud.clear_message()
+		hud.ref_signal([["serve_" + str(first), "Aufschlag " + TEAM_NAMES[first], 1.6]])
 	start_rally()
 
 
@@ -408,16 +557,24 @@ func start_rally() -> void:
 	mouse_rs = Vector2.ZERO
 	ball_g = G
 	flutter = 0.0
+	whistle_done = false
+	serve_deadline = -1.0
+	libero_set_front = [false, false]
+	commit_block = [false, false]
+	for t in 2:
+		_prepare_lineup(t)
+	if check_rules:
+		_check_rules()
 	for t in 2:
 		var form := "serve" if t == serving_team else "receive"
 		for pl in players[t]:
-			var p := court_pos(t, LAYOUT[form][pl.role])
+			var p := formation_pos(t, pl, form)
 			pl.position = p
 			pl.target = p
 			pl.reset_state()
 	ball_vel = Vector3.ZERO
 	_hold_ball_at_server()
-	pause_until = clock + (0.15 if autoplay else 1.0)
+	pause_until = clock + (0.15 if autoplay else 1.2)
 	if serving_team == human_team:
 		serve_aim = Vector2(5.5, 0.0)
 	else:
@@ -430,6 +587,201 @@ func start_rally() -> void:
 			serve_contact = Vector2(rng.randf_range(-0.2, 0.2), 0.0) if r < 0.85 else Vector2(0.0, -0.7)
 	if hud:
 		hud.clear_message()
+	for t in 2:
+		if t != human_team and ai_timeout_wanted[t] and rosters[t].timeouts_left > 0:
+			ai_timeout_wanted[t] = false
+			call_timeout(t)
+			break
+
+
+## Testhilfe (--check): meldet jede Verletzung der Aufstellungsregeln.
+func _check_rules() -> void:
+	for t in 2:
+		var r: TeamRoster = rosters[t]
+		var bad := ""
+		var ids := {}
+		for id in r.lineup:
+			ids[id] = true
+		if ids.size() != 6:
+			bad += " doppelte Spieler;"
+		if r.libero_illegal():
+			bad += " Libero vorn oder auf Position 1;"
+		var srv := player_at_slot(t, 1)
+		if srv == null or srv.role == "L":
+			bad += " Aufschlaeger fehlt oder ist Libero;"
+		var fronts := 0
+		for pl in players[t]:
+			if pl.slot != r.slot_of(pl.member_id) or pl.slot < 1:
+				bad += " Figur %d hat falsche Position;" % pl.member_id
+			if r.is_front(pl.slot):
+				fronts += 1
+				if pl.role == "L":
+					bad += " Libero in der Vorderreihe;"
+		if fronts != 3:
+			bad += " %d Vorderspieler;" % fronts
+		if _lane_player(t, "mid") == null and player_by_role(t, "S") != null:
+			bad += " keine Mittelbahn;"
+		var roles := {}
+		for pl in players[t]:
+			roles[pl.role] = roles.get(pl.role, 0) + 1
+		if roles.get("S", 0) != 1 or roles.get("L", 0) > 1:
+			bad += " Rollen %s;" % str(roles)
+		if bad != "":
+			print("REGELFEHLER T%d Satz %d %d:%d:%s lineup=%s" % [t, set_no, score[0], score[1], bad, str(r.lineup)])
+		if trace:
+			for pl in players[t]:
+				print("  POS T%d P%d %s%d z=%.1f x=%.1f" % [t, pl.slot, pl.role, pl.number, pl.target.z, pl.target.x])
+			print("AUFSTELLUNG T%d Satz %d %d:%d P1..6=%s libero=%d" % [t, set_no, score[0], score[1], str(r.lineup), r.libero_on])
+
+
+## Position eines Spielers in einer Spielsituation (Welt-Koordinaten).
+func formation_pos(t: int, pl: VPlayer, form: String) -> Vector3:
+	var v: Vector2
+	if form == "serve" or form == "receive":
+		v = GRID[form][pl.slot]
+		if form == "receive" and pl.role == "S" and SETTER_HIDE.has(pl.slot):
+			v = SETTER_HIDE[pl.slot]
+	else:
+		var f: Dictionary = FORM[form]
+		if pl.role == "S" and f.has("S"):
+			v = f["S"]
+		elif rosters[t].is_front(pl.slot):
+			var lane: String = pl.lane if pl.lane in ["left", "mid", "right"] else "right"
+			v = f["front"][lane]
+		else:
+			v = f["back"][pl.slot]
+	return court_pos(t, v)
+
+
+# ---------------------------------------------------------------- Libero, Wechsel, Auszeit
+
+## Vor jedem Ballwechsel: unerlaubter Libero muss raus, KI-Teams (und "automatisch") wechseln
+## den Libero selbst ein, die KI wechselt gelegentlich Spieler.
+func _prepare_lineup(t: int) -> void:
+	var r: TeamRoster = rosters[t]
+	if r.libero_illegal():
+		var lib: String = r.m(r.libero_on).name
+		_libero_out(t)
+		if t == human_team:
+			_notice("Libero %s muss raus: Er darf nur im Hinterfeld spielen und nicht aufschlagen" % lib)
+	if t != human_team or cfg.libero_auto:
+		_libero_auto_in(t)
+	if t != human_team:
+		_ai_maybe_sub(t)
+
+
+func _notice(text: String) -> void:
+	notice = text
+	notice_until = clock + 5.0
+
+
+func _figure_of(t: int, member_id: int) -> VPlayer:
+	for pl in players[t]:
+		if pl.member_id == member_id:
+			return pl
+	return null
+
+
+func _libero_auto_in(t: int) -> void:
+	var r: TeamRoster = rosters[t]
+	var slot := r.auto_libero_slot()
+	if slot > 0:
+		libero_enter(t, slot, r.libero_ids()[0])
+
+
+## Libero kommt fuer den Spieler auf `slot` ins Spiel. Gibt einen Fehlertext zurueck (leer = ok).
+func libero_enter(t: int, slot: int, libero_id: int) -> String:
+	var r: TeamRoster = rosters[t]
+	if not r.can_libero_enter(slot):
+		return "Der Libero kann dort nicht rein (nur Hinterfeld, nicht auf Position 1)"
+	var out_id: int = r.lineup[slot - 1]
+	var pl := _figure_of(t, out_id)
+	r.libero_enter(slot, libero_id)
+	_apply_identity(pl, libero_id)
+	_sync_slots(t)
+	return ""
+
+
+func _libero_out(t: int) -> void:
+	var r: TeamRoster = rosters[t]
+	var lib_id := r.libero_on
+	var back := r.libero_leave()
+	_apply_identity(_figure_of(t, lib_id), back)
+	_sync_slots(t)
+
+
+func libero_leave(t: int) -> String:
+	if rosters[t].libero_on < 0:
+		return "Der Libero ist nicht auf dem Feld"
+	_libero_out(t)
+	return ""
+
+
+func substitute(t: int, out_id: int, in_id: int) -> String:
+	var r: TeamRoster = rosters[t]
+	var err := r.sub_error(out_id, in_id)
+	if err != "":
+		return err
+	var pl := _figure_of(t, out_id)
+	r.substitute(out_id, in_id)
+	stats["Wechsel " + TEAM_NAMES[t]] = stats.get("Wechsel " + TEAM_NAMES[t], 0) + 1
+	_apply_identity(pl, in_id)
+	_sync_slots(t)
+	if hud:
+		hud.ref_signal([["sub", "Wechsel %s: %s kommt für %s" % [TEAM_NAMES[t], r.m(in_id).name, r.m(out_id).name], 1.6]])
+		hud.whistle(false)
+	return ""
+
+
+## Trainerbank (Libero, Wechsel, Auszeit): nur bei toter Kugel, vor dem Anpfiff zum Aufschlag.
+func can_use_trainer() -> bool:
+	return human_team >= 0 and not autoplay and ((phase == Phase.PRE_SERVE and not whistle_done) or phase == Phase.TIMEOUT)
+
+
+func call_timeout(t: int) -> String:
+	if phase != Phase.PRE_SERVE or whistle_done:
+		return "Auszeit nur vor dem Aufschlag"
+	var r: TeamRoster = rosters[t]
+	if r.timeouts_left <= 0:
+		return "Keine Auszeiten mehr in diesem Satz"
+	r.timeouts_left -= 1
+	stats["Auszeit " + TEAM_NAMES[t]] = stats.get("Auszeit " + TEAM_NAMES[t], 0) + 1
+	timeout_team = t
+	phase = Phase.TIMEOUT
+	pause_until = clock + (0.3 if autoplay else 8.0)
+	if hud:
+		hud.whistle(false)
+		hud.ref_signal([["timeout", "Auszeit %s" % TEAM_NAMES[t], 8.0]])
+		hud.show_message("Auszeit %s\n\nNoch %d Auszeit(en) in diesem Satz" % [TEAM_NAMES[t], r.timeouts_left])
+	return ""
+
+
+func _end_timeout() -> void:
+	if timeout_team < 0:
+		start_rally()  # Pause vom Seitenwechsel: danach ganz normal weiter
+		return
+	timeout_team = -1
+	phase = Phase.PRE_SERVE
+	pause_until = clock + (0.15 if autoplay else 1.0)
+	if hud:
+		hud.clear_message()
+		hud.ref_signal([])
+
+
+## KI-Trainer: wechselt gelegentlich einen Spieler gegen einen Ersatz mit gleicher Rolle.
+func _ai_maybe_sub(t: int) -> void:
+	var r: TeamRoster = rosters[t]
+	if r.subs_used >= 3 or score[0] + score[1] < 10 or rng.randf() > 0.04:
+		return
+	var outs: Array = r.lineup.duplicate()
+	outs.shuffle()
+	for out_id in outs:
+		if r.m(out_id).role == "L":
+			continue
+		for in_id in r.bench():
+			if r.m(in_id).role == r.m(out_id).role and r.sub_error(out_id, in_id) == "":
+				substitute(t, out_id, in_id)
+				return
 
 
 func _hold_ball_at_server() -> void:
@@ -502,18 +854,30 @@ func _physics_process(delta: float) -> void:
 				new_match()
 		Phase.PRE_SERVE:
 			_hold_ball_at_server()
+			if trainer_wanted and not whistle_done:
+				trainer_wanted = false
+				if hud:
+					hud.open_trainer()
+			if clock >= pause_until and not whistle_done:
+				whistle_done = true
+				serve_deadline = clock + cfg.get_v("serve_time")
+				if hud:
+					hud.whistle(false)
+					hud.ref_signal([["serve_" + str(serving_team), "Aufschlag " + TEAM_NAMES[serving_team], 1.6]])
 			if serving_team == human_team:
 				serve_aim = _nudge_aim(serve_aim, inp.mv, delta)
 				serve_contact = rs
 				if inp.kind_prev or inp.kind_next:
 					serve_kind = 1 - serve_kind
-				if clock >= pause_until:
+				if whistle_done:
 					if inp.hit_down:
 						_do_toss()
 						_start_charge()
 					elif inp.bump:
 						_do_toss()
-			elif clock >= pause_until:
+					elif clock > serve_deadline and not autopress:
+						_end_rally(1 - serving_team, "Aufschlagzeit überschritten")
+			elif whistle_done:
 				_do_toss()
 		Phase.TOSS:
 			if serving_team == human_team:
@@ -538,8 +902,17 @@ func _physics_process(delta: float) -> void:
 			_step_ball(delta)
 		Phase.POINT_PAUSE:
 			if clock >= pause_until:
-				start_rally()
+				if side_change_pending:
+					_do_side_change()
+				else:
+					start_rally()
+		Phase.TIMEOUT:
+			if clock >= pause_until or (start and clock >= pause_until - 6.5):
+				_end_timeout()
 		Phase.SET_OVER:
+			if autoplay or (human_team < 0 and clock >= pause_until + 3.0) or (start and clock >= pause_until - 1.5):
+				_start_set()
+		Phase.MATCH_OVER:
 			if autoplay:
 				if rally_count >= autoplay_rallies:
 					_print_stats()
@@ -575,7 +948,7 @@ func _auto_input() -> Dictionary:
 	var d := _empty_input()
 	d.rs = _auto_rs
 	match phase:
-		Phase.SET_OVER, Phase.INTRO:
+		Phase.SET_OVER, Phase.INTRO, Phase.MATCH_OVER, Phase.TIMEOUT:
 			d.bump = true
 		Phase.PRE_SERVE:
 			if clock >= pause_until:
@@ -601,8 +974,11 @@ func _auto_input() -> Dictionary:
 					else:
 						d.bump = true
 			elif human_player() != null and opp != null and opp.kind == "attack":
+				d.rs = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # zweiter Blocker per rechtem Stick
 				if _due(opp.t - JUMP_RISE):
 					d.hit_down = true
+			elif opp != null and opp.team != human_team and opp.kind == "set" and rng.randf() < 0.02:
+				d.over = true  # Commit-Block ausprobieren
 			else:
 				_auto_t = -1.0
 	return d
@@ -729,7 +1105,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 ## auf dessen Seite der Ball gerade ist; fliegt er hinueber, das andere.
 func plan_next() -> void:
 	opp = null
-	var cur := 0 if ball.position.x < 0.0 else 1
+	var cur := team_at_x(ball.position.x)
 	# Den eigenen Aufschlag darf das aufschlagende Team nicht mehr spielen.
 	var serve_ball := last_action == "serve" and cur == last_touch_team
 	if not serve_ball and _try_team(cur):
@@ -788,7 +1164,7 @@ func _try_team(team: int) -> bool:
 			pl = null
 	elif kind == "set":
 		var s := player_by_role(team, "S")
-		if s != excluded and flat_dist(s.position, p) <= s.run_speed * tc + 0.8:
+		if s != null and s != excluded and flat_dist(s.position, p) <= s.run_speed * tc + 0.8:
 			pl = s
 	if pl == null:
 		pl = _nearest(team, p, excluded, kind == "attack")
@@ -865,17 +1241,23 @@ func _nearest(team: int, p: Vector3, excluded: VPlayer, no_libero: bool) -> VPla
 func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 	var front: Array = []
 	for pl in players[def]:
-		if pl.role in FRONT_ROW:
+		if is_front_row(pl):
 			front.append(pl)
-	var mb := player_by_role(def, "MB")
+	var mb := _lane_player(def, "mid")
+	if mb == null:
+		mb = front[0]
 	var list: Array = []
 	var dirs: Array = []
+	var committed: bool = commit_block[def]
+	commit_block[def] = false
+	var commit_hit := committed and absf(p.z) < 1.5
+	commit_miss[def] = committed and not commit_hit
 	if absf(p.z) < 1.5:
 		list = [mb]
 		dirs = [0.0]
 		var t_left := t_contact - clock
 		for pl in front:
-			if pl != mb and (t_left > 0.9 or rng.randf() < 0.5):
+			if pl != mb and (t_left > 0.9 or commit_hit or rng.randf() < 0.5):
 				list.append(pl)
 				dirs.append(signf(pl.position.z - mb.position.z))
 	else:
@@ -904,6 +1286,10 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 		pl.hand_reach = 0.0
 		pl.block_pose = true
 		pl.block_jump_at = base_jump + rng.randf_range(-0.05, 0.09) + (0.03 if i > 0 else 0.0)
+		if commit_hit:
+			pl.block_jump_at = base_jump + rng.randf_range(-0.03, 0.02)  # Block steht schon, Sprung sitzt
+		elif commit_miss[def]:
+			pl.block_jump_at += 0.12  # falsch geraten: kommt zu spaet
 	blockers[def] = list
 	block_dirs[def] = dirs
 	block_err[def] = rng.randf_range(-0.4, 0.4)
@@ -942,6 +1328,12 @@ func _rally_input(inp: Dictionary) -> void:
 		pl.manual_dir = Vector3.ZERO
 	var mv: Vector2 = inp.mv
 	var hp := human_player()
+	# Commit-Block: Pritschen-Taste, solange der Gegner den Ball spielt (vor dem Angriff).
+	if inp.over and not commit_block[human_team] and (opp == null or opp.team != human_team) and opp != null and opp.kind != "attack" and possession != human_team:
+		commit_block[human_team] = true
+		var cp := _lane_player(human_team, "mid")
+		if cp != null:
+			popup(cp, "Commit: Mitte", Color(1.0, 0.85, 0.3))
 	if opp != null and not opp.done and opp.team == human_team:
 		match opp.kind:
 			"attack":
@@ -961,14 +1353,27 @@ func _rally_input(inp: Dictionary) -> void:
 					_human_touch("over", "")
 	elif hp != null and not blockers[human_team].is_empty() and hp == blockers[human_team][0]:
 		var d := _stick_dir(mv)
+		# Doppelblock: der rechte Stick steuert den zweiten Blocker (sonst schliesst er von selbst).
+		var helper: VPlayer = blockers[human_team][1] if blockers[human_team].size() > 1 else null
+		var d2 := _stick_dir(inp.rs)
+		var rs_on: bool = inp.rs.length() > 0.3
+		var dt := get_physics_process_delta_time()
 		if not hp.airborne:
 			hp.manual_dir = Vector3(0, 0, d.z)
+			if helper != null and not helper.airborne and rs_on:
+				helper.manual_dir = Vector3(0, 0, d2.z)
 			if inp.hit_down and not hp.has_jumped:
 				hp.jump()
+				if helper != null and not helper.has_jumped:
+					helper.jump()
+					_ai_block_hands(human_team, helper)
 		else:
 			# In der Luft: Haende mit dem Stick verschieben, Stick nach vorn = ueber das Netz greifen.
-			hp.hand_shift = move_toward(hp.hand_shift, d.z * 0.45, 3.0 * get_physics_process_delta_time())
+			hp.hand_shift = move_toward(hp.hand_shift, d.z * 0.45, 3.0 * dt)
 			hp.hand_reach = 0.12 if mv.y > 0.5 else 0.0
+			if helper != null and helper.airborne and rs_on:
+				helper.hand_shift = move_toward(helper.hand_shift, d2.z * 0.45, 3.0 * dt)
+				helper.hand_reach = 0.12 if inp.rs.y > 0.5 else 0.0
 
 
 func _attack_input(inp: Dictionary) -> void:
@@ -1024,8 +1429,8 @@ func _ai_actions() -> void:
 	for t in 2:
 		for i in blockers[t].size():
 			var b: VPlayer = blockers[t][i]
-			if t == human_team and i == 0:
-				continue
+			if t == human_team and i <= 1:
+				continue  # der Mensch steuert beide Blocker im Doppelblock
 			if opp.team != t and not b.has_jumped and clock >= b.block_jump_at:
 				b.jump()
 				_ai_block_hands(t, b)
@@ -1056,6 +1461,8 @@ func _ai_prepare(o: Opp) -> void:
 			_ai_attack_choice(o)
 		"set":
 			o.tech = "over" if o.speed <= OVER_OK else "bump"
+			if o.player.role == "L" and absf(o.point.x) < 3.0:
+				o.tech = "bump"  # Libero pritscht vor der 3-m-Linie nicht (Regel)
 		"pass", "free":
 			o.tech = "over" if o.speed <= OVER_OK and rng.randf() < 0.5 else "bump"
 		_:
@@ -1141,6 +1548,19 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		if o.kind == "set" and q == Q.WEAK and rng.randf() < 0.12 * cfg.unit("faults"):
 			_fault(o, "Doppelberührung")
 			return
+	# Regeln: Hinterspieler duerfen nicht aus der Vorderzone angreifen, und nach einem Libero-
+	# Zuspiel (Pritschen vor der 3-m-Linie) darf nicht ueber Netzhoehe angegriffen werden.
+	var libero_flag: bool = libero_set_front[o.team]
+	libero_set_front[o.team] = false
+	if o.kind == "attack":
+		if not is_front_row(pl) and pl.takeoff_x < 2.95:
+			_fault(o, "Hinterspielerfehler")
+			return
+		if libero_flag:
+			_fault(o, "Liberofehler")
+			return
+	elif o.kind == "set" and pl.role == "L" and o.tech == "over" and absf(o.point.x) < 3.0:
+		libero_set_front[o.team] = true
 	if (o.kind == "pass" or o.kind == "dig" or o.kind == "free") and horiz > 0.8:
 		pl.dive()
 	if possession != o.team:
@@ -1215,14 +1635,14 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	var d := 1.0
 	var l := -3.6
 	var T := 1.15
-	match hitter.role:
-		"MB":
+	match hitter.lane:
+		"mid":
 			l = sl.y - 1.0
 			T = 0.6 if sl.x < 2.0 else 0.85
-		"OP":
+		"right":
 			l = 3.6
 			T = 0.95
-		"OH1":
+		"left":
 			l = -3.6
 		_:
 			d = 3.8  # Hinterfeldangriff hinter der 3-m-Linie
@@ -1247,25 +1667,21 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 
 
 func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VPlayer:
-	var role := ""
-	match choice:
-		"left":
-			role = "OH1"
-		"mid":
-			role = "MB"
-		"right":
-			role = "OP"
-		"back":
-			role = "OH2"
-		_:
-			var r := rng.randf()
-			if pass_quality <= Q.GOOD and sl.x < 2.5:
-				role = "OH1" if r < 0.4 else ("OP" if r < 0.7 else "MB")
-			else:
-				role = "OH1" if r < 0.6 else "OP"
-	var h := player_by_role(team, role)
+	var lane := choice
+	if choice == "auto" or choice == "":
+		var r := rng.randf()
+		if pass_quality <= Q.GOOD and sl.x < 2.5:
+			lane = "left" if r < 0.4 else ("right" if r < 0.7 else "mid")
+		else:
+			lane = "left" if r < 0.6 else "right"
+	var h := _lane_player(team, lane)
+	if h == null and lane == "right":
+		h = _lane_player(team, "back")  # kein Diagonalangreifer vorn: Hinterfeldangriff
 	if h == null or h == setter:
-		h = player_by_role(team, "OH1") if setter.role != "OH1" else player_by_role(team, "OP")
+		for alt in ["left", "right", "mid", "back"]:
+			var c := _lane_player(team, alt)
+			if c != null and c != setter:
+				return c
 	return h
 
 
@@ -1369,7 +1785,7 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 		while absf(_net_cross_z(bp, vel)) > HALF_W - 0.25 and tries < 12:
 			tries += 1
 			l *= 0.8
-			l -= signf(bp.z) * 0.4 * (1.0 if o.team == 0 else -1.0)
+			l -= signf(bp.z) * 0.4 * -side_of(o.team)
 			target = court_pos(o.team, Vector2(-d, l))
 			target.y = R
 			vel = Ballistics.launch_with_speed(bp, target, u, g)
@@ -1431,7 +1847,7 @@ func _step_ball(delta: float) -> void:
 			return
 		if _try_block(c, prev):
 			return
-		var t_new := 0 if nxt.x < 0.0 else 1
+		var t_new := team_at_x(nxt.x)
 		if t_new != possession:
 			possession = t_new
 			touches = 0
@@ -1444,12 +1860,12 @@ func _step_ball(delta: float) -> void:
 func _try_block(c: Vector3, prev: Vector3) -> bool:
 	if last_action == "serve" or last_action == "toss":
 		return false  # Aufschlag blocken ist verboten
-	var def := 0 if prev.x > 0.0 else 1
+	var def := team_at_x(-prev.x)
 	var hit_pl: VPlayer = null
 	var hit_dz := 0.0
 	var in_block := 0
 	for pl in players[def]:
-		if not pl.airborne or not (pl.role in FRONT_ROW):
+		if not pl.airborne or not is_front_row(pl):
 			continue
 		var top: float = pl.block_top()
 		if c.y > top + R or c.y < top - 0.75:
@@ -1531,7 +1947,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 
 
 func _on_ball_landed() -> void:
-	var side_team := 0 if ball.position.x < 0.0 else 1
+	var side_team := team_at_x(ball.position.x)
 	var inside := absf(ball.position.x) <= HALF_L + R and absf(ball.position.z) <= HALF_W + R
 	var winner: int
 	var reason: String
@@ -1573,7 +1989,7 @@ func _on_ball_landed() -> void:
 
 
 func _end_rally(winner: int, reason: String) -> void:
-	if phase != Phase.RALLY and phase != Phase.TOSS:
+	if phase != Phase.RALLY and phase != Phase.TOSS and phase != Phase.PRE_SERVE:
 		return
 	opp = null
 	blockers = [[], []]
@@ -1581,27 +1997,119 @@ func _end_rally(winner: int, reason: String) -> void:
 	charging = false
 	flutter = 0.0
 	score[winner] += 1
+	streak[winner] += 1
+	streak[1 - winner] = 0
+	var side_out := winner != serving_team
 	serving_team = winner
+	if side_out:
+		rosters[winner].rotate()  # Rueckschlagteam gewinnt den Ballwechsel: es rotiert
+		_sync_slots(winner)
 	rally_count += 1
 	if trace:
 		print("ENDE: %s -> T%d   ball=%s" % [reason, winner, ball.position])
 	stats[reason] = stats.get(reason, 0) + 1
 	var key: String = "Punkte " + TEAM_NAMES[winner]
 	stats[key] = stats.get(key, 0) + 1
-	var over: bool = score[winner] >= SET_POINTS and score[winner] - score[1 - winner] >= 2
+	var over: bool = score[winner] >= set_target() and score[winner] - score[1 - winner] >= 2
+	if over and trace:
+		print("SATZENDE Satz %d: %d:%d (deciding=%s)" % [set_no, score[0], score[1], deciding])
+	if hud:
+		hud.whistle(true)
+		hud.ref_signal(_ref_sequence(winner, reason, over))
 	if over:
-		phase = Phase.SET_OVER
-		if hud:
-			hud.show_message("%s gewinnt den Satz %d:%d\n\nA / Leertaste: neues Spiel" % [TEAM_NAMES[winner], score[winner], score[1 - winner]])
+		_finish_set(winner)
 	else:
 		phase = Phase.POINT_PAUSE
-		pause_until = clock + (0.2 if autoplay else 2.0)
+		pause_until = clock + (0.2 if autoplay else 2.4)
+		if deciding and not side_changed_deciding and maxi(score[0], score[1]) >= 8:
+			side_change_pending = true  # im Entscheidungssatz wird bei 8 Punkten gewechselt
+			side_changed_deciding = true
+		_ai_coach_after_point()
 		if hud:
 			hud.show_message("%s\nPunkt für %s" % [reason, TEAM_NAMES[winner]])
 
 
+func _finish_set(winner: int) -> void:
+	sets_won[winner] += 1
+	set_scores.append(score.duplicate())
+	stats["Sätze"] = stats.get("Sätze", 0) + 1
+	pause_until = clock + (0.2 if autoplay else 4.0)
+	var history := ""
+	for sc in set_scores:
+		history += "%s%d:%d" % [", " if history != "" else "", sc[0], sc[1]]
+	if sets_won[winner] >= sets_to_win:
+		phase = Phase.MATCH_OVER
+		matches_done += 1
+		match_wins[winner] += 1
+		stats["Spiele " + TEAM_NAMES[winner]] = stats.get("Spiele " + TEAM_NAMES[winner], 0) + 1
+		if hud:
+			hud.show_message("%s gewinnt das Spiel %d:%d\n(%s)\n\nA / Leertaste: neues Spiel" % [
+				TEAM_NAMES[winner], sets_won[winner], sets_won[1 - winner], history])
+	else:
+		phase = Phase.SET_OVER
+		if hud:
+			hud.show_message("Satz %d geht an %s  %d:%d\nSätze: %d:%d\n\nSeitenwechsel · A / Leertaste: nächster Satz" % [
+				set_no, TEAM_NAMES[winner], score[winner], score[1 - winner], sets_won[0], sets_won[1]])
+
+
+## Seitenwechsel im Entscheidungssatz bei 8 Punkten: alle gehen auf die andere Seite.
+func _do_side_change() -> void:
+	side_change_pending = false
+	stats["Seitenwechsel im Entscheidungssatz"] = stats.get("Seitenwechsel im Entscheidungssatz", 0) + 1
+	if trace:
+		print("SEITENWECHSEL bei %d:%d" % [score[0], score[1]])
+	sides = [-sides[0], -sides[1]]
+	for t in 2:
+		for pl in players[t]:
+			pl.set_side(side_of(t))
+			pl.position = Vector3(-pl.position.x, 0.0, -pl.position.z)
+			pl.target = pl.position
+	phase = Phase.TIMEOUT
+	timeout_team = -1
+	pause_until = clock + (0.3 if autoplay else 3.5)
+	if hud:
+		hud.ref_signal([["sidechange", "Seitenwechsel", 3.5]])
+		hud.whistle(false)
+		hud.show_message("Seitenwechsel\n%s %d : %d %s" % [TEAM_NAMES[0], score[0], score[1], TEAM_NAMES[1]])
+
+
+## Schiedsrichter-Zeichen nach einem Ballwechsel: erst der Grund, dann Aufschlag fuer das Team.
+func _ref_sequence(winner: int, reason: String, set_end: bool) -> Array:
+	var seq := []
+	var sig := "in"
+	match reason:
+		"Netz!", "Netzberührung beim Block":
+			sig = "net"
+		"Doppelberührung":
+			sig = "double"
+		"Ball gehalten":
+			sig = "held"
+		"Aus!", "Block-Aus!", "Aufschlag im Aus", "Ball außerhalb der Antenne":
+			sig = "out"
+		"Aufschlagfehler", "Unter dem Netz durch", "Aufschlagzeit überschritten", "Hinterspielerfehler", "Liberofehler":
+			sig = "fault"
+	seq.append([sig, reason, 1.2])
+	if set_end:
+		seq.append(["setend", "Satzende", 2.5])
+	else:
+		seq.append(["serve_" + str(winner), "Aufschlag " + TEAM_NAMES[winner], 1.6])
+	return seq
+
+
+## KI-Trainer nach jedem Punkt: Auszeit bei einer Serie des Gegners.
+func _ai_coach_after_point() -> void:
+	for t in 2:
+		if t == human_team:
+			continue
+		var r: TeamRoster = rosters[t]
+		if r.timeouts_left > 0 and streak[1 - t] >= 3 and maxi(score[0], score[1]) >= 6 and rng.randf() < 0.6:
+			ai_timeout_wanted[t] = true
+		elif r.timeouts_left > 0 and score[1 - t] - score[t] >= 5 and rng.randf() < 0.25:
+			ai_timeout_wanted[t] = true
+
+
 func _print_stats() -> void:
-	print("Ballwechsel: %d, Beruehrungen im Schnitt: %.2f" % [rally_count, float(touch_total) / maxf(rally_count, 1)])
+	print("Ballwechsel: %d, Beruehrungen im Schnitt: %.2f, Spiele: %d (%d : %d)" % [rally_count, float(touch_total) / maxf(rally_count, 1), matches_done, match_wins[0], match_wins[1]])
 	var keys := stats.keys()
 	keys.sort()
 	for k in keys:
@@ -1629,14 +2137,14 @@ func _update_players(delta: float) -> void:
 		if form != "":
 			for pl in players[t]:
 				if not (phase == Phase.PRE_SERVE and pl == server()):
-					pl.target = court_pos(t, LAYOUT[form][pl.role])
+					pl.target = formation_pos(t, pl, form)
 		for pl in players[t]:
 			pl.run_speed = 6.0
 		if opp != null and opp.team != t and opp.kind == "attack" and not blockers[t].is_empty():
 			var list: Array = blockers[t]
 			var prim: VPlayer = list[0]
 			for pl in list:
-				pl.run_speed = 4.5
+				pl.run_speed = 3.0 if commit_miss[t] else 4.5
 			prim.target = Vector3(side_of(t) * 0.45, 0.0, clampf(opp.point.z + (block_err[t] if t != human_team else 0.0), -4.1, 4.1))
 			# Helfer schliessen neben dem Hauptblocker (der Mensch kann ihn verschieben).
 			for i in range(1, list.size()):
@@ -1646,8 +2154,8 @@ func _update_players(delta: float) -> void:
 				var z := clampf(prim.position.z + dir * 0.85, -4.3, 4.3)
 				list[i].target = Vector3(side_of(t) * 0.45, 0.0, z)
 			for pl in players[t]:
-				if not (pl in list) and pl.role in FRONT_ROW:
-					var lane: Vector2 = LAYOUT["defense"][pl.role]
+				if not (pl in list) and is_front_row(pl):
+					var lane: Vector2 = FORM["defense"]["front"][pl.lane if pl.lane in ["left", "mid", "right"] else "right"]
 					pl.target = court_pos(t, Vector2(3.0, lane.y))
 	# Sprungaufschlag: Anlauf unter den Ball und Absprung hinter der Grundlinie.
 	if phase == Phase.TOSS and serve_kind == 1 and not serve_done:
@@ -1826,8 +2334,12 @@ func hint() -> String:
 		Phase.INTRO:
 			return ""
 		Phase.PRE_SERVE:
-			if serving_team == human_team:
-				return "Aufschlag (%s): Ziel linker Stick/WASD · Trefferpunkt rechter Stick/Maus · LB/RB oder 1/2 Stand/Sprung · R2/E halten, loslassen = schlagen" % serve_style_text(serve_kind, serve_contact)
+			if serving_team == human_team and whistle_done:
+				var left := int(ceilf(serve_deadline - clock))
+				var timer := "  ·  Noch %d s!" % left if left <= 5 else ""
+				return "Aufschlag (%s): Ziel linker Stick/WASD · Trefferpunkt rechter Stick/Maus · LB/RB oder 1/2 Stand/Sprung · R2/E halten, loslassen = schlagen%s" % [serve_style_text(serve_kind, serve_contact), timer]
+			if human_team >= 0 and not whistle_done:
+				return "Gleich Anpfiff … Trainerbank (Libero, Wechsel, Auszeit): T / Y"
 		Phase.TOSS:
 			if serving_team == human_team and not serve_done:
 				return "R2 / E halten zum Aufladen, loslassen, wenn der Ball oben ist"
@@ -1839,11 +2351,13 @@ func hint() -> String:
 					"dig":
 						return "Abwehr! A/Leertaste baggern, wenn sich der Ring schließt"
 					"set":
+						if opp.player.role == "L" and absf(opp.point.x) < 3.0:
+							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
 						return "Zuspiel: Stick links Außen · rechts Diagonal · vor Mitte · zurück Hinterfeld, dann X/Q pritschen"
 					"attack":
 						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":
 						return "Ball rüberspielen: X/Q pritschen oder A/Leertaste baggern"
 			if human_player() != null:
-				return "Block: Stick verschiebt den Block · R2/E springen · in der Luft Stick = Hände, nach vorn = übers Netz"
+				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände · vor dem Zuspiel X/Q = Commit auf die Mitte"
 	return ""

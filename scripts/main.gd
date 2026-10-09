@@ -30,8 +30,14 @@ func _ready() -> void:
 	var menu := preload("res://scripts/menu.gd").new()
 	menu.cfg = match_node.cfg
 	hud.add_child(menu)
+	var trainer := preload("res://scripts/trainer.gd").new()
+	trainer.match_node = match_node
+	hud.add_child(trainer)
+	hud.trainer = trainer
 	if OS.get_cmdline_user_args().has("--menu"):
 		menu.call_deferred("open")
+	if OS.get_cmdline_user_args().has("--trainer"):
+		get_tree().create_timer(0.4).timeout.connect(trainer.open)  # Test: Trainerbank oeffnen
 
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
@@ -42,8 +48,10 @@ func _process(delta: float) -> void:
 	# Kamera in Echtzeit bewegen, auch waehrend der Zeitlupe.
 	var rd := delta / maxf(Engine.time_scale, 0.01)
 	var bz: float = match_node.ball.position.z if match_node and match_node.ball else 0.0
-	var want_pos := _cam_base + Vector3(0.0, 0.0, bz * 0.25)
-	var want_look := Vector3(1.5, 1.0, bz * 0.2)
+	# Die Kamera steht immer hinter dem eigenen Team, auch nach dem Seitenwechsel.
+	var cs: float = match_node.camera_side() if match_node else -1.0
+	var want_pos := Vector3(cs * absf(_cam_base.x), _cam_base.y, bz * 0.25)
+	var want_look := Vector3(-cs * 1.5, 1.0, bz * 0.2)
 	var want_fov := 52.0
 	var subj = match_node.cam_subject if match_node else null
 	if subj != null:
@@ -117,6 +125,7 @@ func _setup_input() -> void:
 	_action("toggle_slowmo", [KEY_F2], [])
 	_action("toggle_zoom", [KEY_F3], [])
 	_action("menu", [KEY_ESCAPE], [JOY_BUTTON_START])
+	_action("trainer", [KEY_T], [JOY_BUTTON_Y])
 
 
 func _action(name: String, keys: Array, buttons: Array, axes: Array = []) -> void:
@@ -213,6 +222,7 @@ func _build_hall() -> void:
 	# Hallenwaende und Tribuenen fuer etwas Atmosphaere
 	var wall := Color(0.22, 0.24, 0.3)
 	_box(Vector3(0.5, 8.0, 40.0), Vector3(22.0, 4.0, 0), wall)
+	_box(Vector3(0.5, 8.0, 40.0), Vector3(-22.0, 4.0, 0), wall)
 	_box(Vector3(48.0, 8.0, 0.5), Vector3(0, 4.0, 16.0), wall)
 	_box(Vector3(48.0, 8.0, 0.5), Vector3(0, 4.0, -16.0), wall)
 	for i in 4:

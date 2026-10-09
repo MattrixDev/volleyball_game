@@ -8,6 +8,8 @@ var _sliders := {}
 var _value_labels := {}
 var _help: Label
 var _first: Control
+var _set_buttons := {}
+var _libero_buttons := {}
 
 
 func _ready() -> void:
@@ -59,6 +61,26 @@ func _ready() -> void:
 			_first = b
 	box.add_child(row)
 
+	box.add_child(_text("Spiel: Länge und Libero-Wechsel (Länge gilt ab dem nächsten Spiel)", 18, Color(0.75, 0.78, 0.85)))
+	var rule_row := HBoxContainer.new()
+	rule_row.add_theme_constant_override("separation", 10)
+	for n in [1, 2, 3]:
+		var b := _toggle_button(["1 Satz", "2 Gewinnsätze (Best of 3)", "3 Gewinnsätze (Best of 5)"][n - 1], 270)
+		b.pressed.connect(_on_sets.bind(n))
+		b.focus_entered.connect(_show_help.bind("Wie viele Sätze ein Team gewinnen muss. Sätze gehen bis 25 (mit 2 Punkten Vorsprung), ein Entscheidungssatz bis 15 mit Seitenwechsel bei 8."))
+		rule_row.add_child(b)
+		_set_buttons[n] = b
+	box.add_child(rule_row)
+	var lib_row := HBoxContainer.new()
+	lib_row.add_theme_constant_override("separation", 10)
+	for v in [false, true]:
+		var b := _toggle_button("Libero: automatisch" if v else "Libero: ich wechsle selbst", 270)
+		b.pressed.connect(_on_libero.bind(v))
+		b.focus_entered.connect(_show_help.bind("Selbst: Den Libero und alle Wechsel machst du über die Trainerbank (T / Y vor dem Aufschlag). Automatisch: Der Libero geht von allein für den Mittelblocker im Hinterfeld rein und raus."))
+		lib_row.add_child(b)
+		_libero_buttons[v] = b
+	box.add_child(lib_row)
+
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 18)
@@ -107,6 +129,30 @@ func _ready() -> void:
 	box.add_child(_text("Steuerung im Menü: Steuerkreuz / linker Stick / Pfeiltasten, A / Enter wählt aus", 16, Color(0.6, 0.63, 0.7)))
 
 
+func _toggle_button(t: String, w: int) -> Button:
+	var b := Button.new()
+	b.text = t
+	b.toggle_mode = true
+	b.custom_minimum_size = Vector2(w, 40)
+	b.add_theme_font_size_override("font_size", 19)
+	var on := StyleBoxFlat.new()
+	on.bg_color = Color(0.2, 0.45, 0.9)
+	on.set_corner_radius_all(6)
+	b.add_theme_stylebox_override("pressed", on)
+	b.add_theme_stylebox_override("hover_pressed", on)
+	return b
+
+
+func _on_sets(n: int) -> void:
+	cfg.sets_to_win = n
+	_refresh()
+
+
+func _on_libero(v: bool) -> void:
+	cfg.libero_auto = v
+	_refresh()
+
+
 func _text(t: String, size: int, col := Color(1, 1, 1)) -> Label:
 	var l := Label.new()
 	l.text = t
@@ -119,7 +165,7 @@ func _process(_delta: float) -> void:
 	if Input.is_action_just_pressed("menu"):
 		if visible:
 			close()
-		else:
+		elif not get_tree().paused:
 			open()
 
 
@@ -143,6 +189,10 @@ func _refresh() -> void:
 		_update_value_label(key, s)
 	for p in _preset_buttons:
 		_preset_buttons[p].set_pressed_no_signal(cfg.preset == p)
+	for n in _set_buttons:
+		_set_buttons[n].set_pressed_no_signal(cfg.sets_to_win == n)
+	for v in _libero_buttons:
+		_libero_buttons[v].set_pressed_no_signal(cfg.libero_auto == v)
 
 
 func _update_value_label(key: String, s: Array) -> void:

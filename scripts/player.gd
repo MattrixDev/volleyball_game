@@ -11,6 +11,10 @@ const BLOCK_REACH := 2.45  # Handhoehe im Stand beim Block
 var team := 0
 var role := ""
 var number := 0
+var member_id := -1  # Spieler im Kader (TeamRoster)
+var slot := 1  # Position 1 bis 6 in der Rotation
+var lane := ""  # Angriffsbahn: left, mid, right, back (vom Match gesetzt)
+var takeoff_x := 0.0  # Abstand zum Netz beim Absprung
 var side := -1.0
 var target := Vector3.ZERO
 var run_speed := 6.0
@@ -32,6 +36,7 @@ var _rig: Node3D
 var _tag: Label3D
 var _ring: MeshInstance3D
 var _arms: Array = []
+var _torso: MeshInstance3D
 
 
 func setup(p_team: int, p_role: String, tag_letter: String, p_number: int, color: Color) -> void:
@@ -49,6 +54,7 @@ func setup(p_team: int, p_role: String, tag_letter: String, p_number: int, color
 	cap.height = 1.62
 	torso.mesh = cap
 	torso.material_override = _mat(color)
+	_torso = torso
 	torso.position.y = 0.81
 	_rig.add_child(torso)
 
@@ -96,6 +102,20 @@ func setup(p_team: int, p_role: String, tag_letter: String, p_number: int, color
 	add_child(_ring)
 
 
+## Neue Identitaet (Wechsel, Libero): Rolle, Nummer und Trikotfarbe tauschen.
+func change_identity(p_role: String, tag_letter: String, p_number: int, color: Color) -> void:
+	role = p_role
+	number = p_number
+	(_torso.material_override as StandardMaterial3D).albedo_color = color
+	for arm in _arms:
+		(arm.material_override as StandardMaterial3D).albedo_color = color.darkened(0.15)
+	_tag.text = "%s%d" % [tag_letter, number]
+
+
+func set_side(s: float) -> void:
+	side = s
+
+
 func _mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
@@ -123,6 +143,7 @@ func jump() -> void:
 	airborne = true
 	has_jumped = true
 	jump_v = JUMP_V
+	takeoff_x = absf(position.x)
 
 
 func dive() -> void:
