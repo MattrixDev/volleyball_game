@@ -71,6 +71,9 @@ class Opp:
 	var power := 0.8
 	var over := 0.0  # Aufladung beim Loslassen (> 1 = ueberzogen)
 	var win_scale := 1.0  # Timing-Fenster groesser (> 1) oder kleiner (< 1)
+	var no_reach := false  # KI-Abwehr kommt nicht mehr rechtzeitig hin
+	var start_pos := Vector3.ZERO
+	var max_run := 0.0
 
 
 var phase := Phase.INTRO
@@ -114,6 +117,7 @@ var autoplay_rallies := 200
 var trace := false
 var autopress := false  # Test: drueckt fuer den Menschen automatisch
 var hud = null
+var cfg := GameSettings.new()
 var rng := RandomNumberGenerator.new()
 
 # Eingabe-Zustand des Menschen
@@ -146,6 +150,8 @@ var touch_total := 0
 
 func _ready() -> void:
 	rng.randomize()
+	if not OS.get_cmdline_user_args().has("--autoplay"):
+		cfg.load_file()
 	for t in 2:
 		_spawn_team(t)
 	_make_ball()
@@ -166,6 +172,8 @@ func _ready() -> void:
 			trace = true
 		elif a.begins_with("--seed="):
 			rng.seed = int(a.get_slice("=", 1))
+		elif a.begins_with("--stufe="):
+			cfg.apply_preset(a.get_slice("=", 1))
 	if autoplay:
 		human_team = 0 if autopress else -1
 		new_match()
@@ -437,7 +445,7 @@ func _empty_input() -> Dictionary:
 func _read_input() -> Dictionary:
 	var d := _empty_input()
 	d.mv = Input.get_vector("move_left", "move_right", "move_down", "move_up")
-	var stick := Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up")
+	var stick := _held_stick(Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up"))
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
 	d.bump = Input.is_action_just_pressed("bump")
 	d.over = Input.is_action_just_pressed("overhand")
@@ -453,6 +461,28 @@ func _read_input() -> Dictionary:
 	if Input.is_action_just_pressed("toggle_zoom"):
 		zoom_on = not zoom_on
 	return d
+
+
+## Der rechte Stick federt beim Loslassen zur Mitte zurueck. Damit die gewaehlte
+## Schlagrichtung dabei nicht verloren geht, gilt der letzte deutliche Ausschlag
+## noch eine einstellbare Zeit lang weiter ("Stick nachhalten").
+var _rs_hold := Vector2.ZERO
+var _rs_hold_ms := 0
+
+
+func _held_stick(stick: Vector2) -> Vector2:
+	var now := Time.get_ticks_msec()
+	var l := stick.length()
+	if l >= 0.35:
+		var turned := _rs_hold == Vector2.ZERO or stick.normalized().dot(_rs_hold.normalized()) < 0.8
+		if turned or l >= _rs_hold.length() * 0.85:
+			_rs_hold = stick
+			_rs_hold_ms = now
+			return stick
+	if _rs_hold != Vector2.ZERO and now - _rs_hold_ms <= int(cfg.get_v("stick_hold")):
+		return _rs_hold
+	_rs_hold = Vector2.ZERO
+	return stick
 
 
 func _physics_process(delta: float) -> void:
@@ -672,7 +702,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	if x < 0.0:
 		d += -x * 30.0
 	else:
-		clear -= x * 9.0
+		clear -= x * lerpf(4.0, 9.0, cfg.unit("faults"))
 	var target := court_pos(serving_team, Vector2(-d, l))
 	target.y = R
 	ball_g = g
@@ -715,7 +745,9 @@ func _try_team(team: int) -> bool:
 	var kind := "pass"
 	var h := H_PASS
 	if idx == 0:
-		if (last_action == "attack" or last_action == "block_touch") and ball_vel.length() > 12.0:
+		if (last_action == "attack" and ball_vel.length() > 12.0) or (last_action == "block_touch" and ball_vel.length() > 9.0):
+			kind = "dig"
+		elif last_action == "block":
 			kind = "dig"
 	elif idx == 1:
 		kind = "set"
@@ -774,8 +806,12 @@ func _try_team(team: int) -> bool:
 	# Ein Flatterball ist schwer zu lesen: kleineres Timing-Fenster bei der Annahme.
 	if flutter > 0.0 and last_action == "serve":
 		o.win_scale = 0.88
+	if o.human and (kind == "pass" or kind == "dig" or kind == "free"):
+		o.win_scale *= cfg.get_v("receive_help") / 100.0
 	if not o.human:
 		o.ai_e = ai_e(kind)
+		if kind == "dig":
+			_ai_dig_limits(o, tc)
 	if kind == "attack":
 		pl.has_jumped = false
 		pl.lean = 0.0
@@ -784,6 +820,21 @@ func _try_team(team: int) -> bool:
 		blockers[1 - team] = []
 	opp = o
 	return true
+
+
+## KI-Abwehr: braucht eine Reaktionszeit, laeuft nicht beliebig schnell und wehrt harte
+## Baelle seltener sauber ab. Wie gut, stellt "Gegner-Abwehr" ein.
+func _ai_dig_limits(o: Opp, tc: float) -> void:
+	var skill := cfg.unit("ai_defense")
+	var react := lerpf(0.42, 0.2, skill)
+	var run := lerpf(3.2, 5.5, skill)
+	var reach := lerpf(1.05, 1.6, skill)
+	o.start_pos = o.player.position
+	o.max_run = maxf(0.0, tc - react) * run
+	if flat_dist(o.player.position, o.point) > o.max_run + reach:
+		o.no_reach = true
+	var hard := clampf((o.speed - 14.0) / 12.0, 0.0, 1.0) * (1.0 - 0.6 * skill)
+	o.ai_e *= 1.0 + hard * 1.6
 
 
 var _hitter := [null, null]
@@ -940,7 +991,7 @@ func _human_touch(tech: String, choice: String) -> void:
 	if opp.pending:
 		return
 	var e := clock - opp.t
-	if e < -0.35:
+	if e < -maxf(0.35, windows(opp.kind)[2] * opp.win_scale + 0.05):
 		return  # viel zu frueh gedrueckt: ignorieren
 	opp.tech = tech
 	_press(opp, e, choice)
@@ -984,7 +1035,8 @@ func _ai_actions() -> void:
 func _ai_block_hands(t: int, b: VPlayer) -> void:
 	if opp == null:
 		return
-	var read := rng.randf() < 0.3
+	var read_p := 0.3 if t == human_team else lerpf(0.1, 0.5, cfg.unit("ai_block"))
+	var read := rng.randf() < read_p
 	var shift := rng.randf_range(-0.3, 0.3)
 	if read:
 		var info := attack_shot(opp.team, opp.point, opp.rs, opp.power)
@@ -1045,7 +1097,9 @@ func _shot_blocked(o: Opp, contact: Vector2) -> bool:
 	var f := absf(o.point.x) / maxf(absf(o.point.x - tgt.x), 0.01)
 	var zc := lerpf(o.point.z, tgt.z, f)
 	for b in blockers[1 - o.team]:
-		if b.airborne and absf(zc - b.hands_z()) < 0.5:
+		# Noch nicht abgesprungen: dort, wo der Blocker gerade hinlaeuft.
+		var bz: float = b.hands_z() if b.airborne else b.target.z
+		if absf(zc - bz) < 0.5:
 			return true
 	return false
 
@@ -1065,7 +1119,9 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		"attack":
 			reach = 1.0
 	var horiz := flat_dist(pl.position, o.point)
-	if q == Q.MISS or horiz > reach:
+	if o.no_reach:
+		pl.dive()
+	if q == Q.MISS or horiz > reach or o.no_reach:
 		if trace:
 			print("  T%d %s %s VERFEHLT q=%s e=%.3f horiz=%.2f" % [o.team, pl.role, o.kind, Q_TEXT[q], e, horiz])
 		var txt := "Zu früh" if e < 0.0 else "Zu spät"
@@ -1076,13 +1132,13 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	# Pritschen: genau, aber nur bei Baellen, die nicht zu hart kommen.
 	if o.kind != "attack" and o.tech == "over":
 		if o.speed > OVER_RISKY:
-			if rng.randf() < 0.35:
+			if rng.randf() < 0.35 * cfg.unit("faults"):
 				_fault(o, "Ball gehalten")
 				return
 			q = mini(q + 2, Q.WEAK)
 		elif o.speed > OVER_OK:
 			q = mini(q + 1, Q.WEAK)
-		if o.kind == "set" and q == Q.WEAK and rng.randf() < 0.12:
+		if o.kind == "set" and q == Q.WEAK and rng.randf() < 0.12 * cfg.unit("faults"):
 			_fault(o, "Doppelberührung")
 			return
 	if (o.kind == "pass" or o.kind == "dig" or o.kind == "free") and horiz > 0.8:
@@ -1299,7 +1355,7 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	var target := court_pos(o.team, Vector2(-d, l))
 	target.y = R
 	var vel := Ballistics.launch_with_speed(bp, target, u, g)
-	if q != Q.WEAK or rng.randf() < 0.6:
+	if q != Q.WEAK or rng.randf() < 1.0 - 0.4 * cfg.unit("faults"):
 		# Gute Angreifer passen die Flugbahn an, damit der Ball ueber das Netz geht.
 		while _net_cross_y(bp, vel) < NET_H + 0.15 and d < 8.6:
 			d += 0.5
@@ -1411,7 +1467,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	var pl := hit_pl
 	var top2: float = pl.block_top()
 	# Ueber das Netz greifen ist stark, aber riskant.
-	if pl.hand_reach > 0.0 and rng.randf() < 0.1:
+	if pl.hand_reach > 0.0 and rng.randf() < 0.1 * cfg.unit("faults"):
 		popup(pl, "Netz!", Q_COLOR[Q.MISS])
 		last_touch_team = def
 		_end_rally(1 - def, "Netzberührung beim Block")
@@ -1419,7 +1475,9 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	var s_att := signf(prev.x)
 	ball_g = G
 	# Wie gut steht der Block? Haende ganz oben, ueber das Netz gegriffen, mehrere Blocker.
-	var stuff_p := 0.3 + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0)
+	# Der Mensch blockt immer gleich stark; die Staerke des KI-Blocks stellt "Gegner-Block" ein.
+	var base := 0.33 if def == human_team else lerpf(0.08, 0.32, cfg.unit("ai_block"))
+	var stuff_p := base + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0)
 	if pl.jump_h < 0.6:
 		stuff_p *= 0.4
 	var out_p := 0.85 if last_shot_style == "blockout" else 0.4
@@ -1432,9 +1490,9 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		last_action = "block_touch"
 		popup(pl, "Blockberührung", Q_COLOR[Q.GOOD])
 	elif absf(hit_dz) < 0.3 and c.y < top2 - 0.25 + pl.hand_reach and last_action == "attack" and rng.randf() < stuff_p:
-		# Kompletter Block: Ball faellt auf der Seite des Angreifers runter.
+		# Kompletter Block: Ball wird hart nach unten auf die Seite des Angreifers gedrueckt.
 		ball.position = Vector3(s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(-ball_vel.x * 0.3, -1.0, ball_vel.z * 0.3 + rng.randf_range(-1.0, 1.0))
+		ball_vel = Vector3(s_att * rng.randf_range(1.2, 3.5), -rng.randf_range(3.5, 6.0), ball_vel.z * 0.2 + rng.randf_range(-1.0, 1.0))
 		possession = 1 - def
 		touches = 0
 		last_action = "block"
@@ -1449,6 +1507,15 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			big_hit.emit(1.0 if in_block >= 2 else 0.7)
 			if in_block >= 2:
 				_hitstop_left = 0.45
+	elif last_action == "attack" and ball_vel.length() > 17.0 and rng.randf() < 0.55:
+		# Harter Schlag: Ball geht durch den Block, wird etwas gebremst, bleibt aber schnell.
+		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
+		ball_vel = Vector3(ball_vel.x * rng.randf_range(0.55, 0.75), ball_vel.y * 0.5 + rng.randf_range(-1.0, 1.5), ball_vel.z * 0.6 + rng.randf_range(-2.0, 2.0))
+		possession = def
+		touches = 0
+		last_action = "block_touch"
+		popup(pl, "Durch den Block!", Q_COLOR[Q.WEAK])
+		stats["Durch den Block"] = stats.get("Durch den Block", 0) + 1
 	else:
 		# Blockberuehrung: Ball geht weich weiter, zaehlt nicht als Beruehrung.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
@@ -1610,6 +1677,8 @@ func _update_players(delta: float) -> void:
 				pl.lean = clampf((tz - pl.position.z) / 4.0, -1.0, 1.0)
 		elif opp.human and not assist:
 			pl.target = pl.position
+		elif opp.no_reach:
+			pl.target = opp.start_pos + (p - opp.start_pos).limit_length(opp.max_run)
 		else:
 			pl.target = p
 	for t in 2:
@@ -1617,37 +1686,46 @@ func _update_players(delta: float) -> void:
 			pl.tick(delta)
 
 
-## Zeitlupe und Kamera: Sobald der eigene Angreifer oder Blocker in der Luft ist,
-## laeuft das Spiel langsamer und die Kamera rueckt naeher.
+## Zeitlupe und Kamera: In jeder Spielphase gilt das eingestellte Tempo (Menue), die
+## Kamera rueckt beim eigenen Aufschlag, Angriff und Block naeher.
 func _update_time_and_camera(real_delta: float) -> void:
-	var slow := false
+	var want := 1.0
 	cam_mode = ""
 	cam_subject = null
 	if human_team >= 0 and not autoplay:
 		if (phase == Phase.PRE_SERVE or phase == Phase.TOSS) and serving_team == human_team and not serve_done:
 			cam_mode = "serve"
 			cam_subject = server()
-			slow = phase == Phase.TOSS and serve_kind == 1 and cam_subject.airborne
+			if phase == Phase.TOSS and ((serve_kind == 1 and cam_subject.airborne) or (serve_kind == 0 and ball_vel.y < 1.5)):
+				want = minf(want, cfg.time_scale("slow_serve"))
 		elif phase == Phase.RALLY and opp != null and opp.kind == "attack":
 			if opp.team == human_team:
 				cam_mode = "attack"
 				cam_subject = opp.player
-				slow = opp.player.airborne and (not opp.done or clock < _slow_tail_until)
+				if opp.player.airborne and (not opp.done or clock < _slow_tail_until):
+					want = minf(want, cfg.time_scale("slow_attack"))
 			elif not blockers[human_team].is_empty():
 				cam_mode = "block"
 				cam_subject = blockers[human_team][0]
-				slow = (opp.player.airborne or cam_subject.airborne) and not opp.done
+				if (opp.player.airborne or cam_subject.airborne) and not opp.done:
+					want = minf(want, cfg.time_scale("slow_block"))
+		elif phase == Phase.RALLY and opp != null and not opp.done and opp.human:
+			var remain := opp.t - clock
+			if remain < 0.45 and remain > -0.15:
+				want = minf(want, cfg.time_scale("slow_set" if opp.kind == "set" else "slow_receive"))
 		if phase == Phase.RALLY and last_action == "attack" and clock < _slow_tail_until:
-			slow = slow or (opp == null or opp.team != human_team)
+			if opp == null or opp.team != human_team:
+				want = minf(want, cfg.time_scale("slow_block"))
+	if not slowmo_on:
+		want = 1.0
 	if _hitstop_left > 0.0:
 		_hitstop_left -= real_delta
-		slow = true
+		want = minf(want, SLOW)
 	if not zoom_on:
 		cam_mode = ""
-	var want := SLOW if (slow and slowmo_on) or _hitstop_left > 0.0 else 1.0
 	if phase != Phase.RALLY and phase != Phase.TOSS:
 		want = 1.0
-	Engine.time_scale = want
+	Engine.time_scale = clampf(want, 0.1, 1.0)
 
 
 func _update_visuals() -> void:
