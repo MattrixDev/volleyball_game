@@ -27,6 +27,11 @@ func _ready() -> void:
 	match_node.hud = hud
 	match_node.big_hit.connect(_on_big_hit)
 	add_child(match_node)
+	var menu := preload("res://scripts/menu.gd").new()
+	menu.cfg = match_node.cfg
+	hud.add_child(menu)
+	if OS.get_cmdline_user_args().has("--menu"):
+		menu.call_deferred("open")
 
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
@@ -34,8 +39,6 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if Input.is_action_just_pressed("quit"):
-		get_tree().quit()
 	# Kamera in Echtzeit bewegen, auch waehrend der Zeitlupe.
 	var rd := delta / maxf(Engine.time_scale, 0.01)
 	var bz: float = match_node.ball.position.z if match_node and match_node.ball else 0.0
@@ -111,9 +114,9 @@ func _setup_input() -> void:
 	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])
 	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])
 	_action("toggle_assist", [KEY_F1], [JOY_BUTTON_BACK])
-	_action("toggle_slowmo", [KEY_F2], [JOY_BUTTON_START])
+	_action("toggle_slowmo", [KEY_F2], [])
 	_action("toggle_zoom", [KEY_F3], [])
-	_action("quit", [KEY_ESCAPE], [])
+	_action("menu", [KEY_ESCAPE], [JOY_BUTTON_START])
 
 
 func _action(name: String, keys: Array, buttons: Array, axes: Array = []) -> void:

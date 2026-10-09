@@ -20,7 +20,7 @@ func _ready() -> void:
 	_info = _label(18, HORIZONTAL_ALIGNMENT_LEFT)
 	_info.grow_horizontal = Control.GROW_DIRECTION_END
 	_info.grow_vertical = Control.GROW_DIRECTION_END
-	_info.position = Vector2(16, 16)
+	_info.position = Vector2(16, 84)
 	_pad = preload("res://scripts/contact_pad.gd").new()
 	add_child(_pad)
 	_pad.anchor_left = 1.0
@@ -50,14 +50,15 @@ func _label(size: int, align: HorizontalAlignment) -> Label:
 
 
 func show_intro() -> void:
-	_msg.text = "VOLLEYBALL  ·  Steuerung 2.0\n\n" \
+	_msg.text = "VOLLEYBALL  ·  Phase 1b Balancing\n\n" \
 		+ "Du spielst immer den Spieler mit dem gelben Ring.\n\n" \
 		+ "Baggern: A / Leertaste      Pritschen: X / Q\n" \
 		+ "Schlagen (Aufschlag, Angriff): R2 / E halten und loslassen\n" \
 		+ "Trefferpunkt am Ball: rechter Stick / Maus (oder I J K L)\n" \
 		+ "Laufen, Zuspiel-Richtung, Aufschlagziel, Block: linker Stick / WASD\n" \
 		+ "Aufschlag Stand/Sprung: LB/RB oder 1/2      Block springen: R2 / E\n\n" \
-		+ "Laufhilfe F1 / Select   Zeitlupe F2 / Start   Zoom F3\n\n" \
+		+ "Einstellungen und Schwierigkeit: Esc / Start\n" \
+		+ "Laufhilfe F1 / Select   Zeitlupe an/aus F2   Zoom F3\n\n" \
 		+ "A / Leertaste: Spiel starten"
 	_msg.label_settings.font_size = 28
 
@@ -76,8 +77,8 @@ func update_view(m) -> void:
 	var serve1 := " ●" if m.serving_team == 1 else "   "
 	_score.text = "%s%s  %d : %d  %s%s" % [serve0, m.TEAM_NAMES[0], m.score[0], m.score[1], m.TEAM_NAMES[1], serve1]
 	_hint.text = m.hint()
-	_info.text = "Laufhilfe: %s (F1)   Zeitlupe: %s (F2)   Zoom: %s (F3)" % [
-		"an" if m.assist else "aus", "an" if m.slowmo_on else "aus", "an" if m.zoom_on else "aus"]
+	_info.text = "Stufe: %s (Esc / Start)   Laufhilfe: %s (F1)   Zeitlupe: %s (F2)   Zoom: %s (F3)" % [
+		GameSettings.PRESET_TEXT[m.cfg.preset], "an" if m.assist else "aus", "an" if m.slowmo_on else "aus", "an" if m.zoom_on else "aus"]
 	var show := false
 	if m.human_team >= 0 and not m.autoplay:
 		if (m.phase == m.Phase.PRE_SERVE or m.phase == m.Phase.TOSS) and m.serving_team == m.human_team and not m.serve_done:
