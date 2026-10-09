@@ -28,6 +28,7 @@ var _whistle_short: AudioStreamWAV
 var _whistle_long: AudioStreamWAV
 var _player: AudioStreamPlayer
 var _time := 0.0
+var volume := 35.0  # 0 bis 100, aus den Einstellungen
 
 
 func _ready() -> void:
@@ -44,10 +45,9 @@ func _ready() -> void:
 	_caption.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	_caption.add_theme_constant_override("outline_size", 5)
 	add_child(_caption)
-	_whistle_short = _make_whistle(0.28)
-	_whistle_long = _make_whistle(0.65)
+	_whistle_short = _make_whistle(0.16)
+	_whistle_long = _make_whistle(0.32)
 	_player = AudioStreamPlayer.new()
-	_player.volume_db = -8.0
 	add_child(_player)
 
 
@@ -76,6 +76,9 @@ func _next() -> void:
 
 
 func whistle(long: bool) -> void:
+	if volume <= 0.0:
+		return
+	_player.volume_db = linear_to_db(volume / 100.0 * 0.35)
 	_player.stream = _whistle_long if long else _whistle_short
 	_player.play()
 
@@ -130,7 +133,7 @@ func _draw() -> void:
 			draw_line(SHOULDER + Vector2(-34, -26), SHOULDER + Vector2(6, -26), Color(1, 0.85, 0.3), 3.0)
 
 
-## Pfeifton selbst erzeugen: ein Triller um 3 kHz mit sanftem Ein- und Ausblenden.
+## Pfeifton selbst erzeugen: ein weicher, tiefer Ton (2 kHz, kaum Triller) mit sanftem Ein- und Ausblenden.
 func _make_whistle(seconds: float) -> AudioStreamWAV:
 	var rate := 22050
 	var n := int(seconds * rate)
@@ -139,10 +142,10 @@ func _make_whistle(seconds: float) -> AudioStreamWAV:
 	var phase := 0.0
 	for i in n:
 		var t := float(i) / rate
-		var f := 2950.0 + 180.0 * sin(TAU * 22.0 * t)
+		var f := 1950.0 + 40.0 * sin(TAU * 14.0 * t)
 		phase += TAU * f / rate
-		var env := minf(t / 0.02, 1.0) * minf((seconds - t) / 0.06, 1.0)
-		var v := (sin(phase) * 0.8 + sin(phase * 2.0) * 0.12) * env * (0.75 + 0.25 * sin(TAU * 22.0 * t))
+		var env := minf(t / 0.05, 1.0) * minf((seconds - t) / 0.1, 1.0)
+		var v := sin(phase) * env
 		data.encode_s16(i * 2, int(clampf(v, -1.0, 1.0) * 16000.0))
 	var w := AudioStreamWAV.new()
 	w.format = AudioStreamWAV.FORMAT_16_BITS

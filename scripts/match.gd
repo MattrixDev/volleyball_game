@@ -134,6 +134,8 @@ var timeout_team := -1
 var ai_timeout_wanted := [false, false]
 var whistle_done := false
 var serve_deadline := -1.0
+var commit_miss := [false, false]  # Commit war falsch: Block kommt aussen zu spaet
+var commit_block := [false, false]  # Commit-Block: Mitte gegen den Schnellangriff
 var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
 var trainer_wanted := false
 var notice := ""  # kurzer Hinweis fuer die Anzeige (z.B. "Libero muss raus")
@@ -558,6 +560,7 @@ func start_rally() -> void:
 	whistle_done = false
 	serve_deadline = -1.0
 	libero_set_front = [false, false]
+	commit_block = [false, false]
 	for t in 2:
 		_prepare_lineup(t)
 	if check_rules:
@@ -971,8 +974,11 @@ func _auto_input() -> Dictionary:
 					else:
 						d.bump = true
 			elif human_player() != null and opp != null and opp.kind == "attack":
+				d.rs = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # zweiter Blocker per rechtem Stick
 				if _due(opp.t - JUMP_RISE):
 					d.hit_down = true
+			elif opp != null and opp.team != human_team and opp.kind == "set" and rng.randf() < 0.02:
+				d.over = true  # Commit-Block ausprobieren
 			else:
 				_auto_t = -1.0
 	return d
@@ -1242,12 +1248,16 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 		mb = front[0]
 	var list: Array = []
 	var dirs: Array = []
+	var committed: bool = commit_block[def]
+	commit_block[def] = false
+	var commit_hit := committed and absf(p.z) < 1.5
+	commit_miss[def] = committed and not commit_hit
 	if absf(p.z) < 1.5:
 		list = [mb]
 		dirs = [0.0]
 		var t_left := t_contact - clock
 		for pl in front:
-			if pl != mb and (t_left > 0.9 or rng.randf() < 0.5):
+			if pl != mb and (t_left > 0.9 or commit_hit or rng.randf() < 0.5):
 				list.append(pl)
 				dirs.append(signf(pl.position.z - mb.position.z))
 	else:
@@ -1276,6 +1286,10 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 		pl.hand_reach = 0.0
 		pl.block_pose = true
 		pl.block_jump_at = base_jump + rng.randf_range(-0.05, 0.09) + (0.03 if i > 0 else 0.0)
+		if commit_hit:
+			pl.block_jump_at = base_jump + rng.randf_range(-0.03, 0.02)  # Block steht schon, Sprung sitzt
+		elif commit_miss[def]:
+			pl.block_jump_at += 0.12  # falsch geraten: kommt zu spaet
 	blockers[def] = list
 	block_dirs[def] = dirs
 	block_err[def] = rng.randf_range(-0.4, 0.4)
@@ -1314,6 +1328,12 @@ func _rally_input(inp: Dictionary) -> void:
 		pl.manual_dir = Vector3.ZERO
 	var mv: Vector2 = inp.mv
 	var hp := human_player()
+	# Commit-Block: Pritschen-Taste, solange der Gegner den Ball spielt (vor dem Angriff).
+	if inp.over and not commit_block[human_team] and (opp == null or opp.team != human_team) and opp != null and opp.kind != "attack" and possession != human_team:
+		commit_block[human_team] = true
+		var cp := _lane_player(human_team, "mid")
+		if cp != null:
+			popup(cp, "Commit: Mitte", Color(1.0, 0.85, 0.3))
 	if opp != null and not opp.done and opp.team == human_team:
 		match opp.kind:
 			"attack":
@@ -1333,14 +1353,27 @@ func _rally_input(inp: Dictionary) -> void:
 					_human_touch("over", "")
 	elif hp != null and not blockers[human_team].is_empty() and hp == blockers[human_team][0]:
 		var d := _stick_dir(mv)
+		# Doppelblock: der rechte Stick steuert den zweiten Blocker (sonst schliesst er von selbst).
+		var helper: VPlayer = blockers[human_team][1] if blockers[human_team].size() > 1 else null
+		var d2 := _stick_dir(inp.rs)
+		var rs_on: bool = inp.rs.length() > 0.3
+		var dt := get_physics_process_delta_time()
 		if not hp.airborne:
 			hp.manual_dir = Vector3(0, 0, d.z)
+			if helper != null and not helper.airborne and rs_on:
+				helper.manual_dir = Vector3(0, 0, d2.z)
 			if inp.hit_down and not hp.has_jumped:
 				hp.jump()
+				if helper != null and not helper.has_jumped:
+					helper.jump()
+					_ai_block_hands(human_team, helper)
 		else:
 			# In der Luft: Haende mit dem Stick verschieben, Stick nach vorn = ueber das Netz greifen.
-			hp.hand_shift = move_toward(hp.hand_shift, d.z * 0.45, 3.0 * get_physics_process_delta_time())
+			hp.hand_shift = move_toward(hp.hand_shift, d.z * 0.45, 3.0 * dt)
 			hp.hand_reach = 0.12 if mv.y > 0.5 else 0.0
+			if helper != null and helper.airborne and rs_on:
+				helper.hand_shift = move_toward(helper.hand_shift, d2.z * 0.45, 3.0 * dt)
+				helper.hand_reach = 0.12 if inp.rs.y > 0.5 else 0.0
 
 
 func _attack_input(inp: Dictionary) -> void:
@@ -1396,8 +1429,8 @@ func _ai_actions() -> void:
 	for t in 2:
 		for i in blockers[t].size():
 			var b: VPlayer = blockers[t][i]
-			if t == human_team and i == 0:
-				continue
+			if t == human_team and i <= 1:
+				continue  # der Mensch steuert beide Blocker im Doppelblock
 			if opp.team != t and not b.has_jumped and clock >= b.block_jump_at:
 				b.jump()
 				_ai_block_hands(t, b)
@@ -2111,7 +2144,7 @@ func _update_players(delta: float) -> void:
 			var list: Array = blockers[t]
 			var prim: VPlayer = list[0]
 			for pl in list:
-				pl.run_speed = 4.5
+				pl.run_speed = 3.0 if commit_miss[t] else 4.5
 			prim.target = Vector3(side_of(t) * 0.45, 0.0, clampf(opp.point.z + (block_err[t] if t != human_team else 0.0), -4.1, 4.1))
 			# Helfer schliessen neben dem Hauptblocker (der Mensch kann ihn verschieben).
 			for i in range(1, list.size()):
@@ -2326,5 +2359,5 @@ func hint() -> String:
 					"free":
 						return "Ball rüberspielen: X/Q pritschen oder A/Leertaste baggern"
 			if human_player() != null:
-				return "Block: Stick verschiebt den Block · R2/E springen · in der Luft Stick = Hände, nach vorn = übers Netz"
+				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände · vor dem Zuspiel X/Q = Commit auf die Mitte"
 	return ""

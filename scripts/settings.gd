@@ -18,6 +18,7 @@ const SLIDERS := [
 	["ai_defense", "Gegner-Abwehr", 0, 100, 5, "", "Wie gut der Gegner deine Angriffe abwehrt"],
 	["ai_block", "Gegner-Block", 0, 100, 5, "", "Wie oft der Gegner dich blockt"],
 	["faults", "Fehler-Strenge", 0, 100, 5, "%", "Wie oft Netzfehler, Doppelberührung und Ball gehalten passieren"],
+	["whistle", "Lautstärke Pfiff", 0, 100, 5, "%", "Wie laut der Schiedsrichter pfeift (0 = aus)"],
 	["serve_time", "Zeit für den Aufschlag", 8, 30, 1, "s", "So lange hast du nach dem Pfiff Zeit zum Aufschlagen (Regel: 8 Sekunden)"],
 ]
 
@@ -44,7 +45,9 @@ func _init() -> void:
 
 func apply_preset(name: String) -> void:
 	preset = name
+	var keep: float = float(values.get("whistle", 35))  # Lautstärke gehört zu keiner Stufe
 	values = (PRESETS[name] as Dictionary).duplicate()
+	values["whistle"] = keep
 
 
 func set_value(key: String, v: float) -> void:
@@ -65,7 +68,7 @@ func _detect_preset() -> void:
 
 
 func get_v(key: String) -> float:
-	return float(values.get(key, PRESETS["normal"][key]))
+	return float(values.get(key, PRESETS["normal"].get(key, 35)))
 
 
 ## Spieltempo in einer Phase (1 = normal, 0,1 = zehnmal langsamer).
@@ -96,6 +99,7 @@ func load_file() -> void:
 	libero_auto = bool(cf.get_value("spiel", "libero_auto", false))
 	var p: String = cf.get_value("spiel", "stufe", "normal")
 	apply_preset(p if PRESETS.has(p) else "normal")
+	values["whistle"] = float(cf.get_value("werte", "whistle", 35))
 	if p == "eigene":
 		for s in SLIDERS:
 			values[s[0]] = cf.get_value("werte", s[0], values[s[0]])

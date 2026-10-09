@@ -15,7 +15,10 @@ Aufbauend auf Steuerung 2.0 und dem Balancing (Phase 1a und 1b):
 - Sätze bis 25 mit 2 Punkten Vorsprung, Entscheidungssatz bis 15 mit Seitenwechsel bei 8 Punkten. Spiellänge im Menü: 1 Satz, 2 oder 3 Gewinnsätze. Seitenwechsel nach jedem Satz, die Kamera bleibt hinter deinem Team
 - Schiedsrichter: Pfiff zum Aufschlag und nach jedem Ballwechsel, Handzeichen als Bild (Aufschlag, Punkt, Netz, Doppelberührung, Ball gehalten, Aus, Auszeit, Wechsel, Seitenwechsel, Satzende). Aufschlagzeit 8 bis 30 Sekunden (Menü, Regel: 8), Hinterspielerfehler, Liberofehler
 - Team-KI: wechselt den Libero selbst, nimmt Auszeiten bei Punkteserien des Gegners, wechselt gelegentlich Spieler gleicher Rolle
-- Noch nicht drin: Commit-Block, Profi-Option mit eigenem Angriffssprung, Zwei-Spieler-Doppelblock (braucht lokalen Mehrspieler), animierter Schiedsrichter als 3D-Figur
+- Doppelblock: linker Stick steuert den Hauptblocker, rechter Stick den zweiten (schließt sonst von selbst), R2 / E lässt beide springen
+- Commit-Block: X / Q, solange der Gegner den Ball spielt: Block geht auf die Mitte. Stark gegen den Schnellangriff, außen kommt er zu spät
+- Pfiff weicher und kürzer, Lautstärke im Menü (0 = aus)
+- Noch nicht drin: Profi-Option mit eigenem Angriffssprung, Zwei-Spieler-Doppelblock (braucht lokalen Mehrspieler), animierter Schiedsrichter als 3D-Figur
 
 ## Spielen
 
