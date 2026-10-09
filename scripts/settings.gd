@@ -23,8 +23,8 @@ const SLIDERS := [
 const PRESETS := {
 	"leicht": {"slow_serve": 60, "slow_receive": 45, "slow_set": 30, "slow_attack": 75, "slow_block": 75,
 		"receive_help": 180, "stick_hold": 300, "ai_defense": 25, "ai_block": 25, "faults": 15},
-	"normal": {"slow_serve": 50, "slow_receive": 30, "slow_set": 0, "slow_attack": 65, "slow_block": 65,
-		"receive_help": 140, "stick_hold": 250, "ai_defense": 50, "ai_block": 50, "faults": 35},
+	"normal": {"slow_serve": 50, "slow_receive": 20, "slow_set": 0, "slow_attack": 60, "slow_block": 50,
+		"receive_help": 120, "stick_hold": 200, "ai_defense": 70, "ai_block": 70, "faults": 35},
 	"profi": {"slow_serve": 30, "slow_receive": 0, "slow_set": 0, "slow_attack": 45, "slow_block": 45,
 		"receive_help": 100, "stick_hold": 150, "ai_defense": 80, "ai_block": 75, "faults": 100},
 }
@@ -45,6 +45,11 @@ func apply_preset(name: String) -> void:
 
 func set_value(key: String, v: float) -> void:
 	values[key] = v
+	_detect_preset()
+
+
+## Passen die Werte genau zu einer Stufe, heisst sie so, sonst "Eigene".
+func _detect_preset() -> void:
 	preset = "eigene"
 	for p in PRESETS:
 		var same := true
@@ -86,4 +91,4 @@ func load_file() -> void:
 	if p == "eigene":
 		for s in SLIDERS:
 			values[s[0]] = cf.get_value("werte", s[0], values[s[0]])
-		preset = "eigene"
+		_detect_preset()
