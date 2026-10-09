@@ -10,6 +10,14 @@ var _shake := 0.0
 var _cam_base := Vector3(-18.5, 9.5, 0.0)
 var _cam_pos := Vector3(-18.5, 9.5, 0.0)
 var _cam_look := Vector3(1.5, 1.0, 0.0)
+var fx: HitFx
+var sfx: SoundBank
+var crowd: CrowdView
+var hud
+var menu
+var start_menu
+var _shot_phase := ""
+var _shot_phase_t := 0.0
 
 
 func _ready() -> void:
@@ -21,19 +29,41 @@ func _ready() -> void:
 	camera.position = _cam_base
 	camera.look_at(Vector3(1.5, 1.0, 0.0))
 
-	var hud := HudScript.new()
+	fx = HitFx.new()
+	add_child(fx)
+	sfx = SoundBank.new()
+	add_child(sfx)
+	crowd = CrowdView.new()
+	add_child(crowd)
+	hud = HudScript.new()
 	add_child(hud)
 	match_node = MatchScript.new()
 	match_node.hud = hud
 	match_node.big_hit.connect(_on_big_hit)
+	match_node.contact.connect(_on_contact)
+	match_node.point_won.connect(_on_point)
 	add_child(match_node)
-	var menu := preload("res://scripts/menu.gd").new()
-	menu.cfg = match_node.cfg
-	hud.add_child(menu)
 	var trainer := preload("res://scripts/trainer.gd").new()
 	trainer.match_node = match_node
 	hud.add_child(trainer)
 	hud.trainer = trainer
+	start_menu = preload("res://scripts/start_menu.gd").new()
+	start_menu.cfg = match_node.cfg
+	start_menu.play.connect(_on_play)
+	start_menu.settings.connect(func(): menu.open(true))
+	hud.add_child(start_menu)
+	start_menu.visible = false
+	menu = preload("res://scripts/menu.gd").new()
+	menu.cfg = match_node.cfg
+	menu.match_node = match_node
+	menu.closed.connect(_on_menu_closed)
+	menu.to_title.connect(_on_to_title)
+	hud.add_child(menu)
+	if match_node.attract:
+		hud.set_attract(true)
+		start_menu.call_deferred("open")
+	if OS.get_cmdline_user_args().has("--play"):
+		call_deferred("_on_play")  # Test: Startmenue ueberspringen
 	if OS.get_cmdline_user_args().has("--menu"):
 		menu.call_deferred("open")
 	if OS.get_cmdline_user_args().has("--trainer"):
@@ -42,6 +72,14 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
 			_screenshot_later(a.get_slice("=", 1))
+		elif a.begins_with("--shot-phase="):
+			# Test: --shot-phase=REPLAY:bild.png speichert ein Bild kurz nach Beginn dieser Phase.
+			_shot_phase = a.get_slice("=", 1)
+		elif a.begins_with("--quit-after="):
+			# Test: nach N Sekunden Spielzeit Statistik ausgeben und beenden.
+			get_tree().create_timer(float(a.get_slice("=", 1)), true, true).timeout.connect(func():
+				match_node._print_stats()
+				get_tree().quit())
 
 
 func _process(delta: float) -> void:
@@ -54,7 +92,13 @@ func _process(delta: float) -> void:
 	var want_look := Vector3(-cs * 1.5, 1.0, bz * 0.2)
 	var want_fov := 52.0
 	var subj = match_node.cam_subject if match_node else null
-	if subj != null:
+	if match_node and match_node.cam_mode == "replay":
+		# Fernsehkamera von der Seitenlinie, folgt dem Ball.
+		var b: Vector3 = match_node.ball.position
+		want_pos = Vector3(b.x * 0.6, 5.2, -12.2)
+		want_look = Vector3(b.x * 0.9, maxf(b.y * 0.6, 0.8), b.z * 0.3)
+		want_fov = 44.0
+	elif subj != null:
 		var s: float = subj.side
 		var p: Vector3 = subj.position
 		match match_node.cam_mode:
@@ -81,10 +125,76 @@ func _process(delta: float) -> void:
 		off = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * _shake * 0.25
 	camera.position = _cam_pos + off
 	camera.look_at(_cam_look + off * 0.5)
+	if _shot_phase != "" and match_node:
+		var want: int = match_node.Phase[_shot_phase.get_slice(":", 0)]
+		_shot_phase_t = _shot_phase_t + rd if match_node.phase == want else 0.0
+		if _shot_phase_t > 1.6:
+			var out := _shot_phase.get_slice(":", 1)
+			_shot_phase = ""
+			get_viewport().get_texture().get_image().save_png(out)
+			print("Screenshot gespeichert: ", out)
+			if OS.get_cmdline_user_args().has("--quit-after-shot"):
+				get_tree().quit()
+	if match_node:
+		sfx.sfx_volume = match_node.cfg.get_v("sfx")
+		sfx.crowd_volume = match_node.cfg.get_v("crowd") * (0.6 if match_node.attract else 1.0)
 
 
 func _on_big_hit(strength: float) -> void:
 	_shake = maxf(_shake, strength)
+
+
+func _on_play() -> void:
+	start_menu.visible = false
+	hud.set_attract(false)
+	sfx.stop_crowd()
+	match_node.start_game()
+
+
+func _on_to_title() -> void:
+	match_node.back_to_title()
+	hud.set_attract(true)
+	start_menu.open()
+
+
+func _on_menu_closed() -> void:
+	if start_menu.visible:
+		start_menu.focus()
+
+
+## Ballkontakte: Geraeusch, Lichtblitz bei harten Schlaegen, Staub am Boden.
+func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
+	sfx.play(kind, strength)
+	sfx.excitement = minf(1.0, match_node.rally_touches / 10.0)
+	match kind:
+		"spike":
+			fx.flash(pos, strength)
+			if strength > 0.75:
+				_shake = maxf(_shake, 0.25)
+		"serve":
+			if strength > 0.7:
+				fx.flash(pos, strength * 0.8)
+		"block":
+			fx.flash(pos, strength, Color(0.85, 0.92, 1.0))
+		"floor":
+			fx.dust(pos, strength)
+			if strength > 0.8:
+				_shake = maxf(_shake, 0.3)
+
+
+## Publikum: die Fans des Gewinners jubeln, bei Punkten gegen dich raunt die Halle.
+func _on_point(winner: int, reason: String, highlight: bool) -> void:
+	var fav: int = match_node.human_team
+	var big: bool = highlight or match_node.rally_touches >= 8
+	if fav < 0 or winner == fav:
+		sfx.crowd("cheer", 1.0 if big else 0.65)
+		crowd.cheer(winner, 1.0 if big else 0.6)
+	elif reason in ["Ass!", "Block-Punkt!", "Angriffspunkt!"] or big:
+		sfx.crowd("groan", 0.8)
+		crowd.cheer(winner, 0.5)
+	else:
+		sfx.crowd("applause", 0.4)
+		crowd.cheer(winner, 0.35)
 
 
 ## Testhilfe: --shot=bild.png@2,4.5 speichert Bilder nach 2 und 4,5 Sekunden.

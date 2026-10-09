@@ -216,3 +216,22 @@ func tick(delta: float) -> void:
 		_rig.rotation.z = side * deg_to_rad(65.0) * sin(k * PI)
 	else:
 		_rig.rotation.z = 0.0
+
+
+## Zustand fuer die Wiederholung aufzeichnen und wieder herstellen.
+func snapshot() -> Array:
+	return [position, jump_h, airborne, block_pose, hand_shift, hand_reach, lean, dive_timer, _rig.rotation.z]
+
+
+func restore(s: Array) -> void:
+	position = s[0]
+	jump_h = s[1]
+	airborne = s[2]
+	block_pose = s[3]
+	hand_shift = s[4]
+	hand_reach = s[5]
+	lean = s[6]
+	dive_timer = s[7]
+	_rig.position.y = jump_h
+	_rig.rotation.z = s[8]
+	_pose_arms()
