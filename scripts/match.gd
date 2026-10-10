@@ -2372,7 +2372,7 @@ func _update_players(delta: float) -> void:
 			srv.jump()
 	if opp != null and not opp.done:
 		var pl := opp.player
-		var p := Vector3(opp.point.x, 0.0, opp.point.z)
+		var p := _stand_pos(opp, Vector3(opp.point.x, 0.0, opp.point.z))
 		if opp.kind == "attack":
 			var t_jump := opp.t - JUMP_RISE
 			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.05
@@ -2404,14 +2404,54 @@ func _update_players(delta: float) -> void:
 		opp.player.anim_kind = opp.kind
 		opp.player.anim_tech = opp.tech
 		opp.player.anim_t = opp.t
+		opp.player.contact_pt = opp.point
+		opp.player.contact_aim = _contact_aim(opp)
+		opp.player.contact_on = true
 	if phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done):
 		var sv := server()
 		sv.anim_kind = "serve_hold" if phase == Phase.PRE_SERVE else "serve"
 		sv.anim_tech = "jump" if serve_kind == 1 else "stand"
 		sv.anim_t = serve_ideal if phase == Phase.TOSS else clock + 5.0
+		sv.contact_pt = ball.position   # der Ball der Aufschlaghand (Wurf)
+		sv.contact_aim = Vector3(-side_of(serving_team) * 4.0, 0.0, 0.0)
+		sv.contact_on = phase == Phase.TOSS
 	for t in 2:
 		for pl in players[t]:
 			pl.tick(delta)
+
+
+## Wohin der Spieler den Ball spielt: Annahme zum Zuspieler, Zuspiel zum Angreifer, Angriff
+## auf das Ziel im gegnerischen Feld. Der Koerper dreht sich beim Kontakt dorthin.
+func _contact_aim(o: Opp) -> Vector3:
+	var sd := side_of(o.team)
+	match o.kind:
+		"pass", "dig":
+			var st := player_by_role(o.team, "S")
+			if st != null and st != o.player:
+				return Vector3(st.position.x, 0.0, st.position.z)
+			return Vector3(sd * 1.5, 0.0, 0.5)
+		"set":
+			var h: VPlayer = _hitter[o.team]
+			if h != null and h != o.player:
+				return Vector3(h.position.x, 0.0, h.position.z)
+			return Vector3(sd * 0.5, 0.0, o.point.z)
+		"attack":
+			var info := attack_shot(o.team, o.point, o.rs, o.power)
+			return info.target
+	return Vector3(-sd * 4.0, 0.0, 0.0)
+
+
+## Wo der Spieler beim Kontakt steht: der Ball trifft vor dem Koerper auf (Baggern ca. 45 cm,
+## Pritschen 15 cm vor dem Rumpf in Spielrichtung); beim Angriff steht der Spieler hinter dem Ball.
+func _stand_pos(o: Opp, p: Vector3) -> Vector3:
+	if o.kind == "attack":
+		return p + Vector3(side_of(o.team) * 0.3, 0.0, 0.0)
+	var aim := _contact_aim(o)
+	var dv := Vector3(aim.x - p.x, 0.0, aim.z - p.z)
+	if dv.length() < 0.1:
+		return p
+	var off := 0.15 if (o.kind == "set" or o.tech == "over") else 0.38
+	return p - dv.normalized() * off
 
 
 ## Zeitlupe und Kamera: In jeder Spielphase gilt das eingestellte Tempo (Menue), die

@@ -43,6 +43,12 @@ var anim_kind := ""  # pass, dig, set, attack, free, serve, serve_hold
 var anim_tech := "bump"
 var anim_t := -10.0  # Zeitpunkt der Ballberuehrung
 var celebrate_until := -10.0
+## Ballkontakt (vom Match gesetzt): Ballmitte beim Kontakt und der Punkt, wohin gespielt wird.
+## Beim Kontakt zielen Haende und Unterarme genau auf contact_pt (siehe _contact_ik).
+var contact_pt := Vector3.ZERO
+var contact_aim := Vector3.ZERO
+var contact_on := false
+var net_x := 0.0  # Lage des Netzes (x), nur zum Testen anders
 
 var fig: HumanFigure
 var _ring: MeshInstance3D
@@ -69,7 +75,7 @@ func setup(p_team: int, p_role: String, _tag_letter: String, p_number: int, colo
 	fig = HumanFigure.new()
 	add_child(fig)
 	var h := hash(team * 1000 + number)
-	fig.build(_colors(color), true, (h / 13) % HumanFigure.HAIR_STYLES, false, 0.96 + 0.09 * float((h / 31) % 10) / 9.0)
+	fig.build(_colors(color), true, (h / 13) % HumanFigure.HAIR_STYLES, false, 1.04 + 0.07 * float((h / 31) % 10) / 9.0)
 	fig.set_number(number, _number_color(color), (Teams.playing()[team] as TeamStyle).number)
 	fig.pose(_p_idle())
 
@@ -133,6 +139,7 @@ func reset_state() -> void:
 	lean = 0.0
 	anim_kind = ""
 	anim_t = -10.0
+	contact_on = false
 	_last_pos = position
 
 
@@ -222,8 +229,18 @@ func _animate(delta: float) -> void:
 	if not alert and celebrate_until < now:
 		face = Vector3(-side, 0.0, 0.0)
 	face.y = 0.0
+	# Beim Zuspiel dreht sich der Koerper zum Ziel (Schultern quer zur Spielrichtung).
+	var turn := 7.0
+	var crel := now - anim_t
+	if contact_on and anim_kind in ["pass", "dig", "set", "free"] and crel > -0.45 and crel < 0.25 and dive_timer <= 0.0:
+		var av := contact_aim - position
+		av.y = 0.0
+		if av.length() > 0.3:
+			var cur := face.normalized() if face.length() > 0.01 else av.normalized()
+			face = cur.lerp(av.normalized(), smoothstep(-0.45, -0.1, crel))
+			turn = 14.0
 	var want := atan2(-face.x, -face.z)
-	_yaw = lerp_angle(_yaw, want, clampf(delta * 7.0, 0.0, 1.0))
+	_yaw = lerp_angle(_yaw, want, clampf(delta * turn, 0.0, 1.0))
 	fig.rotation.y = _yaw
 
 	_stiff = 20.0
@@ -245,6 +262,60 @@ func _animate(delta: float) -> void:
 		y = maxf(jump_h, -fig.lowest_point(false))
 	_root_y = maxf(lerpf(_root_y, y, clampf(delta * 25.0, 0.0, 1.0)), -low)
 	fig.root_node.position.y = _root_y
+	_contact_ik()
+
+
+## Ballkontakt wie im echten Spiel: im Kontaktmoment sitzen Haende oder Unterarme genau am Ball.
+## Pro Technik gibt es ein Ziel fuer jedes Handgelenk (Weltkoordinaten) und eine Zeitkurve
+## (Hinfuehren, Kontakt, Loslassen). Neue Techniken (z. B. weitere Zuspielarten) bekommen hier
+## einen eigenen Zweig.
+func _contact_ik() -> void:
+	var rel := now - anim_t
+	var f := Vector3(-sin(_yaw), 0.0, -cos(_yaw))  # blickt nach vorn
+	var r := Vector3(cos(_yaw), 0.0, -sin(_yaw))   # rechte Seite
+	var up := Vector3.UP
+	var tg := {}
+	var w := 0.0
+	var b := contact_pt
+	if block_pose and airborne:
+		# Haende ueber das Netz gedrueckt, Handflaechen zeigen zum Gegner.
+		var net_side := -side
+		var base := Vector3(net_x + net_side * (0.06 + hand_reach * 0.9), block_top() - 0.1, hands_z())
+		tg = {"l": base - r * 0.11, "r": base + r * 0.11}
+		w = smoothstep(0.05, 0.3, jump_h)
+	elif not contact_on and anim_kind != "serve":
+		return
+	elif anim_kind in ["pass", "dig", "free"] and anim_tech != "over":
+		# Baggern: gestreckte Arme, Plattform aus beiden Unterarmen unter dem Ball.
+		w = smoothstep(-0.32, -0.06, rel) * (1.0 - smoothstep(0.1, 0.3, rel))
+		var plat := b - up * 0.17 + f * 0.07
+		tg = {"l": plat - r * 0.05, "r": plat + r * 0.05}
+	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
+		# Pritschen: beide Haende ueber der Stirn, Finger umfassen den Ball von hinten und den Seiten.
+		w = smoothstep(-0.3, -0.05, rel) * (1.0 - smoothstep(0.1, 0.32, rel))
+		var ad := contact_aim - position
+		ad.y = 0.0
+		var follow := (ad.normalized() + up) * 0.5 * (0.2 * smoothstep(0.0, 0.2, rel)) if ad.length() > 0.1 else Vector3.ZERO
+		var hb := b + follow
+		tg = {"l": hb - r * 0.085 - up * 0.08 - f * 0.05, "r": hb + r * 0.085 - up * 0.08 - f * 0.05}
+	elif anim_kind == "attack" and airborne:
+		# Angriff: Schlaghand (rechts) trifft die Rueckseite des Balls mit gestrecktem Arm.
+		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.03, 0.16, rel))
+		tg = {"r": b - up * 0.07 - f * 0.17}
+	elif anim_kind == "serve":
+		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.03, 0.16, rel))
+		if airborne:
+			tg = {"r": b - up * 0.07 - f * 0.17}
+		else:
+			tg = {"r": b - up * 0.02 - f * 0.14}
+	if w <= 0.001 or tg.is_empty():
+		return
+	# Im Kontaktmoment streckt sich der Schlagende (Schultergürtel, Fussspitzen): ca. 14 cm mehr Reichweite.
+	if airborne and (anim_kind == "attack" or anim_kind == "serve"):
+		fig.root_node.position.y += 0.14 * w
+	for sd in tg:
+		fig.ik_arm(sd, tg[sd], w)
+	fig._sync()
 
 
 func _arm(p: Dictionary, sd: String, fwd: float, out: float, elbow: float, wrist := 0.0, twist := 0.0) -> void:
@@ -312,12 +383,12 @@ func _p_run(a: float) -> Dictionary:
 func _p_bump(rel := 0.0) -> Dictionary:
 	var dip := 1.0 - smoothstep(-0.3, 0.0, rel)
 	var drive := smoothstep(0.0, 0.25, rel)
-	var p := {"hips": Vector3(-0.3 + 0.12 * drive, 0, 0), "chest": Vector3(-0.42 + 0.2 * drive, 0, 0), "head": Vector3(0.5 - 0.2 * drive, 0, 0)}
+	var p := {"hips": Vector3(-0.38 + 0.14 * drive, 0, 0), "chest": Vector3(-0.55 + 0.25 * drive, 0, 0), "head": Vector3(0.6 - 0.25 * drive, 0, 0)}
 	var arm_fwd := lerpf(0.85, 1.2, 1.0 - dip) + 0.45 * drive
 	_arm(p, "l", arm_fwd, -0.3, 0.0, 0.0)
 	_arm(p, "r", arm_fwd, -0.3, 0.0, 0.0)
-	var th := lerpf(0.95, 0.8, drive) + 0.15 * dip
-	var kn := lerpf(1.45, 0.8, drive) + 0.15 * dip - 0.15
+	var th := lerpf(1.1, 0.8, drive) + 0.15 * dip
+	var kn := lerpf(1.7, 0.8, drive) + 0.15 * dip - 0.15
 	_leg(p, "l", th, kn, 0.2)
 	_leg(p, "r", th - 0.1, kn - 0.1, 0.2)
 	return p
@@ -325,17 +396,17 @@ func _p_bump(rel := 0.0) -> Dictionary:
 
 ## Pritschen: Haende ueber der Stirn, Ellbogen aussen, Beine und Arme strecken durch den Ball.
 func _p_set(rel := 0.0) -> Dictionary:
-	var load := 1.0 - smoothstep(-0.25, 0.0, rel)
-	var ext := smoothstep(0.0, 0.2, rel)
+	var load := 1.0 - smoothstep(-0.3, -0.1, rel)
+	var ext := smoothstep(-0.14, 0.08, rel)
 	var p := {"hips": Vector3(-0.1 * load, 0, 0), "chest": Vector3(-0.05 + 0.12 * ext, 0, 0), "head": Vector3(0.55 - 0.15 * ext, 0, 0)}
 	var up := lerpf(2.45, 2.85, ext)
 	var elbow := lerpf(1.55, 0.35, ext)
 	_arm(p, "l", up, 0.55 - 0.25 * ext, elbow, -0.45)
 	_arm(p, "r", up, 0.55 - 0.25 * ext, elbow, -0.45)
-	var th := lerpf(0.6, 0.15, ext)
-	var kn := lerpf(0.95, 0.2, ext)
-	_leg(p, "l", th, kn, 0.18)
-	_leg(p, "r", th - 0.1, kn, 0.18)
+	var th := lerpf(0.6, 0.05, ext)
+	var kn := lerpf(0.95, 0.1, ext)
+	_leg(p, "l", th, kn, 0.14, 0.5 * ext)
+	_leg(p, "r", th - 0.05, kn, 0.14, 0.5 * ext)
 	return p
 
 

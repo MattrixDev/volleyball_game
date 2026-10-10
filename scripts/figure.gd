@@ -287,6 +287,49 @@ func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 	_sync()
 
 
+## Arm so stellen, dass das Handgelenk an der Weltposition target sitzt (Ballkontakt).
+## Loest Schulter vor/seitlich und Ellbogen numerisch (gedaempfte Gauss-Newton-Schritte),
+## ausgehend von der aktuellen Haltung. w blendet zwischen Pose (0) und Ziel (1). Rueckgabe:
+## verbleibender Abstand in m (zum Pruefen, ob die Figur den Ball erreicht).
+func ik_arm(sd: String, target: Vector3, w: float, iters := 4) -> float:
+	var sh: Node3D = j["sh_" + sd]
+	var el: Node3D = j["el_" + sd]
+	var wr: Node3D = j["wr_" + sd]
+	var s := -1.0 if sd == "l" else 1.0
+	var y0 := sh.rotation.y
+	var v := Vector3(sh.rotation.x, sh.rotation.z * s, el.rotation.x)  # vor, seitlich, Ellbogen
+	var v_start := v
+	var pos := Callable(self, "_ik_wrist").bind(sh, el, wr, y0, s)
+	var err := 0.0
+	for it in iters:
+		var p0: Vector3 = pos.call(v)
+		var e := target - p0
+		err = e.length()
+		if err < 0.004:
+			break
+		var d := 0.02
+		var c0: Vector3 = ((pos.call(v + Vector3(d, 0, 0)) as Vector3) - p0) / d
+		var c1: Vector3 = ((pos.call(v + Vector3(0, d, 0)) as Vector3) - p0) / d
+		var c2: Vector3 = ((pos.call(v + Vector3(0, 0, d)) as Vector3) - p0) / d
+		var a := Basis(
+			Vector3(c0.dot(c0) + 0.02, c0.dot(c1), c0.dot(c2)),
+			Vector3(c1.dot(c0), c1.dot(c1) + 0.02, c1.dot(c2)),
+			Vector3(c2.dot(c0), c2.dot(c1), c2.dot(c2) + 0.02))
+		var step := a.inverse() * Vector3(c0.dot(e), c1.dot(e), c2.dot(e))
+		v += step.limit_length(0.6)
+		v = Vector3(clampf(v.x, -0.6, 3.1), clampf(v.y, -0.5, 2.0), clampf(v.z, 0.0, 2.6))
+	var fin: Vector3 = v_start.lerp(v, clampf(w, 0.0, 1.0))
+	sh.rotation = Vector3(fin.x, y0, fin.y * s)
+	el.rotation = Vector3(fin.z, 0.0, 0.0)
+	return ((pos.call(fin) as Vector3) - target).length()
+
+
+func _ik_wrist(v: Vector3, sh: Node3D, el: Node3D, wr: Node3D, y0: float, s: float) -> Vector3:
+	sh.rotation = Vector3(v.x, y0, v.y * s)
+	el.rotation = Vector3(v.z, 0.0, 0.0)
+	return wr.global_position
+
+
 ## Tiefster Punkt des Koerpers (Hoehe ueber dem Boden der Figur). Nur Fuesse oder alles
 ## (Knie, Haende, Kopf, Brust), etwa wenn der Spieler hechtet.
 func lowest_point(all: bool) -> float:

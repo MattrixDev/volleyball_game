@@ -47,6 +47,9 @@ func _init() -> void:
 				"spike":
 					pl.anim_kind = "attack"
 					pl.anim_t = 0.75
+					pl.contact_on = true
+					pl.contact_pt = Vector3(x0 - 0.3, 3.2, 0.0)
+					pl.contact_aim = Vector3(x0 - 6.0, 0.0, 0.0)
 					var air_t := t - 0.25
 					pl.airborne = air_t > 0.0 and air_t < 0.8
 					pl.jump_h = maxf(0.0, 3.96 * air_t - 4.905 * air_t * air_t) if pl.airborne else 0.0
@@ -54,7 +57,11 @@ func _init() -> void:
 					pl.anim_kind = "pass" if kind == "bump" else "set"
 					pl.anim_tech = "under" if kind == "bump" else "over"
 					pl.anim_t = 0.7
+					pl.contact_on = true
+					pl.contact_pt = Vector3(x0 - (0.38 if kind == "bump" else 0.15), 0.85 if kind == "bump" else 2.3, 0.0)
+					pl.contact_aim = Vector3(x0 - 5.0, 0.0, 0.0)
 				"block":
+					pl.net_x = x0 + 0.5
 					pl.block_pose = t > 0.2
 					var air_t := t - 0.3
 					pl.airborne = air_t > 0.0 and air_t < 0.6
@@ -75,6 +82,21 @@ func _init() -> void:
 		pl.position = Vector3(x0, 0, 0)
 		pl._last_pos = pl.position
 		figs.append(pl.fig)
+	if kind in ["spike", "bump", "set"]:
+		for i in n:
+			var bm := MeshInstance3D.new()
+			var sp := SphereMesh.new()
+			sp.radius = 0.105
+			sp.height = 0.21
+			bm.mesh = sp
+			var bmat := StandardMaterial3D.new()
+			bmat.albedo_color = Color(1.0, 0.9, 0.2)
+			bm.material_override = bmat
+			var x0b := -7.2 + i * 1.8
+			var by := 3.2 if kind == "spike" else (0.85 if kind == "bump" else 2.3)
+			var bx := x0b - (0.3 if kind == "spike" else (0.38 if kind == "bump" else 0.15))
+			bm.position = Vector3(bx, by, 0.0)
+			root3.add_child(bm)
 	var cam := Camera3D.new()
 	root3.add_child(cam)
 	var cp := Vector3(0.0, 1.3, 9.0)
