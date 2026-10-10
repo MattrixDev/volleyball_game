@@ -177,6 +177,154 @@ def facet_colors(ob, amount=0.07, seed=0):
             ca.data[li].color = (v, v, v, 1.0)
 
 
+# ------------------------------------------------------------------ Koerper aus Ringen (kantig)
+def _sstep(e0, e1, x):
+    t = min(1.0, max(0.0, (x - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
+
+
+def _ring(center, side, front, up_len, f, b, n, p=2.0, phase=0.0):
+    """Ein Ring aus n Punkten (Superellipse): side = Richtung zur Seite (Halbachse up_len),
+    front = nach vorn (+f) bzw. hinten (b). p > 2 macht die Form kantiger (flache Brust)."""
+    pts = []
+    for k in range(n):
+        t = 2 * math.pi * (k + phase) / n
+        c, s = math.cos(t), math.sin(t)
+        x = math.copysign(abs(c) ** (2.0 / p), c) * up_len
+        y = math.copysign(abs(s) ** (2.0 / p), s) * (f if s > 0 else b)
+        pts.append(center + side * x + front * y)
+    return pts
+
+
+def _loft(bm, rings, cap_start=True, cap_end=True):
+    """Ringe zu einer Roehre verbinden; Rueckgabe: Liste der Vertex-Listen je Ring."""
+    vs = [[bm.verts.new(p) for p in r] for r in rings]
+    n = len(rings[0])
+    for a, b in zip(vs, vs[1:]):
+        for k in range(n):
+            k2 = (k + 1) % n
+            bm.faces.new((a[k], a[k2], b[k2], b[k]))
+    if cap_start:
+        bm.faces.new(list(reversed(vs[0])))
+    if cap_end:
+        bm.faces.new(vs[-1])
+    return vs
+
+
+# Rumpf: (z, halbe Breite, vorn, hinten, y-Versatz, Kantigkeit)
+TORSO = [
+    (0.885, 0.105, 0.075, 0.085, 0.0, 2.0),
+    (0.93, 0.14, 0.088, 0.104, -0.004, 2.2),
+    (0.99, 0.152, 0.092, 0.112, -0.004, 2.3),   # Gesaess
+    (1.06, 0.146, 0.088, 0.1, 0.0, 2.3),
+    (1.12, 0.132, 0.088, 0.09, 0.004, 2.4),     # Taille
+    (1.2, 0.138, 0.096, 0.09, 0.006, 2.5),
+    (1.28, 0.152, 0.11, 0.096, 0.008, 2.6),     # unterer Brustkorb
+    (1.35, 0.166, 0.124, 0.102, 0.01, 2.7),     # Brustmuskel
+    (1.415, 0.176, 0.118, 0.104, 0.008, 2.7),
+    (1.465, 0.172, 0.096, 0.096, 0.0, 2.6),
+    (1.505, 0.158, 0.078, 0.086, -0.006, 2.4),  # Schulterlinie
+    (1.54, 0.13, 0.062, 0.074, -0.008, 2.2),    # kraeftiger Kapuzenmuskel
+    (1.57, 0.094, 0.064, 0.07, -0.006, 2.1),
+    (1.595, 0.086, 0.066, 0.068, -0.002, 2.2),   # Hals (kraeftig)
+    (1.62, 0.078, 0.064, 0.062, 0.004, 2.1),
+    (1.665, 0.07, 0.06, 0.058, 0.01, 2.0),
+]
+# Arm: (Abstand ab Schulter, oben/unten, vorn, hinten)
+ARM = [
+    (-0.06, 0.052, 0.058, 0.058),
+    (0.0, 0.058, 0.066, 0.066),
+    (0.05, 0.06, 0.066, 0.064),    # Deltamuskel
+    (0.11, 0.06, 0.064, 0.06),
+    (0.17, 0.056, 0.072, 0.056),   # Bizeps
+    (0.24, 0.05, 0.058, 0.052),
+    (0.3, 0.043, 0.045, 0.045),    # Ellbogen
+    (0.36, 0.05, 0.056, 0.05),     # Unterarmmuskel
+    (0.45, 0.041, 0.042, 0.039),
+    (0.54, 0.03, 0.026, 0.026),
+    (0.575, 0.029, 0.022, 0.022),  # Handgelenk
+]
+# Bein: (z, seitlich, vorn, hinten, x-Versatz)
+LEG = [
+    (1.0, 0.09, 0.085, 0.095, 0.0),
+    (0.9, 0.094, 0.09, 0.094, 0.004),
+    (0.8, 0.088, 0.094, 0.084, 0.004),  # Oberschenkel vorn kraeftig
+    (0.69, 0.078, 0.084, 0.072, 0.002),
+    (0.6, 0.064, 0.07, 0.06, 0.0),
+    (0.52, 0.054, 0.058, 0.05, 0.0),    # Knie
+    (0.46, 0.055, 0.05, 0.06, 0.0),
+    (0.38, 0.06, 0.046, 0.074, -0.002),  # Wade
+    (0.29, 0.05, 0.042, 0.058, -0.002),
+    (0.2, 0.038, 0.036, 0.04, 0.0),
+    (0.12, 0.034, 0.034, 0.036, 0.0),   # Knoechel
+]
+
+
+def build_body_loft():
+    """Koerper aus Ringen wie bei einem handmodellierten Low-Poly-Modell: Rumpf, Arme und
+    Beine als kantige Roehren mit Muskelformen. Gewichte fuer das Skelett werden direkt
+    aus der Lage am Koerper gesetzt (Rumpf, Arm entlang, Bein entlang)."""
+    bm = bmesh.new()
+    weights = {}  # BMVert -> {Knochen: Gewicht}
+    X, Y, Z = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
+    rings = [_ring(Vector((0, yo, z)), X, Y, hx, f, b, 16, p) for z, hx, f, b, yo, p in TORSO]
+    for r, (z, *_rest) in zip(_loft(bm, rings), TORSO):
+        for v in r:
+            sh = _sstep(1.0, 1.17, z)
+            hd = _sstep(1.6, 1.66, z)
+            w = {"hips": 1 - sh, "chest": sh * (1 - hd), "head": hd}
+            # Schulterecke geht ein wenig mit dem Oberarm mit
+            if z > 1.38 and abs(v.co.x) > 0.11:
+                k = 0.45 * _sstep(0.11, 0.17, abs(v.co.x)) * _sstep(1.38, 1.47, z)
+                w = {n: g * (1 - k) for n, g in w.items()}
+                w["sh_" + ("r" if v.co.x > 0 else "l")] = k
+            weights[v] = w
+    for s, sd in ((-1, "l"), (1, "r")):
+        u = Vector((s * math.cos(ARM_A), 0, -math.sin(ARM_A)))
+        upv = Vector((s * math.sin(ARM_A), 0, math.cos(ARM_A)))
+        # Achse an der Schulter etwas tiefer: der Deltamuskel liegt unter der Schulterlinie
+        rings = [_ring(Vector(arm_pt(s, d, -0.014 * max(0.0, 1.0 - d / 0.15))), upv, Y, a, f, b, 10, 2.2, 0.5)
+                 for d, a, f, b in ARM]
+        for r, (d, *_rest) in zip(_loft(bm, rings), ARM):
+            for v in r:
+                c = _sstep(-0.05, 0.04, d)
+                e = _sstep(0.27, 0.33, d)
+                wr = _sstep(0.55, 0.585, d)
+                weights[v] = {"chest": 1 - c, "sh_" + sd: c * (1 - e), "el_" + sd: e * (1 - wr), "wr_" + sd: wr}
+        rings = [_ring(Vector((s * (HIP_X + xo), 0, z)), X, Y, sx, f, b, 10, 2.2, 0.5) for z, sx, f, b, xo in LEG]
+        for r, (z, *_rest) in zip(_loft(bm, rings), LEG):
+            for v in r:
+                h = _sstep(1.03, 0.88, z)
+                k = _sstep(0.56, 0.47, z)
+                a = _sstep(0.15, 0.1, z)
+                weights[v] = {"hips": 1 - h, "hip_" + sd: h * (1 - k), "kn_" + sd: k * (1 - a), "an_" + sd: a}
+    # Facetten: Quads in Dreiecke, Punkte leicht verrueckt (unregelmaessige Flaechen)
+    rnd = random.Random(21)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])   # gespiegelte Arme zeigen sonst nach innen
+    bm.normal_update()
+    for v in bm.verts:
+        v.co += v.normal * rnd.uniform(-0.0025, 0.0025)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method="ALTERNATE")
+    ob = new_object("body", bm)
+    # Vertex-Indizes bleiben beim to_mesh in Reihenfolge der Erzeugung
+    add_mat(ob, "skin")
+    groups = {}
+    for i, (v, w) in enumerate(weights.items()):
+        for n, g in w.items():
+            if g > 0.001:
+                if n not in groups:
+                    groups[n] = ob.vertex_groups.new(name=n)
+                groups[n].add([i], g, "REPLACE")
+    return ob
+
+
+def build_skin(body):
+    """Sichtbare Haut = Kopie des Koerpers (gleiche Gewichte)."""
+    b = bpy.data.objects.new("skin_body", body.data.copy())
+    bpy.context.collection.objects.link(b)
+    return b
+
+
 # ------------------------------------------------------------------ Koerper (Skin-Modifier)
 def build_body_smooth():
     """Rumpf, Arme, Beine als ein Stueck: ein Gerippe aus Punkten mit Radien, aus dem der
@@ -286,7 +434,7 @@ def paint_faces(ob, mat, test):
 def v_neck_cut(c):
     """True, wenn die Stelle im Halsausschnitt liegt: rundes Loch um den Hals, vorn ein V."""
     r = math.hypot(c.x, c.y * 1.15)
-    if c.z > 1.51 and r < 0.078:
+    if c.z > 1.558 or (c.z > 1.51 and r < 0.1):
         return True
     if c.y > 0.02 and c.z > V_TIP:
         return abs(c.x) < V_W * (c.z - V_TIP) / (V_TOP - V_TIP)
@@ -307,7 +455,30 @@ def neck_cut(bm):
         bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector((0, 0, V_TIP)), plane_no=n)
     geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
     bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector((0, 0, 1.51)), plane_no=Vector((0, 0, 1)))
+    geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
+    bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector((0, 0, 1.558)), plane_no=Vector((0, 0, 1)))
     bm.faces.ensure_lookup_table()
+
+
+def zcut(bm, *zs):
+    """Waagerechte Schnittkanten (saubere Saeume statt Dreieckszacken)."""
+    for z in zs:
+        geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
+        bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector((0, 0, z)), plane_no=Vector((0, 0, 1)))
+
+
+def arm_cut(bm, d):
+    """Schnittkante quer zum Arm, d Meter ab der Schulter (Aermelsaum)."""
+    for s in (-1, 1):
+        geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
+        u = Vector((s * math.cos(ARM_A), 0, -math.sin(ARM_A)))
+        bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector(arm_pt(s, d)), plane_no=u)
+
+
+def jersey_cut(bm):
+    neck_cut(bm)
+    zcut(bm, 0.97)
+    arm_cut(bm, 0.165)
 
 
 def collar_strip(j, width=0.022, lift=0.004):
@@ -366,13 +537,14 @@ def build_jersey(body):
         for v in bm.verts:
             if v.co.z < 1.02 and abs(v.co.x) < 0.3:
                 v.co.z -= 0.035                      # faellt ueber den Hosenbund
-    j = shell(body, "jersey", "jersey", keep, push, hem, neck_cut)
+    j = shell(body, "jersey", "jersey", keep, push, hem, jersey_cut)
     j = facet(j, 1500)
     collar = thicken(collar_strip(j), 0.005)
     pi = add_mat(j, "panel")
     for p in j.data.polygons:
         c, n = p.center, p.normal
-        if abs(c.x) < SH_X + 0.01 and c.z < 1.43 and abs(n.x) > 0.8 and arm_coord(c)[1] > 0.11:
+        ang = math.degrees(math.atan2(c.y, abs(c.x)))
+        if c.z < 1.42 and -28.0 < ang < 18.0 and arm_coord(c)[1] > 0.11:
             p.material_index = pi
     j = thicken(j, 0.007)
     return j, collar
@@ -383,8 +555,8 @@ def build_shorts(body):
         return 0.715 < c.z < 1.07 and abs(c.x) < 0.3
 
     def push(co):
-        return 0.018 + max(0.0, 0.93 - co.z) * 0.06  # Beine weiten sich leicht nach unten
-    s = shell(body, "shorts", "shorts", keep, push)
+        return 0.022 + max(0.0, 0.95 - co.z) * 0.12  # weite, gerade Hosenbeine wie in der Vorlage
+    s = shell(body, "shorts", "shorts", keep, push, cut=lambda bm: zcut(bm, 0.715, 1.07))
     s = facet(s, 700)
     return thicken(s, 0.007)
 
@@ -404,7 +576,7 @@ def build_trousers(body):
 def build_socks(body):
     def keep(c, n):
         return 0.105 < c.z < 0.33
-    s = shell(body, "socks", "socks", keep, 0.005)
+    s = shell(body, "socks", "socks", keep, 0.005, cut=lambda bm: zcut(bm, 0.105, 0.33))
     s = facet(s, 300)
     return thicken(s, 0.005)
 
@@ -505,166 +677,268 @@ def hand(s):
 
 
 # ------------------------------------------------------------------ Kopf (ohne Augen und Mund)
+# Kopf: (z relativ zur Kopfmitte, halbe Breite, vorn, hinten, y-Versatz, Kantigkeit). Wenige,
+# grosse Flaechen wie in der Vorlage: flache Stirn, kantiger breiter Kiefer, eckiges Kinn.
+HEAD_RINGS = [
+    (-0.126, 0.038, 0.02, 0.03, 0.07, 3.2),    # Kinn unten (flach, breit)
+    (-0.11, 0.054, 0.03, 0.06, 0.06, 3.6),     # Kinn vorn
+    (-0.085, 0.066, 0.04, 0.08, 0.045, 3.6),
+    (-0.058, 0.07, 0.05, 0.095, 0.035, 3.5),   # Kieferwinkel
+    (-0.024, 0.074, 0.062, 0.1, 0.025, 3.0),   # Wange
+    (0.01, 0.078, 0.07, 0.105, 0.02, 2.8),     # Wangenknochen, Augen
+    (0.04, 0.079, 0.072, 0.107, 0.018, 2.6),   # Brauen
+    (0.075, 0.077, 0.066, 0.105, 0.012, 2.4),  # Stirn
+    (0.105, 0.068, 0.052, 0.095, 0.006, 2.2),
+    (0.128, 0.048, 0.035, 0.07, 0.0, 2.0),
+    (0.14, 0.02, 0.015, 0.03, -0.004, 2.0),
+]
+
+
+def _wedge(bm, pts, faces):
+    vs = [bm.verts.new(Vector(p)) for p in pts]
+    for f in faces:
+        bm.faces.new([vs[i] for i in f])
+
+
 def head():
-    """Kantiger Kopf wie in der Vorlage: kein Mund, keine Augen, nur Flaechen fuer Stirn,
-    Brauenbogen, Augenhoehlen, Wangenknochen, gerade Nase, kraeftigen Kiefer und Kinn."""
+    """Kantiger Kopf wie in der Vorlage: kein Mund, keine Augen, nur grosse Flaechen fuer
+    Stirn, Brauenbogen, Augenhoehlen, Wangenknochen, Nase, breiten Kiefer und eckiges Kinn."""
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=40, v_segments=28, radius=1.0)
-    for v in bm.verts:
-        x, y, z = v.co  # Einheitskugel, y = vorn
-        w = 0.089
-        if z < -0.25:                        # Kiefer bis zum Kieferwinkel breit, dann zum Kinn
-            t = (-z - 0.25) / 0.75
-            w *= 1.0 - 0.03 * t - 0.3 * max(0.0, t - 0.6) / 0.4
-        d = 0.104 if y < 0 else 0.098
-        if y < 0 and z > -0.3:
-            d *= 1.05                        # Hinterkopf
-        h = 0.114 if z > 0 else 0.108
-        if z < -0.82:
-            z = -0.82 - (-z - 0.82) * 0.4    # Kinn unten flach
-        nx, ny, nz = x * w, y * d, z * h
-        if y > 0.5:                          # Gesicht vorn flacher
-            ny -= (y - 0.5) * 0.03
-        if abs(x) < 0.3 and -0.45 < z < 0.2 and y > 0.7:   # Nase
-            k = (1 - abs(x) / 0.3) ** 1.5
-            prof = max(0.0, 1.0 - abs(z + 0.24) / 0.26)
-            ny += 0.024 * k * (0.35 + 0.65 * prof)
-        if abs(x) < 0.75 and 0.1 < z < 0.32 and y > 0.6:   # Brauenbogen
-            ny += 0.006 * (1 - abs(z - 0.21) / 0.11)
-        if 0.22 < abs(x) < 0.62 and -0.04 < z < 0.12 and y > 0.65:  # Augenhoehlen
-            ny -= 0.007
-        if 0.45 < abs(x) < 0.85 and -0.28 < z < -0.02 and y > 0.3:  # Wangenknochen
-            nx += math.copysign(0.004, x)
-        if z < -0.62 and abs(x) > 0.45:      # kantiger Kieferwinkel
-            nx += math.copysign(0.004, x)
-        if z < -0.8 and y > 0.35:            # Kinn nach vorn
-            ny += 0.008
-        v.co = Vector((nx, ny + 0.002, nz + HEAD_C))
-    for s in (-1, 1):  # Ohren: flache Halbschalen
-        r = bmesh.ops.create_uvsphere(bm, u_segments=8, v_segments=6, radius=1.0)
-        for v in r["verts"]:
-            x, y, z = v.co
-            v.co = Vector((s * 0.08 + x * 0.013, -0.008 + y * 0.026, HEAD_C - 0.008 + z * 0.04))
+    X, Y = Vector((1, 0, 0)), Vector((0, 1, 0))
+    n = 12
+    rings = [_ring(Vector((0, yo, HEAD_C + z)), X, Y, hx, f, b, n, p, 0.0) for z, hx, f, b, yo, p in HEAD_RINGS]
+    vs = _loft(bm, rings)
+    front = n // 4
+    for ri, (z, *_r) in enumerate(HEAD_RINGS):
+        r = vs[ri]
+        if abs(z - 0.01) < 0.001:       # Augenhoehlen
+            for dk in (-1, 1):
+                r[front + dk].co.y -= 0.013
+                r[front + dk].co.z += 0.004
+        if abs(z + 0.024) < 0.001:      # Wangenknochen treten vor
+            for dk in (-2, 2):
+                r[front + dk].co.x += math.copysign(0.004, r[front + dk].co.x)
+                r[front + dk].co.y += 0.006
+        if abs(z + 0.058) < 0.001:      # Kieferkante
+            for dk in (-2, 2):
+                r[front + dk].co.x += math.copysign(0.006, r[front + dk].co.x)
+    hc = HEAD_C
+    # Nase: Keil von der Nasenwurzel zur Spitze
+    _wedge(bm, [(-0.008, 0.086, hc + 0.03), (0.008, 0.086, hc + 0.03), (0, 0.108, hc - 0.022),
+                (-0.014, 0.088, hc - 0.028), (0.014, 0.088, hc - 0.028), (0, 0.096, hc - 0.032)],
+           [(0, 3, 2), (0, 2, 1), (1, 2, 4), (3, 5, 2), (2, 5, 4)])
+    # Brauenbogen: Leiste ueber den Augen, unten schraeg (wirft Schatten in die Augenhoehlen)
+    bx = [-0.068, -0.034, 0.0, 0.034, 0.068]
+    top, edge, under = [], [], []
+    for x in bx:
+        yf = 0.092 - 3.2 * x * x
+        top.append(bm.verts.new((x, yf - 0.006, hc + 0.064)))
+        edge.append(bm.verts.new((x, yf + 0.004, hc + 0.04 + abs(x) * 0.12)))   # Brauen fallen zur Mitte ab
+        under.append(bm.verts.new((x, yf - 0.012, hc + 0.026 + abs(x) * 0.1)))
+    for i in range(len(bx) - 1):
+        bm.faces.new((top[i], top[i + 1], edge[i + 1], edge[i]))
+        bm.faces.new((edge[i], edge[i + 1], under[i + 1], under[i]))
+    for s in (-1, 1):  # Ohren: flache Keile an den Seiten
+        _wedge(bm, [(s * 0.074, -0.0, hc + 0.035), (s * 0.088, -0.016, hc + 0.03), (s * 0.086, -0.022, hc - 0.03),
+                    (s * 0.074, -0.004, hc - 0.035), (s * 0.072, -0.03, hc + 0.0)],
+               [(0, 1, 2, 3) if s > 0 else (3, 2, 1, 0), (1, 4, 2) if s > 0 else (2, 4, 1)])
+    for v in bm.verts:   # etwas breiter als hoch, wie in der Vorlage
+        v.co.x *= 1.08
+        v.co.y *= 1.03
+    bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method="ALTERNATE")
+    bm.normal_update()
     ob = new_object("head", bm)
     add_mat(ob, "skin")
-    return facet(ob, 520)
+    return ob
 
 
-# ------------------------------------------------------------------ Frisuren (Metaballs)
-def _skull_point(u, v, lift=0.0):
-    """Punkt auf der Kopfoberflaeche: u = Winkel um die Hochachse (0 = vorn), v = Hoehe 0..1."""
+# ------------------------------------------------------------------ Frisuren (kantige Straehnen)
+def _scalp(u, v, lift=0.0):
+    """Punkt auf dem Schaedel: u = Winkel um die Hochachse (0 = vorn), v = Hoehe 0..1."""
     el = v * math.pi / 2.0
-    x = math.sin(u) * math.cos(el) * 0.091
-    y = math.cos(u) * math.cos(el) * 0.104
-    z = math.sin(el) * 0.124
-    n = Vector((x / 0.091 ** 2, y / 0.104 ** 2, z / 0.124 ** 2)).normalized()
+    x = math.sin(u) * math.cos(el) * 0.088
+    y = math.cos(u) * math.cos(el) * 0.101 + 0.004
+    z = math.sin(el) * 0.135 + 0.008
+    n = Vector((x / 0.088 ** 2, (y - 0.004) / 0.101 ** 2, (z - 0.008) / 0.135 ** 2)).normalized()
     return Vector((x, y, z + HEAD_C)) + n * lift, n
 
 
-def _in_hairline(u, v):
-    """Haaransatz: vorn hoch (Stirn frei), an den Seiten ueber den Ohren, hinten tief."""
-    fu = math.cos(u)  # 1 vorn, -1 hinten
+def _tuft(bm, root, d, width, length, rnd, sides=4, bend=None, normal=None, flat=1.0):
+    """Eine Straehne als spitze, leicht gebogene Pyramide. Mit normal und flat < 1 wird sie
+    flach wie ein breites Blatt (liegt am Kopf an)."""
+    d = d.normalized()
+    if normal is not None:
+        b = (normal - d * normal.dot(d)).normalized()
+        a = d.cross(b).normalized()
+        rot = 0.0
+    else:
+        a = d.orthogonal().normalized()
+        b = d.cross(a).normalized()
+        rot = rnd.uniform(0, math.pi)
+    base = []
+    for k in range(sides):
+        t = rot + 2 * math.pi * k / sides
+        base.append(bm.verts.new(root + (a * math.cos(t) + b * math.sin(t) * flat) * width * rnd.uniform(0.85, 1.15)))
+    off = bend * length if bend is not None else Vector()
+    mid_c = root + d * length * 0.5 + off * 0.25
+    mid = [bm.verts.new(mid_c + (bv.co - root) * 0.75) for bv in base]
+    tip = bm.verts.new(root + d * length + off * 0.6)
+    for k in range(sides):
+        k2 = (k + 1) % sides
+        bm.faces.new((base[k], base[k2], mid[k2], mid[k]))
+        bm.faces.new((mid[k], mid[k2], tip))
+    bm.faces.new(list(reversed(base)))
+
+
+def _in_hair(u, v):
+    fu = math.cos(u)
     side = abs(math.sin(u))
-    limit = 0.42 * max(0.0, fu) ** 1.5 + 0.2 * side - 0.3 * max(0.0, -fu)
-    return v > limit
+    lim = 0.42 * max(0.0, fu) ** 1.5 - 0.05 * side - 0.3 * max(0.0, -fu)
+    if side > 0.8 and fu > -0.3:      # Koteletten vor den Ohren
+        lim = min(lim, -0.12)
+    return v > lim
 
 
-def hair_mesh(name, elements, resolution=0.012, target=700):
-    mb = bpy.data.metaballs.new(name)
-    mb.resolution = resolution
-    mb.render_resolution = resolution
-    mb.threshold = 0.6
-    ob = bpy.data.objects.new(name + "_mb", mb)
-    bpy.context.collection.objects.link(ob)
-    for (co, radius, size, rot) in elements:
-        el = mb.elements.new(type="ELLIPSOID")
-        el.co = co
-        el.radius = radius
-        el.size_x, el.size_y, el.size_z = size
-        el.rotation = rot
-        el.stiffness = 1.6
-    bpy.context.view_layer.update()
-    dg = bpy.context.evaluated_depsgraph_get()
-    me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg), depsgraph=dg)
-    bpy.data.objects.remove(ob)
-    hob = bpy.data.objects.new(name, me)
-    bpy.context.collection.objects.link(hob)
-    hob.data.materials.clear()
-    add_mat(hob, "hair")
-    return facet(hob, target)
+def _hair_cap(name, lift, vmin_back=-0.25):
+    """Kappe: Schaedelteil oberhalb des Haaransatzes, etwas nach aussen versetzt."""
+    bm = bmesh.new()
+    nu, nv = 22, 10
+    grid = {}
+    for j in range(nv + 1):
+        v = vmin_back + (1.0 - vmin_back) * j / nv
+        for i in range(nu):
+            u = -math.pi + 2 * math.pi * i / nu
+            co, _n = _scalp(u, min(v, 0.999), lift)
+            grid[i, j] = bm.verts.new(co)
+    top = bm.verts.new(_scalp(0, 1.0, lift)[0])
+    for j in range(nv):
+        for i in range(nu):
+            i2 = (i + 1) % nu
+            u = -math.pi + 2 * math.pi * (i + 0.5) / nu
+            v = vmin_back + (1.0 - vmin_back) * (j + 0.5) / nv
+            if _in_hair(u, v):
+                bm.faces.new((grid[i, j], grid[i2, j], grid[i2, j + 1], grid[i, j + 1]))
+    for i in range(nu):
+        bm.faces.new((grid[i, nv], grid[(i + 1) % nu, nv], top))
+    loose = [v for v in bm.verts if not v.link_faces]
+    bmesh.ops.delete(bm, geom=loose, context="VERTS")
+    # Rand an die Kopfhaut ziehen, damit keine Kante absteht
+    for v in bm.verts:
+        if v.is_boundary:
+            v.co -= (v.co - Vector((0, 0, HEAD_C))).normalized() * lift * 0.9
+    return bm
 
 
-def _tuft_rot(n, back_tilt, side_tilt, twist):
-    """Drehung eines Buendels: entlang der Kopfnormalen, nach hinten/seitlich geneigt."""
-    up = Vector((0, 0, 1))
-    q = up.rotation_difference(n)
-    m = q.to_matrix() @ Matrix.Rotation(back_tilt, 3, "X") @ Matrix.Rotation(side_tilt, 3, "Y") @ Matrix.Rotation(twist, 3, "Z")
-    return m.to_quaternion()
+def _finish_hair(name, bm, seed):
+    rnd = random.Random(seed)
+    for v in bm.verts:
+        v.co += Vector((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1))) * 0.001
+    bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method="ALTERNATE")
+    ob = new_object(name, bm)
+    add_mat(ob, "hair")
+    return ob
 
 
-def _flow_rot(n, d):
-    """Ellipsoid-Drehung: lange Achse (z) entlang der Kammrichtung d, flach zur Kopfhaut."""
-    d = (d - n * d.dot(n)).normalized()
-    side = n.cross(d).normalized()
-    m = Matrix((side, n, d)).transposed()   # Spalten: x = seitlich, y = Normale, z = Richtung
-    return m.to_quaternion()
+def _side_back_tufts(bm, rnd, count, length, vmax=0.5):
+    """Seiten und Hinterkopf: flache Straehnen, die nach hinten unten am Kopf anliegen."""
+    for i in range(count):
+        u = rnd.uniform(-math.pi, math.pi)
+        v = rnd.uniform(-0.2, vmax)
+        if not _in_hair(u, v) or (math.cos(u) > 0.5 and v < 0.35):
+            continue
+        root, n = _scalp(u, v, 0.008)
+        d = n * 0.15 + Vector((0, -0.75, -0.5)) + Vector((math.sin(u) * 0.1, 0, 0))
+        _tuft(bm, root, d, rnd.uniform(0.035, 0.045), length * rnd.uniform(0.8, 1.2), rnd, normal=n, flat=0.35)
 
 
-def _hair_layer(rnd, lift_fn, flow_fn, radius, size, vmin=-0.2, count=26, rings=9, extra_keep=None):
-    els = []
-    for ri in range(rings):
-        v = vmin + (1.0 - vmin) * (ri + 0.5) / rings
-        n_ring = max(3, int(count * math.cos(max(0.0, v) * math.pi / 2.0) + 2))
-        for k in range(n_ring):
-            u = -math.pi + (k + rnd.uniform(0.2, 0.8)) / n_ring * 2 * math.pi
-            ok = _in_hairline(u, v) or (extra_keep is not None and extra_keep(u, v))
-            if not ok:
-                continue
-            co, n = _skull_point(u, v, lift_fn(u, v))
-            els.append((co, radius * rnd.uniform(0.9, 1.1), size, _flow_rot(n, flow_fn(u, v, n))))
-    return els
+def _hair_shell(nu, nv, vmin, keep, lift_fn, spike_fn, edge_fn=None):
+    """Frisur als ein geschlossenes, kantiges Volumen ueber dem Schaedel: Hoehe je Punkt aus
+    lift_fn(u, v), einzelne Punkte werden mit spike_fn zu Spitzen herausgezogen. Der Rand
+    liegt auf der Kopfhaut auf (keine Luecke). Ergibt grosse, klare Flaechen wie in der Vorlage."""
+    bm = bmesh.new()
+    grid, nrm = {}, {}
+    for j in range(nv + 1):
+        v = vmin + (1.0 - vmin) * j / nv
+        for i in range(nu):
+            u = -math.pi + 2 * math.pi * (i + 0.5 * (j % 2)) / nu
+            co, n = _scalp(u, min(v, 0.995), 0.0)
+            grid[i, j] = bm.verts.new(co)
+            nrm[i, j] = (u, v, n)
+    top = bm.verts.new(_scalp(0, 1.0, 0.0)[0])
+    cells = set()
+    for j in range(nv):
+        for i in range(nu):
+            u = -math.pi + 2 * math.pi * (i + 0.5) / nu
+            v = vmin + (1.0 - vmin) * (j + 0.5) / nv
+            if keep(u, v):
+                cells.add((i, j))
+                bm.faces.new((grid[i, j], grid[(i + 1) % nu, j], grid[(i + 1) % nu, j + 1], grid[i, j + 1]))
+    for i in range(nu):
+        bm.faces.new((grid[i, nv], grid[(i + 1) % nu, nv], top))
+    loose = [v for v in bm.verts if not v.link_faces]
+    bmesh.ops.delete(bm, geom=loose, context="VERTS")
+    # Hoehe und Spitzen; Randpunkte bleiben auf der Haut
+    for (i, j), vert in grid.items():
+        if not vert.is_valid:
+            continue
+        u, v, n = nrm[i, j]
+        if vert.is_boundary:
+            vert.co += n * 0.003
+            if edge_fn:
+                vert.co += edge_fn(u, v, n, i, j)
+            continue
+        vert.co += n * lift_fn(u, v) + spike_fn(u, v, n, i, j)
+    top.co += Vector((0, 0, lift_fn(0.0, 1.0))) + spike_fn(0.0, 1.0, Vector((0, 0, 1)), 0, nv + 1)
+    # Unterseite schliessen: Rand zum Kopf hin ist offen, das Volumen sitzt auf dem Kopf
+    return bm
 
 
 def hair_variants():
-    rnd = random.Random(5)
     out = []
-    back_up = lambda u, v, n: Vector((0.15, -1.0, 0.55))
-    # 0: wellig, oben voll und nach hinten gekaemmt, vorn leicht aufgestellt (wie die Vorlage)
-    els = _hair_layer(rnd, lambda u, v: 0.006 + 0.034 * max(0.0, v) ** 1.3 * (0.55 + 0.45 * max(0.0, math.cos(u))),
-                      back_up, 0.034, (0.95, 0.6, 1.6), vmin=-0.15, count=22, rings=10)
-    els += _hair_layer(rnd, lambda u, v: -0.004, back_up, 0.03, (1.0, 0.45, 1.2), vmin=-0.2, count=20, rings=8)
-    for k in range(9):  # Wellen und lockere Spitzen oben vorn
-        u = rnd.uniform(-0.9, 0.9)
-        v = rnd.uniform(0.6, 0.95)
-        co, n = _skull_point(u, v, 0.04)
-        d = Vector((math.sin(u) * 0.6, -0.4 + rnd.uniform(-0.2, 0.3), 1.0))
-        els.append((co, 0.026, (0.8, 0.6, 1.7), _flow_rot(n, d)))
-    out.append(hair_mesh("hair_0", els, 0.0085, 900))
-    # 1: sehr kurz (dichte Kappe)
-    els = _hair_layer(rnd, lambda u, v: -0.004, back_up, 0.03, (1.0, 0.45, 1.2), vmin=-0.2, count=22, rings=9)
-    out.append(hair_mesh("hair_1", els, 0.009, 500))
-    # 2: laenger, Scheitel links, Pony zur Seite gekaemmt, hinten bis in den Nacken
-    side_back = lambda u, v, n: Vector((0.9 if math.cos(u) > 0.2 else 0.25, -0.7, -0.15))
-    els = _hair_layer(rnd, lambda u, v: 0.003 + 0.012 * max(0.0, v), side_back, 0.03, (0.9, 0.45, 1.8),
-                      vmin=-0.3, count=20, rings=10,
-                      extra_keep=lambda u, v: math.cos(u) < -0.55 and v > -0.38)
-    for k in range(7):  # Pony: lange Straehnen schraeg ueber die Stirn
-        u = -0.55 + k * 0.17
-        co, n = _skull_point(u, 0.62 + 0.04 * math.sin(k), 0.018)
-        els.append((co, 0.03, (0.75, 0.45, 2.1), _flow_rot(n, Vector((1.0, 0.25, -0.55)))))
-    out.append(hair_mesh("hair_2", els, 0.0085, 900))
-    # 3: lockig (dichte kleine Locken)
-    els = _hair_layer(rnd, lambda u, v: -0.004, back_up, 0.03, (1.0, 0.45, 1.2), vmin=-0.2, count=20, rings=8)
-    for ri in range(11):
-        v = -0.12 + 1.1 * (ri + 0.5) / 11
-        n_ring = max(4, int(34 * math.cos(max(0.0, min(1.0, v)) * math.pi / 2.0) + 3))
-        for k in range(n_ring):
-            u = -math.pi + (k + rnd.uniform(0.3, 0.7)) / n_ring * 2 * math.pi
-            if not _in_hairline(u, v):
-                continue
-            co, n = _skull_point(u, min(v, 1.0), 0.014 + 0.008 * max(0.0, v))
-            els.append((co, rnd.uniform(0.018, 0.021), (1, 1, 1), _flow_rot(n, Vector((0, -1, 0.3)))))
-    out.append(hair_mesh("hair_3", els, 0.007, 1100))
+    # 0: wie die Vorlage: volles Haar, oben und vorn grosse Spitzen nach oben, leicht zur
+    #    rechten Seite gekaemmt, Seiten anliegend, Koteletten, Stirn mit Zacken
+    rnd = random.Random(51)
+
+    def lift0(u, v):
+        front = max(0.0, math.cos(u))
+        side = abs(math.sin(u))
+        return 0.01 + 0.012 * max(0.0, v) + 0.012 * side * min(1.0, max(0.0, v) / 0.5) + 0.004 * front * max(0.0, v - 0.4)
+
+    def spike0(u, v, n, i, j):
+        if v < 0.35 or (i + j) % 2:
+            return Vector()
+        front = max(0.0, math.cos(u))
+        d = n * 1.0 + Vector((0.3 + 0.6 * math.sin(u), 0.35 * front - 0.3 * (1 - front), 0.3))
+        big = 1.5 if v > 0.6 and rnd.random() < 0.5 else 1.0
+        return d.normalized() * rnd.uniform(0.014, 0.03) * big * (0.6 + 0.5 * v)
+
+    def edge0(u, v, n, i, j):
+        if math.cos(u) > 0.4 and i % 2 == 0:   # Stirn: Zacken fallen leicht nach vorn
+            return Vector((0, 0.006, -0.008))
+        return Vector()
+    bm = _hair_shell(20, 7, -0.3, _in_hair, lift0, spike0, edge0)
+    out.append(_finish_hair("hair_0", bm, 1))
+    # 1: sehr kurz, kleine Zacken
+    rnd = random.Random(52)
+    bm = _hair_shell(20, 6, -0.3, _in_hair, lambda u, v: 0.008 + 0.008 * max(0.0, v),
+                     lambda u, v, n, i, j: n * rnd.uniform(0.0, 0.008) if (i + j) % 2 == 0 else Vector())
+    out.append(_finish_hair("hair_1", bm, 2))
+    # 2: laenger, Seitenscheitel, nach rechts und hinten gekaemmt, hinten bis in den Nacken
+    rnd = random.Random(53)
+    keep2 = lambda u, v: _in_hair(u, v) or (math.cos(u) < -0.4 and v > -0.45)
+
+    def spike2(u, v, n, i, j):
+        if (i + j) % 2:
+            return Vector()
+        flow = Vector((0.9, -0.2, -0.4)) if math.cos(u) > -0.2 else Vector((0.1, -0.6, -0.8))
+        return (n * 0.3 + flow).normalized() * rnd.uniform(0.02, 0.04)
+    bm = _hair_shell(20, 8, -0.45, keep2, lambda u, v: 0.016 + 0.022 * max(0.0, v), spike2)
+    out.append(_finish_hair("hair_2", bm, 3))
+    # 3: lockig: dichtes Volumen mit vielen kleinen Beulen
+    rnd = random.Random(54)
+    bm = _hair_shell(28, 10, -0.3, _in_hair, lambda u, v: 0.024 + 0.02 * max(0.0, v),
+                     lambda u, v, n, i, j: n * rnd.uniform(-0.006, 0.014))
+    out.append(_finish_hair("hair_3", bm, 4))
     return out
 
 
@@ -746,7 +1020,11 @@ def bind(rig, body_smooth, meshes, rigid):
     body_smooth.select_set(True)
     rig.select_set(True)
     bpy.context.view_layer.objects.active = rig
-    bpy.ops.object.parent_set(type="ARMATURE_AUTO")
+    if body_smooth.vertex_groups:
+        body_smooth.parent = rig   # Gewichte stehen schon (build_body_loft)
+        body_smooth.modifiers.new("Armature", "ARMATURE").object = rig
+    else:
+        bpy.ops.object.parent_set(type="ARMATURE_AUTO")
     names = [g.name for g in body_smooth.vertex_groups]
     bw = []
     for v in body_smooth.data.vertices:
@@ -843,7 +1121,7 @@ def render_preview(folder, tag, hide=()):
     for o in bpy.data.objects:
         if o.type == "MESH":
             o.hide_render = o.name in hide
-    views = {"front": ((0, 9.5, 1.0), 1.0), "side": ((9.5, 0, 1.0), 1.0), "back": ((0, -9.5, 1.0), 1.0), "face": ((0.5, 1.5, 1.8), 1.72)}
+    views = {"front": ((0, 9.5, 1.0), 1.0), "side": ((9.5, 0, 1.0), 1.0), "back": ((0, -9.5, 1.0), 1.0), "face": ((0.5, 1.5, 1.8), 1.72), "head": ((0.0, 1.3, 1.77), 1.75)}
     for vname, (loc, tz) in views.items():
         cam.location = loc
         d = Vector((0, 0, tz)) - cam.location
@@ -854,12 +1132,12 @@ def render_preview(folder, tag, hide=()):
 
 def main():
     reset()
-    body_smooth = build_body_smooth()
+    body_smooth = build_body_loft()
     jersey, collar = build_jersey(body_smooth)
     shorts = build_shorts(body_smooth)
     socks = build_socks(body_smooth)
     trousers = build_trousers(body_smooth)
-    skin = build_body_lowpoly(body_smooth)
+    skin = build_skin(body_smooth)
     soft = [skin, jersey, collar, shorts, socks, trousers]
     rigid = {}
     parts = list(soft)
@@ -923,6 +1201,8 @@ def main():
             scn.render.filepath = f"{PREVIEW}/hair_{k}.png"
             bpy.ops.render.render(write_still=True)
     tris = sum(len(p.vertices) - 2 for m in all_meshes for p in m.data.polygons)
+    for m in all_meshes:
+        print("TEIL", m.name, len(m.data.polygons))
     # Ein Mesh fuer den Koerper (je Material eine Flaeche), Frisuren getrennt
     bpy.ops.object.select_all(action="DESELECT")
     for m in parts:
