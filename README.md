@@ -68,7 +68,8 @@ godot res://scenes/main.tscn -- --botplay --shot-phase=REPLAY:bild.png --quit-af
 | `scripts/match.gd` | Spielablauf, Regeln, KI, Ballberührungen |
 | `scripts/ballistics.gd` | Flugbahnen und Vorhersage |
 | `scripts/player.gd` | Spieler: Laufen, Springen, Hechten, Posen |
-| `scripts/figure.gd` | Spielerkörper mit Gelenken, weiche Posen, Bodenkontakt |
+| `scripts/figure.gd` | Spielerfigur: lädt das Blender-Modell, Gelenke, weiche Posen, Bodenkontakt |
+| `tools/blender/build_player.py` | Baut das Spielermodell in Blender (`pip install bpy`) und schreibt `assets/models/player.glb` |
 | `tools/anim_strip.gd`, `tools/closeup.gd`, `tools/pose_shot.gd` | Prüfbilder für Bewegungen und Figuren |
 | `scripts/arena.gd` | Halle, Tribünen, Anzeigetafel, Schiedsrichter, Bänke |
 | `scripts/main.gd` | Halle, Kamera, Steuerung, verbindet Geräusche und Effekte |

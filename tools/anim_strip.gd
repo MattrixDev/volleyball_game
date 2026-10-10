@@ -1,6 +1,7 @@
 extends SceneTree
 ## Bildfolge einer Bewegung zum Pruefen: godot -s res://tools/anim_strip.gd -- bild.png [spike|run|shuffle|dive|land]
 var frames := 0
+var figs := []
 
 func _init() -> void:
 	var args := OS.get_cmdline_user_args()
@@ -35,6 +36,7 @@ func _init() -> void:
 		var x0 := -7.2 + i * 1.8
 		pl.position = Vector3(x0, 0, 0)
 		pl._last_pos = pl.position
+		figs.append(pl.fig)
 		pl.alert = true
 		var dt := 1.0 / 120.0
 		var steps := 30 + i * 9
@@ -63,6 +65,7 @@ func _init() -> void:
 			pl._animate(dt)
 		pl.position = Vector3(x0, 0, 0)
 		pl._last_pos = pl.position
+		figs.append(pl.fig)
 	var cam := Camera3D.new()
 	root3.add_child(cam)
 	var cp := Vector3(0.0, 1.4, 10.5)
@@ -71,6 +74,8 @@ func _init() -> void:
 
 func _process(_delta: float) -> bool:
 	frames += 1
+	for f in figs:
+		f._sync()
 	if frames == 10:
 		root.get_viewport().get_texture().get_image().save_png(OS.get_cmdline_user_args()[0])
 		return true
