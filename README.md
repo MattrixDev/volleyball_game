@@ -100,3 +100,7 @@ godot res://scenes/main.tscn -- --botplay --shot-phase=REPLAY:bild.png --quit-af
 | `scripts/trainer.gd` | Trainerbank (Auszeit, Libero, Wechsel) |
 | `scripts/referee.gd` | Schiedsrichter: Handzeichen und Pfiff |
 | `scripts/menu.gd`, `scripts/settings.gd` | Einstellungsmenü, Stufen, Spiellänge |
+
+## Spielerfigur aus dem Meshy-Modell (Phase 2i)
+
+`tools/blender/build_player_meshy.py <meshy.blend> assets/models/player.glb` baut die Figur aus Mattis' Meshy-Modell (CC BY 4.0, Quelle: Low-Poly Volleyball Player): drehen, vereinfachen, nach Bereichen einfärben (Materialnamen wie im Team-System), Skelett mit den Gelenknamen aus `figure.gd`, Arme senken. Die ältere, selbst modellierte Figur steckt weiter in `build_player.py` (4 Frisuren); die Meshy-Figur hat eine Frisur, die Haarfarbe wechselt pro Spieler.
