@@ -254,11 +254,12 @@ func _arm(p: Dictionary, sd: String, fwd: float, out: float, elbow: float, wrist
 	p["wr_" + sd] = Vector3(wrist, 0.0, 0.0)
 
 
-func _leg(p: Dictionary, sd: String, thigh: float, knee: float, spread := 0.0) -> void:
+func _leg(p: Dictionary, sd: String, thigh: float, knee: float, spread := 0.0, point := 0.0) -> void:
 	var s := -1.0 if sd == "l" else 1.0
 	p["hip_" + sd] = Vector3(thigh, 0.0, spread * s)
 	p["kn_" + sd] = Vector3(-knee, 0.0, 0.0)
-	p["an_" + sd] = Vector3(-(thigh - knee), 0.0, 0.0)
+	# point = Fuss strecken (Zehen nach unten), z. B. in der Luft
+	p["an_" + sd] = Vector3(-(thigh - knee) - point, 0.0, 0.0)
 
 
 func _p_idle() -> Dictionary:
@@ -274,13 +275,13 @@ func _p_idle() -> Dictionary:
 func _p_ready() -> Dictionary:
 	# Leichtes Wippen und Gewicht verlagern, damit niemand wie eingefroren dasteht.
 	var t := now * 3.2 + number * 1.7
-	var bob := sin(t) * 0.07
-	var shift := sin(t * 0.37) * 0.05
-	var p := {"hips": Vector3(-0.15, 0, shift), "chest": Vector3(-0.3, 0, -shift * 0.6), "head": Vector3(0.35, 0, 0)}
-	_arm(p, "l", 0.65 + bob, 0.2, 0.9 + bob)
-	_arm(p, "r", 0.65 + bob, 0.2, 0.9 + bob)
-	_leg(p, "l", 0.6 + bob, 1.0 + bob * 1.8, 0.12)
-	_leg(p, "r", 0.6 + bob, 1.0 + bob * 1.8, 0.12)
+	var bob := sin(t) * 0.05
+	var shift := sin(t * 0.37) * 0.04
+	var p := {"hips": Vector3(-0.2, 0, shift), "chest": Vector3(-0.34, 0, -shift * 0.6), "head": Vector3(0.4, 0, 0)}
+	_arm(p, "l", 0.55 + bob, 0.28, 0.75 + bob)
+	_arm(p, "r", 0.55 + bob, 0.28, 0.75 + bob)
+	_leg(p, "l", 0.7 + bob, 1.1 + bob * 1.8, 0.2)
+	_leg(p, "r", 0.7 + bob, 1.1 + bob * 1.8, 0.2)
 	return p
 
 
@@ -306,21 +307,35 @@ func _p_run(a: float) -> Dictionary:
 	return p
 
 
-func _p_bump() -> Dictionary:
-	var p := {"hips": Vector3(-0.25, 0, 0), "chest": Vector3(-0.35, 0, 0), "head": Vector3(0.45, 0, 0)}
-	_arm(p, "l", 1.0, -0.22, 0.0, 0.0)
-	_arm(p, "r", 1.0, -0.22, 0.0, 0.0)
-	_leg(p, "l", 0.8, 1.25, 0.15)
-	_leg(p, "r", 0.8, 1.25, 0.15)
+## Baggern: tief in die Knie, Arme gestreckt und zusammen, Schwung kommt aus den Beinen.
+## rel = Zeit relativ zum Ballkontakt: davor abtauchen, danach Beine strecken und Plattform heben.
+func _p_bump(rel := 0.0) -> Dictionary:
+	var dip := 1.0 - smoothstep(-0.3, 0.0, rel)
+	var drive := smoothstep(0.0, 0.25, rel)
+	var p := {"hips": Vector3(-0.3 + 0.12 * drive, 0, 0), "chest": Vector3(-0.42 + 0.2 * drive, 0, 0), "head": Vector3(0.5 - 0.2 * drive, 0, 0)}
+	var arm_fwd := lerpf(0.85, 1.2, 1.0 - dip) + 0.45 * drive
+	_arm(p, "l", arm_fwd, -0.3, 0.0, 0.0)
+	_arm(p, "r", arm_fwd, -0.3, 0.0, 0.0)
+	var th := lerpf(0.95, 0.8, drive) + 0.15 * dip
+	var kn := lerpf(1.45, 0.8, drive) + 0.15 * dip - 0.15
+	_leg(p, "l", th, kn, 0.2)
+	_leg(p, "r", th - 0.1, kn - 0.1, 0.2)
 	return p
 
 
-func _p_set() -> Dictionary:
-	var p := {"chest": Vector3(0.05, 0, 0), "head": Vector3(0.55, 0, 0)}
-	_arm(p, "l", 2.5, 0.45, 1.5, -0.4)
-	_arm(p, "r", 2.5, 0.45, 1.5, -0.4)
-	_leg(p, "l", 0.35, 0.55, 0.1)
-	_leg(p, "r", 0.35, 0.55, 0.1)
+## Pritschen: Haende ueber der Stirn, Ellbogen aussen, Beine und Arme strecken durch den Ball.
+func _p_set(rel := 0.0) -> Dictionary:
+	var load := 1.0 - smoothstep(-0.25, 0.0, rel)
+	var ext := smoothstep(0.0, 0.2, rel)
+	var p := {"hips": Vector3(-0.1 * load, 0, 0), "chest": Vector3(-0.05 + 0.12 * ext, 0, 0), "head": Vector3(0.55 - 0.15 * ext, 0, 0)}
+	var up := lerpf(2.45, 2.85, ext)
+	var elbow := lerpf(1.55, 0.35, ext)
+	_arm(p, "l", up, 0.55 - 0.25 * ext, elbow, -0.45)
+	_arm(p, "r", up, 0.55 - 0.25 * ext, elbow, -0.45)
+	var th := lerpf(0.6, 0.15, ext)
+	var kn := lerpf(0.95, 0.2, ext)
+	_leg(p, "l", th, kn, 0.18)
+	_leg(p, "r", th - 0.1, kn, 0.18)
 	return p
 
 
@@ -340,8 +355,9 @@ func _p_spike(rel: float) -> Dictionary:
 	_arm(p, "r", lerpf(sh_up, 0.55, swing) + follow * 0.1, lerpf(0.25, 0.55, arch), lerpf(lerpf(0.3, 2.1, cock), 0.15, swing), 0.3 * swing)
 	# Gegenarm zeigt zum Ball, zieht beim Schlag nach unten zum Koerper
 	_arm(p, "l", lerpf(2.6, 0.7, swing), 0.12, lerpf(0.25, 1.0, swing))
-	_leg(p, "l", lerpf(0.35, 0.65, swing), lerpf(1.2, 0.7, swing), 0.1)
-	_leg(p, "r", lerpf(0.0, 0.55, swing), lerpf(1.25, 0.6, swing), 0.1)
+	# Beine: beim Ausholen Fersen nach hinten zum Gesaess, beim Schlag nach vorn klappen (Hohlkreuz-Schnapp)
+	_leg(p, "l", lerpf(0.25, 0.75, swing), lerpf(1.55, 0.8, swing), 0.14, 0.9)
+	_leg(p, "r", lerpf(-0.05, 0.6, swing), lerpf(1.7, 0.7, swing), 0.14, 0.9)
 	return p
 
 
@@ -359,12 +375,12 @@ func _p_block() -> Dictionary:
 	# Haende seitlich verschieben: Welt-z in die lokale Seitenrichtung umrechnen.
 	var local_shift := -side * hand_shift
 	var fwd := 3.05 - hand_reach * 1.2
-	var p := {"chest": Vector3(-0.05, 0, local_shift * 0.25), "head": Vector3(0.25, 0, 0)}
-	_arm(p, "l", fwd, 0.14 - local_shift * 0.5, 0.05, -0.3)
-	_arm(p, "r", fwd, 0.14 + local_shift * 0.5, 0.05, -0.3)
+	var p := {"hips": Vector3(-0.1 if airborne else 0.0, 0, 0), "chest": Vector3(-0.25 if airborne else -0.05, 0, local_shift * 0.25), "head": Vector3(0.45 if airborne else 0.25, 0, 0)}
+	_arm(p, "l", fwd, 0.1 - local_shift * 0.5, 0.05, -0.35)
+	_arm(p, "r", fwd, 0.1 + local_shift * 0.5, 0.05, -0.35)
 	if airborne:
-		_leg(p, "l", 0.15, 0.3, 0.1)
-		_leg(p, "r", 0.15, 0.3, 0.1)
+		_leg(p, "l", 0.2, 0.35, 0.08, 0.9)
+		_leg(p, "r", 0.1, 0.3, 0.08, 0.9)
 	else:
 		_arm(p, "l", 2.3, 0.25, 1.3, -0.3)
 		_arm(p, "r", 2.3, 0.25, 1.3, -0.3)
@@ -464,7 +480,7 @@ func _target_pose() -> Dictionary:
 		base = _mix(base, _p_land(), sin(land * PI * 0.5) * 0.8)
 		_stiff = 30.0
 	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.7 and rel < 0.5:
-		var tech := _p_set() if anim_tech == "over" else _p_bump()
+		var tech := _p_set(rel) if anim_tech == "over" else _p_bump(rel)
 		var w := smoothstep(-0.7, -0.3, rel) * (1.0 - smoothstep(0.2, 0.5, rel))
 		base = _mix(base, tech, w)
 		_stiff = 26.0

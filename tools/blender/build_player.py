@@ -31,12 +31,12 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else "player.glb"
 PREVIEW = sys.argv[2] if len(sys.argv) > 2 else ""
 
 # ------------------------------------------------------------------ Masse (Meter)
-SH_X = 0.19     # Schultergelenk seitlich
+SH_X = 0.212     # Schultergelenk seitlich
 SH_Z = 1.505     # Schulterhoehe
 UPPER = 0.30     # Oberarm
 FORE = 0.27      # Unterarm
 ARM_A = math.radians(40.0)  # Arme beim Bauen 40 Grad gesenkt (A-Haltung): weniger Verzerrung an der Schulter
-HIP_X = 0.088
+HIP_X = 0.098
 HIP_Z = 0.95
 KNEE_Z = 0.51
 ANKLE_Z = 0.095
@@ -267,7 +267,9 @@ def build_body_loft():
     bm = bmesh.new()
     weights = {}  # BMVert -> {Knochen: Gewicht}
     X, Y, Z = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
-    rings = [_ring(Vector((0, yo, z)), X, Y, hx, f, b, 16, p) for z, hx, f, b, yo, p in TORSO]
+    def tk(z):   # breiter Brustkorb, Hals bleibt
+        return 1.0 + 0.13 * (1 - _sstep(1.5, 1.58, z)) * _sstep(0.9, 1.1, z)
+    rings = [_ring(Vector((0, yo, z)), X, Y, hx * tk(z), f * (1 + 0.4 * (tk(z) - 1)), b, 16, p) for z, hx, f, b, yo, p in TORSO]
     for r, (z, *_rest) in zip(_loft(bm, rings), TORSO):
         for v in r:
             sh = _sstep(1.0, 1.17, z)
@@ -283,7 +285,7 @@ def build_body_loft():
         u = Vector((s * math.cos(ARM_A), 0, -math.sin(ARM_A)))
         upv = Vector((s * math.sin(ARM_A), 0, math.cos(ARM_A)))
         # Achse an der Schulter etwas tiefer: der Deltamuskel liegt unter der Schulterlinie
-        rings = [_ring(Vector(arm_pt(s, d, -0.014 * max(0.0, 1.0 - d / 0.15))), upv, Y, a, f, b, 10, 2.2, 0.5)
+        rings = [_ring(Vector(arm_pt(s, d, -0.014 * max(0.0, 1.0 - d / 0.15))), upv, Y, a * 1.15, f * 1.15, b * 1.15, 10, 2.2, 0.5)
                  for d, a, f, b in ARM]
         for r, (d, *_rest) in zip(_loft(bm, rings), ARM):
             for v in r:
@@ -291,7 +293,7 @@ def build_body_loft():
                 e = _sstep(0.27, 0.33, d)
                 wr = _sstep(0.55, 0.585, d)
                 weights[v] = {"chest": 1 - c, "sh_" + sd: c * (1 - e), "el_" + sd: e * (1 - wr), "wr_" + sd: wr}
-        rings = [_ring(Vector((s * (HIP_X + xo), 0, z)), X, Y, sx, f, b, 10, 2.2, 0.5) for z, sx, f, b, xo in LEG]
+        rings = [_ring(Vector((s * (HIP_X + xo), 0, z)), X, Y, sx * 1.15, f * 1.15, b * 1.15, 10, 2.2, 0.5) for z, sx, f, b, xo in LEG]
         for r, (z, *_rest) in zip(_loft(bm, rings), LEG):
             for v in r:
                 h = _sstep(1.03, 0.88, z)
@@ -552,11 +554,11 @@ def build_jersey(body):
 
 def build_shorts(body):
     def keep(c, n):
-        return 0.715 < c.z < 1.07 and abs(c.x) < 0.3
+        return 0.68 < c.z < 1.07 and abs(c.x) < 0.3
 
     def push(co):
         return 0.022 + max(0.0, 0.95 - co.z) * 0.12  # weite, gerade Hosenbeine wie in der Vorlage
-    s = shell(body, "shorts", "shorts", keep, push, cut=lambda bm: zcut(bm, 0.715, 1.07))
+    s = shell(body, "shorts", "shorts", keep, push, cut=lambda bm: zcut(bm, 0.68, 1.07))
     s = facet(s, 700)
     return thicken(s, 0.007)
 

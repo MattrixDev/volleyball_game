@@ -50,6 +50,15 @@ func _init() -> void:
 					var air_t := t - 0.25
 					pl.airborne = air_t > 0.0 and air_t < 0.8
 					pl.jump_h = maxf(0.0, 3.96 * air_t - 4.905 * air_t * air_t) if pl.airborne else 0.0
+				"bump", "set":
+					pl.anim_kind = "pass" if kind == "bump" else "set"
+					pl.anim_tech = "under" if kind == "bump" else "over"
+					pl.anim_t = 0.7
+				"block":
+					pl.block_pose = t > 0.2
+					var air_t := t - 0.3
+					pl.airborne = air_t > 0.0 and air_t < 0.6
+					pl.jump_h = maxf(0.0, 3.4 * air_t - 4.905 * air_t * air_t) if pl.airborne else 0.0
 				"run":
 					pl.position.x -= 5.0 * dt
 				"shuffle":
@@ -68,9 +77,9 @@ func _init() -> void:
 		figs.append(pl.fig)
 	var cam := Camera3D.new()
 	root3.add_child(cam)
-	var cp := Vector3(0.0, 1.4, 10.5)
+	var cp := Vector3(0.0, 1.3, 9.0)
 	cam.transform = Transform3D(Basis.looking_at(Vector3(0, 1.2, 0) - cp), cp)
-	cam.fov = 50
+	cam.fov = 40
 
 func _process(_delta: float) -> bool:
 	frames += 1
