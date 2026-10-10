@@ -12,15 +12,14 @@ var _msg_color := Color(1.0, 0.85, 0.35)
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	theme = UiTheme.get_theme()
 	visible = false
 	var shade := ColorRect.new()
 	shade.color = Color(0, 0, 0, 0.65)
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(shade)
 	var panel := PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.1, 0.12, 0.17, 0.97)
-	sb.set_corner_radius_all(12)
+	var sb := UiTheme.box(UiTheme.BG, 16, Color(1, 1, 1, 0.06), 1)
 	sb.set_content_margin_all(24)
 	panel.add_theme_stylebox_override("panel", sb)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -34,14 +33,14 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not Input.is_action_just_pressed("trainer"):
+	if not Input.is_action_just_pressed("trainer") or match_node.attract:
 		return
 	if visible:
 		close()
 	elif not get_tree().paused:
 		if match_node.can_use_trainer():
 			open()
-		elif match_node.phase == match_node.Phase.POINT_PAUSE and match_node.human_team >= 0:
+		elif (match_node.phase == match_node.Phase.POINT_PAUSE or match_node.phase == match_node.Phase.REPLAY) and match_node.human_team >= 0:
 			match_node.trainer_wanted = true
 			match_node._notice("Trainerbank öffnet sich gleich vor dem Aufschlag")
 		else:

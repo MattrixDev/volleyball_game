@@ -8,6 +8,9 @@ extends Node3D
 ## Loslassen, Trefferpunkt am Ball mit dem rechten Stick, Block mit dem linken Stick.
 
 signal big_hit(strength: float)
+## Fuer Geraeusche und Effekte: Ballkontakt (serve, bump, set, spike, tip, block, net, floor).
+signal contact(kind: String, pos: Vector3, strength: float)
+signal point_won(winner: int, reason: String, highlight: bool)
 
 const G := 9.81
 const R := Ballistics.BALL_R
@@ -28,9 +31,10 @@ const OVERCHARGE := 1.25  # ab hier ist der Schlag ueberzogen
 const OVER_OK := 12.0  # bis zu dieser Ballgeschwindigkeit (m/s) ist Pritschen sicher
 const OVER_RISKY := 17.0  # darueber droht "Ball gehalten"
 
-const TEAM_NAMES := ["SV Nordhafen", "TSV Eichenberg"]
-const TEAM_COLORS := [Color(0.16, 0.38, 0.86), Color(0.85, 0.2, 0.18)]
-const LIBERO_COLORS := [Color(0.98, 0.82, 0.15), Color(0.95, 0.95, 0.95)]
+## Namen und Trikots kommen aus teams/*.tres (siehe Teams, TeamStyle).
+var TEAM_NAMES: Array = Teams.playing().map(func(t): return t.name)
+var TEAM_COLORS: Array = Teams.playing().map(func(t): return t.jersey)
+var LIBERO_COLORS: Array = Teams.playing().map(func(t): return t.libero_jersey)
 ## Positionen je Spielsituation (lokal: Abstand zum Netz, seitlich; negativ = links).
 ## Beim Aufschlag und der Annahme stehen alle in Rotationsreihenfolge (Position 1 bis 6),
 ## damit die Aufstellung regelgerecht ist (keine Ueberlappung). Danach laufen die
@@ -52,7 +56,7 @@ const FORM := {
 const LANE_PREF := {"OH": -1.0, "MB": 0.0, "OP": 1.0, "S": 2.0, "L": 0.5}
 const SETTER_TARGET := Vector2(1.2, 1.0)
 
-enum Phase { INTRO, PRE_SERVE, TOSS, RALLY, POINT_PAUSE, TIMEOUT, SET_OVER, MATCH_OVER }
+enum Phase { INTRO, PRE_SERVE, TOSS, RALLY, POINT_PAUSE, TIMEOUT, SET_OVER, MATCH_OVER, REPLAY }
 enum Q { PERFECT, GOOD, WEAK, MISS }
 const Q_TEXT := ["PERFEKT!", "Gut", "Schwach", "Daneben"]
 const Q_COLOR := [Color(1.0, 0.85, 0.1), Color(0.55, 1.0, 0.55), Color(1.0, 0.6, 0.3), Color(1.0, 0.3, 0.3)]
@@ -88,6 +92,7 @@ var clock := 0.0
 var players: Array = [[], []]
 var ball: Node3D
 var ball_mesh: MeshInstance3D
+var _replay_jump := false
 var ball_shadow: MeshInstance3D
 var ball_vel := Vector3.ZERO
 var ball_g := G
@@ -143,6 +148,22 @@ var notice_until := 0.0
 var match_wins := [0, 0]
 var matches_done := 0
 var autoplay := false
+var attract := false  # Startmenue: im Hintergrund spielt KI gegen KI
+## Wiederholung: die letzten Sekunden werden aufgezeichnet (Ball, Spieler, Kontakte).
+const REC_SECONDS := 5.0
+var _rec: Array = []  # [clock, Ballposition, [Spielerzustaende]]
+var _rec_events: Array = []  # [clock, Art, Position, Staerke]
+var _rally_end := -100.0
+var replay_pending := false
+var _replay: Array = []
+var _replay_ev: Array = []
+var _replay_i := 0
+var _replay_ev_i := 0
+var _replay_t := 0.0
+var _replay_live: Array = []
+var rally_touches := 0
+var points_since_replay := 99
+var last_attack_speed := 0.0
 var autoplay_rallies := 200
 var trace := false
 var test_score := []  # Test: Startstand des ersten Satzes, z.B. --score=24:10
@@ -217,8 +238,11 @@ func _ready() -> void:
 		new_match()
 	elif human_team < 0 or autopress:
 		new_match()
-	elif hud:
-		hud.show_intro()
+	else:
+		# Startmenue: dahinter laeuft ein Spiel KI gegen KI, bis du "Spielen" waehlst.
+		attract = true
+		human_team = -1
+		new_match()
 
 
 func _input(event: InputEvent) -> void:
@@ -318,16 +342,14 @@ func _unshaded(c: Color) -> StandardMaterial3D:
 func _make_ball() -> void:
 	ball = Node3D.new()
 	add_child(ball)
+	# Ball aus Blender (assets/models/ball.glb, r = 10,5 cm), etwas groesser gezeichnet,
+	# damit man ihn gut sieht
+	var src: Node3D = preload("res://assets/models/ball.glb").instantiate()
+	var bm := src.find_children("*", "MeshInstance3D", true, false)[0] as MeshInstance3D
 	ball_mesh = MeshInstance3D.new()
-	var s := SphereMesh.new()
-	s.radius = 0.14  # etwas groesser gezeichnet, damit man ihn gut sieht
-	s.height = 0.28
-	ball_mesh.mesh = s
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(1.0, 0.92, 0.35)
-	m.emission_enabled = true
-	m.emission = Color(0.35, 0.3, 0.05)
-	ball_mesh.material_override = m
+	ball_mesh.mesh = bm.mesh
+	ball_mesh.scale = Vector3.ONE * (0.14 / 0.105)
+	src.free()
 	ball.add_child(ball_mesh)
 
 	ball_shadow = MeshInstance3D.new()
@@ -473,7 +495,7 @@ func ai_e(kind: String) -> float:
 
 
 func popup(pl: VPlayer, text: String, color: Color) -> void:
-	if autoplay:
+	if autoplay or attract:
 		return
 	var l := Label3D.new()
 	l.text = text
@@ -502,6 +524,25 @@ func new_match() -> void:
 	sides = [-1.0, 1.0]
 	match_first_server = rng.randi() % 2  # Auslosung
 	_start_set()
+
+
+## Aus dem Startmenue: neues Spiel mit dir als Team 0, frische Kader.
+func start_game() -> void:
+	_abort_replay()
+	attract = false
+	human_team = 0
+	for t in 2:
+		rosters[t] = TeamRoster.new(t)
+	new_match()
+
+
+func back_to_title() -> void:
+	_abort_replay()
+	attract = true
+	human_team = -1
+	for t in 2:
+		rosters[t] = TeamRoster.new(t)
+	new_match()
 
 
 func set_target() -> int:
@@ -561,6 +602,10 @@ func start_rally() -> void:
 	serve_deadline = -1.0
 	libero_set_front = [false, false]
 	commit_block = [false, false]
+	rally_touches = 0
+	last_attack_speed = 0.0
+	_rec.clear()
+	_rec_events.clear()
 	for t in 2:
 		_prepare_lineup(t)
 	if check_rules:
@@ -574,6 +619,7 @@ func start_rally() -> void:
 			pl.reset_state()
 	ball_vel = Vector3.ZERO
 	_hold_ball_at_server()
+	reset_physics_interpolation()
 	pause_until = clock + (0.15 if autoplay else 1.2)
 	if serving_team == human_team:
 		serve_aim = Vector2(5.5, 0.0)
@@ -699,7 +745,18 @@ func libero_enter(t: int, slot: int, libero_id: int) -> String:
 	r.libero_enter(slot, libero_id)
 	_apply_identity(pl, libero_id)
 	_sync_slots(t)
+	_sub_banner(t, "Libero rein", libero_id, out_id, 3.0)
 	return ""
+
+
+## Einblendung unten links: wer kommt, wer geht (auch beim Gegner).
+func _sub_banner(t: int, what: String, in_id: int, out_id: int, secs: float) -> void:
+	if hud == null or autoplay:
+		return
+	var r: TeamRoster = rosters[t]
+	var a: Dictionary = r.m(in_id)
+	var b: Dictionary = r.m(out_id)
+	hud.show_sub(t, TEAM_NAMES[t], what, "#%d %s" % [a.number, a.name], "#%d %s" % [b.number, b.name], secs)
 
 
 func _libero_out(t: int) -> void:
@@ -708,6 +765,7 @@ func _libero_out(t: int) -> void:
 	var back := r.libero_leave()
 	_apply_identity(_figure_of(t, lib_id), back)
 	_sync_slots(t)
+	_sub_banner(t, "Libero raus", back, lib_id, 3.0)
 
 
 func libero_leave(t: int) -> String:
@@ -727,6 +785,7 @@ func substitute(t: int, out_id: int, in_id: int) -> String:
 	stats["Wechsel " + TEAM_NAMES[t]] = stats.get("Wechsel " + TEAM_NAMES[t], 0) + 1
 	_apply_identity(pl, in_id)
 	_sync_slots(t)
+	_sub_banner(t, "Wechsel", in_id, out_id, 5.0)
 	if hud:
 		hud.ref_signal([["sub", "Wechsel %s: %s kommt für %s" % [TEAM_NAMES[t], r.m(in_id).name, r.m(out_id).name], 1.6]])
 		hud.whistle(false)
@@ -752,7 +811,7 @@ func call_timeout(t: int) -> String:
 	if hud:
 		hud.whistle(false)
 		hud.ref_signal([["timeout", "Auszeit %s" % TEAM_NAMES[t], 8.0]])
-		hud.show_message("Auszeit %s\n\nNoch %d Auszeit(en) in diesem Satz" % [TEAM_NAMES[t], r.timeouts_left])
+		hud.show_banner("Auszeit %s" % TEAM_NAMES[t], "Noch %d Auszeit(en) in diesem Satz" % r.timeouts_left)
 	return ""
 
 
@@ -901,11 +960,15 @@ func _physics_process(delta: float) -> void:
 			_ai_actions()
 			_step_ball(delta)
 		Phase.POINT_PAUSE:
-			if clock >= pause_until:
+			if replay_pending and clock >= _rally_end + 1.1:
+				_start_replay()
+			elif clock >= pause_until:
 				if side_change_pending:
 					_do_side_change()
 				else:
 					start_rally()
+		Phase.REPLAY:
+			_step_replay(real_delta, start)
 		Phase.TIMEOUT:
 			if clock >= pause_until or (start and clock >= pause_until - 6.5):
 				_end_timeout()
@@ -922,11 +985,110 @@ func _physics_process(delta: float) -> void:
 			elif start or (human_team < 0 and clock >= pause_until + 3.0):
 				new_match()
 
-	_update_players(delta)
+	if phase != Phase.REPLAY:
+		_update_players(delta)
+		_record()
 	_update_time_and_camera(real_delta)
 	_update_visuals()
+	if phase == Phase.REPLAY:
+		for t in 2:
+			for pl in players[t]:
+				pl.set_controlled(false)
 	if hud:
 		hud.update_view(self)
+
+
+# ---------------------------------------------------------------- Wiederholung
+
+func _record() -> void:
+	if autoplay or hud == null:
+		return
+	if not (phase == Phase.TOSS or phase == Phase.RALLY or (phase == Phase.POINT_PAUSE and clock < _rally_end + 0.6)):
+		return
+	var snaps := []
+	for t in 2:
+		for pl in players[t]:
+			snaps.append(pl.snapshot())
+	_rec.append([clock, ball.position, snaps])
+	while not _rec.is_empty() and _rec[0][0] < clock - REC_SECONDS:
+		_rec.pop_front()
+
+
+func _start_replay() -> void:
+	replay_pending = false
+	var t0 := _rally_end - 2.6
+	_replay = _rec.filter(func(f): return f[0] >= t0)
+	_replay_ev = _rec_events.filter(func(e): return e[0] >= t0)
+	if _replay.size() < 20:
+		return
+	_replay_live = []
+	for t in 2:
+		for pl in players[t]:
+			_replay_live.append(pl.snapshot())
+	_replay_live.append(ball.position)
+	_replay_i = 0
+	_replay_ev_i = 0
+	_replay_t = _replay[0][0]
+	_replay_jump = true
+	phase = Phase.REPLAY
+	points_since_replay = 0
+	stats["Wiederholungen"] = stats.get("Wiederholungen", 0) + 1
+	if hud:
+		hud.show_replay(true)
+
+
+## Spielt die Aufzeichnung ab: langsam, und um den entscheidenden Moment noch langsamer.
+func _step_replay(real_delta: float, skip: bool) -> void:
+	if skip and _replay_t > _replay[0][0] + 0.25:
+		_end_replay()
+		return
+	var near := absf(_replay_t - (_rally_end - 0.35)) < 0.55
+	_replay_t += real_delta * (0.33 if near else 0.6)
+	while _replay_i < _replay.size() - 1 and _replay[_replay_i + 1][0] <= _replay_t:
+		_replay_i += 1
+	# Zwischen zwei aufgezeichneten Bildern weich mischen, damit die Zeitlupe nicht ruckelt.
+	var f: Array = _replay[_replay_i]
+	var g: Array = _replay[mini(_replay_i + 1, _replay.size() - 1)]
+	var w := 0.0
+	if g[0] > f[0]:
+		w = clampf((_replay_t - f[0]) / (g[0] - f[0]), 0.0, 1.0)
+	ball.position = (f[1] as Vector3).lerp(g[1], w)
+	var k := 0
+	for t in 2:
+		for pl in players[t]:
+			pl.restore_mix(f[2][k], g[2][k], w)
+			k += 1
+	if _replay_jump:
+		_replay_jump = false
+		reset_physics_interpolation()
+	while _replay_ev_i < _replay_ev.size() and _replay_ev[_replay_ev_i][0] <= _replay_t:
+		var e: Array = _replay_ev[_replay_ev_i]
+		contact.emit(e[1], e[2], e[3])
+		_replay_ev_i += 1
+	if _replay_i >= _replay.size() - 1:
+		_end_replay()
+
+
+func _end_replay() -> void:
+	var k := 0
+	for t in 2:
+		for pl in players[t]:
+			pl.restore(_replay_live[k])
+			k += 1
+	ball.position = _replay_live[k]
+	reset_physics_interpolation()
+	_replay = []
+	phase = Phase.POINT_PAUSE
+	pause_until = clock + 0.6
+	if hud:
+		hud.show_replay(false)
+
+
+func _abort_replay() -> void:
+	if phase == Phase.REPLAY:
+		_end_replay()
+	replay_pending = false
+	timeout_team = -1
 
 
 func _start_charge() -> void:
@@ -1096,6 +1258,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	serve_time = clock
 	phase = Phase.RALLY
 	popup(srv, Q_TEXT[q], Q_COLOR[q])
+	_fx("serve", ball.position, power * (1.0 if jump else 0.65))
 	if serving_team == human_team and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
 	plan_next()
@@ -1588,6 +1751,11 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 			_do_attack(o, q, e)
 		"free":
 			_do_free(o, q)
+	rally_touches += 1
+	if o.kind == "attack":
+		_fx("tip" if last_action == "tip" else "spike", before, clampf(ball_vel.length() / 26.0, 0.3, 1.0))
+	else:
+		_fx("set" if o.tech == "over" else "bump", before, clampf(o.speed / 20.0, 0.25, 1.0))
 	stats["Technik " + ("Pritschen" if o.tech == "over" else "Baggern")] = stats.get("Technik " + ("Pritschen" if o.tech == "over" else "Baggern"), 0) + (1 if o.kind != "attack" else 0)
 	if trace:
 		print("  T%d %s %s %s q=%s e=%.3f pos=%s vel=%s" % [o.team, pl.role, o.kind, o.tech, Q_TEXT[q], e, before, ball_vel])
@@ -1791,6 +1959,7 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 			vel = Ballistics.launch_with_speed(bp, target, u, g)
 	ball_vel = vel
 	last_action = "attack"
+	last_attack_speed = vel.length()
 	_slow_tail_until = clock + 0.12
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
 	if o.human:
@@ -1823,6 +1992,9 @@ func _do_free(o: Opp, q: int) -> void:
 
 func _step_ball(delta: float) -> void:
 	var prev := ball.position
+	var spin_axis := Vector3.UP.cross(ball_vel)
+	if spin_axis.length() > 0.05:
+		ball_mesh.rotate(spin_axis.normalized(), ball_vel.length() * delta / 0.14 * 0.4)
 	var res := Ballistics.advance(prev, ball_vel, delta, ball_g)
 	var nxt: Vector3 = res[0]
 	ball_vel = res[1]
@@ -1838,6 +2010,7 @@ func _step_ball(delta: float) -> void:
 			ball_g = G
 			flutter = 0.0
 			net_touched = true
+			_fx("net", c, 0.5)
 			if possession != last_touch_team:
 				possession = last_touch_team
 			plan_next()
@@ -1940,6 +2113,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		touches = 0
 		last_action = "block_touch"
 		popup(pl, "Blockberührung", Q_COLOR[Q.GOOD])
+	_fx("block", c, 1.0 if last_action == "block" else 0.55)
 	last_touch_team = def
 	last_toucher = null
 	plan_next()
@@ -1947,6 +2121,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 
 
 func _on_ball_landed() -> void:
+	_fx("floor", ball.position, clampf(ball_vel.length() / 22.0, 0.2, 1.0))
 	var side_team := team_at_x(ball.position.x)
 	var inside := absf(ball.position.x) <= HALF_L + R and absf(ball.position.z) <= HALF_W + R
 	var winner: int
@@ -1988,6 +2163,29 @@ func _on_ball_landed() -> void:
 	_end_rally(winner, reason)
 
 
+func _fx(kind: String, pos: Vector3, strength: float) -> void:
+	if autoplay:
+		return
+	_rec_events.append([clock, kind, pos, strength])
+	contact.emit(kind, pos, strength)
+
+
+## Starke Punkte bekommen eine Wiederholung: Ass, Blockpunkt, sehr harter Angriff, langer
+## Ballwechsel. Damit es nicht nervt, kommt nach einer Wiederholung fruehestens 4 Punkte
+## spaeter die naechste.
+func _is_highlight(reason: String) -> bool:
+	points_since_replay += 1
+	var strong := false
+	match reason:
+		"Ass!", "Block-Punkt!":
+			strong = true
+		"Angriffspunkt!", "Block-Aus!":
+			strong = last_attack_speed >= 24.5 or rally_touches >= 20
+		"Gelegt!", "Ball im Feld":
+			strong = rally_touches >= 20
+	return strong and points_since_replay >= 4
+
+
 func _end_rally(winner: int, reason: String) -> void:
 	if phase != Phase.RALLY and phase != Phase.TOSS and phase != Phase.PRE_SERVE:
 		return
@@ -2013,9 +2211,15 @@ func _end_rally(winner: int, reason: String) -> void:
 	var over: bool = score[winner] >= set_target() and score[winner] - score[1 - winner] >= 2
 	if over and trace:
 		print("SATZENDE Satz %d: %d:%d (deciding=%s)" % [set_no, score[0], score[1], deciding])
+	for pl in players[winner]:
+		pl.celebrate_until = clock + 1.6
+	var highlight := _is_highlight(reason)
+	_rally_end = clock
+	point_won.emit(winner, reason, highlight)
 	if hud:
 		hud.whistle(true)
 		hud.ref_signal(_ref_sequence(winner, reason, over))
+		hud.flash_score(winner)
 	if over:
 		_finish_set(winner)
 	else:
@@ -2025,8 +2229,7 @@ func _end_rally(winner: int, reason: String) -> void:
 			side_change_pending = true  # im Entscheidungssatz wird bei 8 Punkten gewechselt
 			side_changed_deciding = true
 		_ai_coach_after_point()
-		if hud:
-			hud.show_message("%s\nPunkt für %s" % [reason, TEAM_NAMES[winner]])
+		replay_pending = highlight and cfg.replays and hud != null and not autoplay
 
 
 func _finish_set(winner: int) -> void:
@@ -2043,13 +2246,13 @@ func _finish_set(winner: int) -> void:
 		match_wins[winner] += 1
 		stats["Spiele " + TEAM_NAMES[winner]] = stats.get("Spiele " + TEAM_NAMES[winner], 0) + 1
 		if hud:
-			hud.show_message("%s gewinnt das Spiel %d:%d\n(%s)\n\nA / Leertaste: neues Spiel" % [
-				TEAM_NAMES[winner], sets_won[winner], sets_won[1 - winner], history])
+			hud.show_banner("%s gewinnt das Spiel %d:%d" % [TEAM_NAMES[winner], sets_won[winner], sets_won[1 - winner]],
+				"Sätze: %s   ·   A / Leertaste: neues Spiel" % history)
 	else:
 		phase = Phase.SET_OVER
 		if hud:
-			hud.show_message("Satz %d geht an %s  %d:%d\nSätze: %d:%d\n\nSeitenwechsel · A / Leertaste: nächster Satz" % [
-				set_no, TEAM_NAMES[winner], score[winner], score[1 - winner], sets_won[0], sets_won[1]])
+			hud.show_banner("Satz %d geht an %s  %d:%d" % [set_no, TEAM_NAMES[winner], score[winner], score[1 - winner]],
+				"Sätze %d:%d   ·   Seitenwechsel   ·   A / Leertaste: nächster Satz" % [sets_won[0], sets_won[1]])
 
 
 ## Seitenwechsel im Entscheidungssatz bei 8 Punkten: alle gehen auf die andere Seite.
@@ -2064,13 +2267,14 @@ func _do_side_change() -> void:
 			pl.set_side(side_of(t))
 			pl.position = Vector3(-pl.position.x, 0.0, -pl.position.z)
 			pl.target = pl.position
+	reset_physics_interpolation()
 	phase = Phase.TIMEOUT
 	timeout_team = -1
 	pause_until = clock + (0.3 if autoplay else 3.5)
 	if hud:
 		hud.ref_signal([["sidechange", "Seitenwechsel", 3.5]])
 		hud.whistle(false)
-		hud.show_message("Seitenwechsel\n%s %d : %d %s" % [TEAM_NAMES[0], score[0], score[1], TEAM_NAMES[1]])
+		hud.show_banner("Seitenwechsel", "%s %d : %d %s" % [TEAM_NAMES[0], score[0], score[1], TEAM_NAMES[1]])
 
 
 ## Schiedsrichter-Zeichen nach einem Ballwechsel: erst der Grund, dann Aufschlag fuer das Team.
@@ -2189,6 +2393,22 @@ func _update_players(delta: float) -> void:
 			pl.target = opp.start_pos + (p - opp.start_pos).limit_length(opp.max_run)
 		else:
 			pl.target = p
+	# Posen: wer gerade den Ball spielt, wer aufschlaegt, wohin alle schauen.
+	var rally_on := phase == Phase.RALLY or phase == Phase.TOSS or phase == Phase.PRE_SERVE
+	for t in 2:
+		for pl in players[t]:
+			pl.now = clock
+			pl.look_target = ball.position
+			pl.alert = rally_on
+	if opp != null and not opp.done:
+		opp.player.anim_kind = opp.kind
+		opp.player.anim_tech = opp.tech
+		opp.player.anim_t = opp.t
+	if phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done):
+		var sv := server()
+		sv.anim_kind = "serve_hold" if phase == Phase.PRE_SERVE else "serve"
+		sv.anim_tech = "jump" if serve_kind == 1 else "stand"
+		sv.anim_t = serve_ideal if phase == Phase.TOSS else clock + 5.0
 	for t in 2:
 		for pl in players[t]:
 			pl.tick(delta)
@@ -2231,6 +2451,8 @@ func _update_time_and_camera(real_delta: float) -> void:
 		want = minf(want, SLOW)
 	if not zoom_on:
 		cam_mode = ""
+	if phase == Phase.REPLAY:
+		cam_mode = "replay"
 	if phase != Phase.RALLY and phase != Phase.TOSS:
 		want = 1.0
 	Engine.time_scale = clampf(want, 0.1, 1.0)
@@ -2333,6 +2555,8 @@ func hint() -> String:
 	match phase:
 		Phase.INTRO:
 			return ""
+		Phase.REPLAY:
+			return "Wiederholung  ·  A / Leertaste: überspringen"
 		Phase.PRE_SERVE:
 			if serving_team == human_team and whistle_done:
 				var left := int(ceilf(serve_deadline - clock))
