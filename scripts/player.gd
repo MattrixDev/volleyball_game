@@ -300,8 +300,10 @@ func _contact_ik() -> void:
 		tg = {"l": hb - r * 0.085 - up * 0.08 - f * 0.05, "r": hb + r * 0.085 - up * 0.08 - f * 0.05}
 	elif anim_kind == "attack" and airborne:
 		# Angriff: Schlaghand (rechts) trifft die Rueckseite des Balls mit gestrecktem Arm.
-		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.03, 0.16, rel))
-		tg = {"r": b - up * 0.07 - f * 0.17}
+		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.05, 0.2, rel))
+		# Handballen trifft, danach schnappen Handflaeche und Finger ueber den Ball (Nachschwung).
+		var snap := smoothstep(0.0, 0.1, rel)
+		tg = {"r": b - up * 0.07 - f * 0.17 + (f * 0.28 - up * 0.12) * snap}
 	elif anim_kind == "serve":
 		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.03, 0.16, rel))
 		if airborne:
