@@ -141,6 +141,7 @@ var whistle_done := false
 var serve_deadline := -1.0
 var commit_miss := [false, false]  # Block falsch gelesen: kommt zu spaet
 var commit_block := [false, false]  # Mensch hat vor dem Zuspiel den Block gestellt (Lesen)
+var read_hit := [false, false]  # Block richtig gelesen: mehr Kill-Chance
 var read_z := 0.0  # Netzposition (z), auf die der Mensch seinen Mittelblocker gestellt hat
 var set_tempo := ["", ""]  # Tempo des letzten Zuspiels je Team (high, fast, quick)
 var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
@@ -1442,9 +1443,11 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 	commit_block[def] = false
 	var commit_hit := false
 	commit_miss[def] = false
+	read_hit[def] = false
 	if committed and mb != null:
 		var miss_by := absf(mb.position.z - p.z)
 		commit_hit = miss_by < 1.0
+		read_hit[def] = commit_hit
 		commit_miss[def] = miss_by > 2.2
 		if commit_hit:
 			popup(mb, "Gelesen!", Color(1.0, 0.85, 0.3))
@@ -2218,6 +2221,10 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	# Der Mensch blockt immer gleich stark; die Staerke des KI-Blocks stellt "Gegner-Block" ein.
 	var base := 0.34 if def == human_team else lerpf(0.1, 0.34, cfg.unit("ai_block"))
 	var stuff_p := base + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0) + (0.1 if in_block >= 3 else 0.0)
+	if read_hit[def]:
+		stuff_p += 0.2  # richtig gelesen
+	elif commit_miss[def]:
+		stuff_p *= 0.6
 	if pl.jump_h < 0.6:
 		stuff_p *= 0.4
 	var out_p := 0.85 if last_shot_style == "blockout" else 0.4
