@@ -6,6 +6,8 @@ const DIR := "res://teams/"
 static var _all: Array = []
 static var home := "nordhafen"
 static var away := "eichenberg"
+## Nach einem Teamwechsel im Startmenue wird die Szene neu geladen und das Spiel startet sofort.
+static var autostart := false
 
 
 static func all() -> Array:
@@ -31,3 +33,14 @@ static func by_id(id: String) -> TeamStyle:
 ## Die beiden Teams des aktuellen Spiels (0 = links, 1 = rechts).
 static func playing() -> Array:
 	return [by_id(home), by_id(away)]
+
+
+## Naechstes Team in der Liste nach id, das nicht skip ist (fuer die Auswahl im Startmenue).
+static func next_id(id: String, skip: String, step := 1) -> String:
+	var ids: Array = all().map(func(t): return t.id)
+	var i := ids.find(id)
+	for k in ids.size():
+		i = posmod(i + step, ids.size())
+		if ids[i] != skip:
+			return ids[i]
+	return id

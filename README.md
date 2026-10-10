@@ -15,7 +15,7 @@ Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/cod
 
 ### Neues Team anlegen
 
-Eine Datei in `teams/` kopieren (zum Beispiel `teams/seewald.tres`), `id`, `name` und die Farben ändern. Im Godot-Editor geht das auch per Doppelklick mit Farbwählern. Welche zwei Teams spielen, steht in `scripts/teams.gd` (`home`, `away`).
+Eine Datei in `teams/` kopieren (zum Beispiel `teams/seewald.tres`), `id`, `name` und die Farben ändern. Im Godot-Editor geht das auch per Doppelklick mit Farbwählern. Die beiden Teams wählt man im Startmenü aus (Dein Team, Gegner). Zum Testen: `-- --teams=seewald,nordhafen`.
 
 ## Phase 2b – Sounds und Low-Poly-Look
 

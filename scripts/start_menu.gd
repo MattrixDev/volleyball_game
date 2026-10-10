@@ -13,6 +13,8 @@ var _back: Button
 var _sub: Label
 var _time := 0.0
 var _logo: Label
+var _team_btn: Array = []  # [Button eigenes Team, Button Gegner]
+var _pick := []  # gewaehlte Team-ids [eigenes, Gegner]
 
 
 func _ready() -> void:
@@ -60,10 +62,32 @@ func _ready() -> void:
 	_main.add_child(gap)
 
 	_play = _big("Spielen")
-	_play.pressed.connect(func(): play.emit())
+	_play.pressed.connect(_on_play)
 	_main.add_child(_play)
 	_sub = UiTheme.label("", 17, UiTheme.MUTED)
 	_main.add_child(_sub)
+	# Teamauswahl: A / Enter oder links / rechts wechselt das Team
+	_pick = [Teams.home, Teams.away]
+	for k in 2:
+		var b := _big("")
+		b.custom_minimum_size = Vector2(520, 50)
+		b.add_theme_font_size_override("font_size", 22)
+		b.pressed.connect(_cycle.bind(k, 1))
+		b.gui_input.connect(func(ev: InputEvent):
+			if ev.is_action_pressed("ui_left"):
+				_cycle(k, -1)
+				b.accept_event()
+			elif ev.is_action_pressed("ui_right"):
+				_cycle(k, 1)
+				b.accept_event())
+		var sw := ColorRect.new()  # Trikotfarbe als kleines Feld rechts im Knopf
+		sw.custom_minimum_size = Vector2(40, 26)
+		sw.position = Vector2(462, 12)
+		sw.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(sw)
+		_main.add_child(b)
+		_team_btn.append([b, sw])
+	_update_teams()
 	var s := _big("Einstellungen")
 	s.pressed.connect(func(): settings.emit())
 	_main.add_child(s)
@@ -79,6 +103,32 @@ func _ready() -> void:
 	_main.add_child(UiTheme.label("A / Enter wählt aus  ·  Steuerkreuz / Pfeiltasten wechseln", 16, UiTheme.MUTED))
 
 	_build_controls()
+
+
+func _cycle(k: int, step: int) -> void:
+	_pick[k] = Teams.next_id(_pick[k], _pick[1 - k], step)
+	_update_teams()
+
+
+func _update_teams() -> void:
+	for k in 2:
+		var t := Teams.by_id(_pick[k])
+		var b: Button = _team_btn[k][0]
+		b.text = "%s:  ◀ %s ▶" % [["Dein Team", "Gegner"][k], t.name]
+		(_team_btn[k][1] as ColorRect).color = t.jersey
+	_update_sub()
+
+
+## Spielen: sind andere Teams gewaehlt, wird die Halle mit den neuen Trikots neu aufgebaut.
+func _on_play() -> void:
+	if _pick[0] != Teams.home or _pick[1] != Teams.away:
+		Teams.home = _pick[0]
+		Teams.away = _pick[1]
+		Teams.autostart = true
+		get_tree().paused = false
+		get_tree().reload_current_scene()
+		return
+	play.emit()
 
 
 func _big(t: String) -> Button:
@@ -162,10 +212,14 @@ func open() -> void:
 	focus()
 
 
-func focus() -> void:
+func _update_sub() -> void:
 	if cfg:
-		_sub.text = "%s gegen %s  ·  %s  ·  Stufe %s" % [Teams.playing()[0].name, Teams.playing()[1].name,
+		_sub.text = "%s gegen %s  ·  %s  ·  Stufe %s" % [Teams.by_id(_pick[0]).name, Teams.by_id(_pick[1]).name,
 			["1 Satz", "Best of 3", "Best of 5"][cfg.sets_to_win - 1], GameSettings.PRESET_TEXT[cfg.preset]]
+
+
+func focus() -> void:
+	_update_sub()
 	if _controls.visible:
 		_back.grab_focus()
 	else:

@@ -23,6 +23,10 @@ var _shot_phase_t := 0.0
 
 
 func _ready() -> void:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--teams="):  # Test: --teams=seewald,nordhafen
+			Teams.home = a.get_slice("=", 1).get_slice(",", 0)
+			Teams.away = a.get_slice("=", 1).get_slice(",", 1)
 	_setup_input()
 	arena = Arena.new()
 	# Spieler und Ball laufen mit 120 Hz Physik und werden fuer jeden Bildschirm-Frame
@@ -73,8 +77,9 @@ func _ready() -> void:
 	if match_node.attract:
 		hud.set_attract(true)
 		start_menu.call_deferred("open")
-	if OS.get_cmdline_user_args().has("--play"):
-		call_deferred("_on_play")  # Test: Startmenue ueberspringen
+	if OS.get_cmdline_user_args().has("--play") or Teams.autostart:
+		Teams.autostart = false
+		call_deferred("_on_play")  # Test: Startmenue ueberspringen; nach Teamwechsel direkt spielen
 	if OS.get_cmdline_user_args().has("--menu"):
 		menu.call_deferred("open")
 	if OS.get_cmdline_user_args().has("--trainer"):

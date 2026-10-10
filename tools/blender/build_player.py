@@ -31,11 +31,12 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else "player.glb"
 PREVIEW = sys.argv[2] if len(sys.argv) > 2 else ""
 
 # ------------------------------------------------------------------ Masse (Meter)
-SH_X = 0.215     # Schultergelenk seitlich
-SH_Z = 1.53      # Schulterhoehe
+SH_X = 0.19     # Schultergelenk seitlich
+SH_Z = 1.505     # Schulterhoehe
 UPPER = 0.30     # Oberarm
 FORE = 0.27      # Unterarm
-HIP_X = 0.095
+ARM_A = math.radians(40.0)  # Arme beim Bauen 40 Grad gesenkt (A-Haltung): weniger Verzerrung an der Schulter
+HIP_X = 0.088
 HIP_Z = 0.95
 KNEE_Z = 0.51
 ANKLE_Z = 0.095
@@ -45,6 +46,29 @@ HEAD_Z = 1.645   # Kopfgelenk (oberes Halsende)
 HEAD_C = HEAD_Z + 0.115  # Kopfmitte
 
 # Vorschaufarben (im Spiel kommen die Farben vom Team)
+def arm_pt(s, d, dz=0.0):
+    """Punkt auf der Armachse, d Meter von der Schulter (A-Haltung), dz quer dazu."""
+    return (s * (SH_X + d * math.cos(ARM_A) + dz * math.sin(ARM_A)), 0.0,
+            SH_Z - d * math.sin(ARM_A) + dz * math.cos(ARM_A))
+
+
+def to_a_pose(co, s):
+    """Punkt aus der T-Haltung um das Schultergelenk in die A-Haltung drehen."""
+    x, y, z = co.x - s * SH_X, co.y, co.z - SH_Z
+    a = s * ARM_A
+    return Vector((x * math.cos(a) + z * math.sin(a) + s * SH_X, y, -x * math.sin(a) + z * math.cos(a) + SH_Z))
+
+
+def arm_coord(c):
+    """(Abstand entlang des Arms ab Schulter, Abstand von der Armachse) fuer einen Punkt."""
+    s = 1.0 if c.x >= 0 else -1.0
+    vx, vz = s * c.x - SH_X, c.z - SH_Z
+    ux, uz = math.cos(ARM_A), -math.sin(ARM_A)
+    a = vx * ux + vz * uz
+    px, pz = vx - a * ux, vz - a * uz
+    return a, math.sqrt(px * px + pz * pz + c.y * c.y)
+
+
 COLORS = {
     "skin": (0.86, 0.6, 0.42, 1),
     "hair": (0.28, 0.17, 0.1, 1),
@@ -170,28 +194,28 @@ def build_body_smooth():
             edges.append((a, b))
 
     crotch = p((0, 0, 0.90), 0.13, 0.10)
-    pelvis = p((0, 0, 0.98), 0.158, 0.112)
-    waist = p((0, 0, 1.10), 0.138, 0.096)
-    abdo = p((0, 0.003, 1.22), 0.15, 0.102)
-    lchest = p((0, 0.01, 1.33), 0.176, 0.116)
-    chest = p((0, 0.014, 1.42), 0.196, 0.12)
-    upper = p((0, 0.0, 1.50), 0.205, 0.11)
-    neck0 = p((0, -0.006, 1.585), 0.072, 0.068)
-    neck1 = p((0, 0.0, HEAD_Z + 0.025), 0.062, 0.06)
+    pelvis = p((0, 0, 0.98), 0.14, 0.106)
+    waist = p((0, 0, 1.10), 0.126, 0.094)
+    abdo = p((0, 0.003, 1.22), 0.138, 0.098)
+    lchest = p((0, 0.016, 1.32), 0.17, 0.122)
+    chest = p((0, 0.02, 1.40), 0.186, 0.128)
+    upper = p((0, 0.0, 1.465), 0.176, 0.1)       # Schulterlinie, faellt zum Arm hin ab
+    neck0 = p((0, -0.008, 1.56), 0.06, 0.058)      # schlanker, sichtbarer Hals
+    neck1 = p((0, 0.0, HEAD_Z + 0.025), 0.054, 0.054)
     chain(crotch, pelvis, waist, abdo, lchest, chest, upper, neck0, neck1)
     for s in (-1, 1):
-        sh = p((s * SH_X, 0, SH_Z), 0.083)
-        dl = p((s * (SH_X + 0.07), 0, SH_Z - 0.004), 0.08, 0.074)       # Deltamuskel
-        bi = p((s * (SH_X + 0.16), 0, SH_Z - 0.006), 0.066, 0.07)       # Bizeps
-        el0 = p((s * (SH_X + 0.255), 0, SH_Z - 0.008), 0.054, 0.056)
-        el = p((s * (SH_X + UPPER), 0, SH_Z - 0.01), 0.05)
-        fa = p((s * (SH_X + UPPER + 0.07), 0, SH_Z - 0.01), 0.058, 0.052)  # Unterarmmuskel
-        fa2 = p((s * (SH_X + UPPER + 0.17), 0, SH_Z - 0.01), 0.046, 0.038)
-        wr = p((s * (SH_X + UPPER + FORE), 0, SH_Z - 0.01), 0.036, 0.028)
+        sh = p(arm_pt(s, 0.0), 0.074)
+        dl = p(arm_pt(s, 0.06, -0.004), 0.071, 0.068)      # Deltamuskel
+        bi = p(arm_pt(s, 0.15, -0.006), 0.062, 0.066)      # Bizeps
+        el0 = p(arm_pt(s, 0.255, -0.008), 0.054, 0.056)
+        el = p(arm_pt(s, UPPER, -0.01), 0.05)
+        fa = p(arm_pt(s, UPPER + 0.07, -0.01), 0.058, 0.052)  # Unterarmmuskel
+        fa2 = p(arm_pt(s, UPPER + 0.17, -0.01), 0.046, 0.038)
+        wr = p(arm_pt(s, UPPER + FORE, -0.01), 0.036, 0.028)
         chain(upper, sh, dl, bi, el0, el, fa, fa2, wr)
-        hp = p((s * HIP_X, 0, HIP_Z), 0.11, 0.112)
-        q1 = p((s * (HIP_X + 0.006), 0.006, 0.84), 0.108, 0.11)        # Oberschenkel
-        q2 = p((s * (HIP_X + 0.006), 0.008, 0.71), 0.098, 0.1)
+        hp = p((s * HIP_X, 0, HIP_Z), 0.098, 0.104)
+        q1 = p((s * (HIP_X + 0.004), 0.006, 0.84), 0.094, 0.1)        # Oberschenkel
+        q2 = p((s * (HIP_X + 0.004), 0.008, 0.71), 0.086, 0.092)
         q3 = p((s * (HIP_X + 0.004), 0.006, 0.6), 0.076, 0.078)
         kn = p((s * (HIP_X + 0.003), 0.0, KNEE_Z), 0.063, 0.064)
         c1 = p((s * (HIP_X + 0.003), -0.016, 0.39), 0.07, 0.076)       # Wade
@@ -262,26 +286,27 @@ def paint_faces(ob, mat, test):
 def v_neck_cut(c):
     """True, wenn die Stelle im Halsausschnitt liegt: rundes Loch um den Hals, vorn ein V."""
     r = math.hypot(c.x, c.y * 1.15)
-    if c.z > 1.54 and r < 0.088:
+    if c.z > 1.51 and r < 0.078:
         return True
     if c.y > 0.02 and c.z > V_TIP:
-        return abs(c.x) < V_W * (c.z - V_TIP) / (1.6 - V_TIP)
+        return abs(c.x) < V_W * (c.z - V_TIP) / (V_TOP - V_TIP)
     return False
 
 
-V_TIP = 1.49   # Spitze des V-Ausschnitts
-V_W = 0.068    # halbe Breite des V auf Hoehe 1.6
+V_TIP = 1.455  # Spitze des V-Ausschnitts
+V_TOP = 1.57   # Hoehe, auf der V_W gilt
+V_W = 0.068    # halbe Breite des V auf Hoehe V_TOP
 
 
 def neck_cut(bm):
     """Schnittkanten entlang der beiden V-Linien und rund um den Hals."""
     for sx in (-1, 1):
-        d = Vector((sx * V_W, 0, 1.6 - V_TIP)).normalized()
+        d = Vector((sx * V_W, 0, V_TOP - V_TIP)).normalized()
         n = Vector((d.z, 0, -sx * d.x)) if sx > 0 else Vector((-d.z, 0, d.x))
         geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
         bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector((0, 0, V_TIP)), plane_no=n)
     geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
-    bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector((0, 0, 1.54)), plane_no=Vector((0, 0, 1)))
+    bmesh.ops.bisect_plane(bm, geom=geom, plane_co=Vector((0, 0, 1.51)), plane_no=Vector((0, 0, 1)))
     bm.faces.ensure_lookup_table()
 
 
@@ -327,12 +352,14 @@ def build_jersey(body):
     def keep(c, n):
         if v_neck_cut(c):
             return False
-        return 0.97 < c.z < 1.7 and abs(c.x) < SH_X + 0.165
+        a, r = arm_coord(c)
+        return 0.97 < c.z < 1.7 and not (a > 0.165 and r < 0.11)
 
     def push(co):
-        d = 0.015 + max(0.0, 1.32 - co.z) * 0.05   # unten etwas weiter
-        if abs(co.x) > SH_X + 0.04:
-            d += 0.005                               # Aermel etwas weiter
+        d = 0.011 + max(0.0, 1.24 - co.z) * 0.12   # sitzt oben eng, faellt unten ueber die Hose
+        a, r = arm_coord(co)
+        if a > 0.04 and r < 0.11:
+            d += 0.002                               # Aermel
         return d
 
     def hem(bm):
@@ -345,7 +372,7 @@ def build_jersey(body):
     pi = add_mat(j, "panel")
     for p in j.data.polygons:
         c, n = p.center, p.normal
-        if abs(c.x) < SH_X + 0.01 and c.z < 1.43 and abs(n.x) > 0.8:
+        if abs(c.x) < SH_X + 0.01 and c.z < 1.43 and abs(n.x) > 0.8 and arm_coord(c)[1] > 0.11:
             p.material_index = pi
     j = thicken(j, 0.007)
     return j, collar
@@ -353,7 +380,7 @@ def build_jersey(body):
 
 def build_shorts(body):
     def keep(c, n):
-        return 0.665 < c.z < 1.07 and abs(c.x) < 0.3
+        return 0.715 < c.z < 1.07 and abs(c.x) < 0.3
 
     def push(co):
         return 0.018 + max(0.0, 0.93 - co.z) * 0.06  # Beine weiten sich leicht nach unten
@@ -470,6 +497,8 @@ def hand(s):
     tv = block(x0 + s * 0.04, 0.056, z0 - 0.01, 0.075, 0.024, 0.025, 0.8)
     for v in tv:
         v.co.y += abs(v.co.x - x0) * 0.3
+    for v in bm.verts:
+        v.co = to_a_pose(v.co, s)
     ob = new_object("hand_" + ("l" if s < 0 else "r"), bm)
     add_mat(ob, "skin")
     return facet(ob, 220, smooth_levels=1)
@@ -679,9 +708,9 @@ BONES = [
 ]
 for _sd, _s in (("l", -1), ("r", 1)):
     BONES += [
-        ("sh_" + _sd, (_s * SH_X, 0, SH_Z), (_s * (SH_X + UPPER), 0, SH_Z - 0.01), "chest"),
-        ("el_" + _sd, (_s * (SH_X + UPPER), 0, SH_Z - 0.01), (_s * (SH_X + UPPER + FORE), 0, SH_Z - 0.01), "sh_" + _sd),
-        ("wr_" + _sd, (_s * (SH_X + UPPER + FORE), 0, SH_Z - 0.01), (_s * (SH_X + UPPER + FORE + 0.18), 0, SH_Z - 0.01), "el_" + _sd),
+        ("sh_" + _sd, arm_pt(_s, 0.0), arm_pt(_s, UPPER, -0.01), "chest"),
+        ("el_" + _sd, arm_pt(_s, UPPER, -0.01), arm_pt(_s, UPPER + FORE, -0.01), "sh_" + _sd),
+        ("wr_" + _sd, arm_pt(_s, UPPER + FORE, -0.01), arm_pt(_s, UPPER + FORE + 0.18, -0.01), "el_" + _sd),
         ("hip_" + _sd, (_s * HIP_X, 0, HIP_Z), (_s * HIP_X, 0, KNEE_Z), "hips"),
         ("kn_" + _sd, (_s * HIP_X, 0, KNEE_Z), (_s * HIP_X, 0, ANKLE_Z), "hip_" + _sd),
         ("an_" + _sd, (_s * HIP_X, 0, ANKLE_Z), (_s * HIP_X, 0.17, 0.02), "kn_" + _sd),
@@ -757,7 +786,7 @@ def lower_arms(rig, meshes):
     for sd, s in (("l", -1), ("r", 1)):
         pb = rig.pose.bones["sh_" + sd]
         rest = pb.bone.matrix_local.to_3x3()
-        world_rot = Matrix.Rotation(math.radians(s * 88.0), 3, "Y")
+        world_rot = Matrix.Rotation(s * (math.radians(88.0) - ARM_A), 3, "Y")
         pb.rotation_mode = "QUATERNION"
         pb.rotation_quaternion = (rest.inverted() @ world_rot @ rest).to_quaternion()
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -855,7 +884,7 @@ def main():
     lg = logo("logo_chest", loc, n, 0.04)
     parts.append(lg)
     rigid[lg.name] = "chest"
-    loc, n = surface_hit(shorts, (0.12, 0.6, 0.73), (0, -1, 0))
+    loc, n = surface_hit(shorts, (0.11, 0.6, 0.78), (0, -1, 0))
     lg2 = logo("logo_shorts", loc, n, 0.034)
     soft.append(lg2)
     parts.append(lg2)
@@ -866,7 +895,7 @@ def main():
     for key, ob, origin, direction, bone in [
         ("num_front", jersey, (0, 0.6, 1.33), (0, -1, 0), "chest"),
         ("num_back", jersey, (0, -0.6, 1.36), (0, 1, 0), "chest"),
-        ("num_shorts", shorts, (-0.12, 0.6, 0.74), (0, -1, 0), "hip_l"),
+        ("num_shorts", shorts, (-0.11, 0.6, 0.79), (0, -1, 0), "hip_l"),
     ]:
         loc, n = surface_hit(ob, origin, direction)
         markers[key] = {"bone": bone, "pos": gd(loc), "normal": gd(n)}
