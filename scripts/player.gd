@@ -8,8 +8,8 @@ const G := 9.81
 const JUMP_V := 3.96  # ergibt ca. 0,80 m Sprunghoehe
 const SPIKE_REACH := 2.45  # Handhoehe im Stand beim Angriff
 const BLOCK_REACH := 2.45  # Handhoehe im Stand beim Block
-const SKINS := [Color(0.96, 0.8, 0.66), Color(0.9, 0.7, 0.54), Color(0.78, 0.57, 0.4), Color(0.6, 0.42, 0.3), Color(0.42, 0.29, 0.2)]
-const HAIRS := [Color(0.15, 0.1, 0.07), Color(0.3, 0.2, 0.12), Color(0.55, 0.38, 0.2), Color(0.85, 0.7, 0.4), Color(0.08, 0.08, 0.08), Color(0.6, 0.3, 0.15)]
+const SKINS := [Color(0.9, 0.74, 0.62), Color(0.86, 0.66, 0.52), Color(0.74, 0.55, 0.41), Color(0.58, 0.42, 0.31), Color(0.42, 0.3, 0.22)]
+const HAIRS := [Color(0.17, 0.12, 0.09), Color(0.3, 0.2, 0.13), Color(0.46, 0.33, 0.2), Color(0.72, 0.6, 0.4), Color(0.1, 0.1, 0.1), Color(0.5, 0.29, 0.17)]
 
 var team := 0
 var role := ""
@@ -68,8 +68,9 @@ func setup(p_team: int, p_role: String, _tag_letter: String, p_number: int, colo
 	_yaw = -side * PI / 2.0
 	fig = HumanFigure.new()
 	add_child(fig)
-	fig.build(_colors(color), true, number % 3)
-	fig.set_number(number, _number_color(color))
+	var h := hash(team * 1000 + number)
+	fig.build(_colors(color), true, (h / 13) % HumanFigure.HAIR_STYLES, false, 0.96 + 0.09 * float((h / 31) % 10) / 9.0)
+	fig.set_number(number, _number_color(color), (Teams.playing()[team] as TeamStyle).number)
 	fig.pose(_p_idle())
 
 	_ring = MeshInstance3D.new()
@@ -90,23 +91,18 @@ func setup(p_team: int, p_role: String, _tag_letter: String, p_number: int, colo
 	_last_pos = position
 
 
+## Farben aus dem Trikot des Teams (teams/*.tres), Haut und Haare je Spieler verschieden.
 func _colors(jersey: Color) -> Dictionary:
 	_jersey = jersey
 	var h := hash(team * 1000 + number)
-	var shorts := Color(0.08, 0.12, 0.3) if team == 0 else Color(0.95, 0.95, 0.95)
-	return {
-		"jersey": jersey,
-		"shorts": shorts,
-		"skin": SKINS[h % SKINS.size()],
-		"hair": HAIRS[(h / 7) % HAIRS.size()],
-		"shoes": Color(0.97, 0.97, 0.97) if team == 0 else Color(0.15, 0.15, 0.17),
-		"socks": Color(0.95, 0.95, 0.95) if team == 0 else jersey.darkened(0.2),
-		"trim": Color(1, 1, 1) if team == 0 else Color(0.98, 0.85, 0.2),
-	}
+	var c: Dictionary = (Teams.playing()[team] as TeamStyle).colors(role == "L")
+	c["skin"] = SKINS[h % SKINS.size()]
+	c["hair"] = HAIRS[(h / 7) % HAIRS.size()]
+	return c
 
 
-func _number_color(jersey: Color) -> Color:
-	return Color(0.1, 0.1, 0.12) if jersey.get_luminance() > 0.6 else Color(1, 1, 1)
+func _number_color(_jersey_color: Color) -> Color:
+	return (Teams.playing()[team] as TeamStyle).number_color(role == "L")
 
 
 ## Neue Identitaet (Wechsel, Libero): Rolle, Nummer und Trikotfarbe tauschen.
@@ -116,7 +112,7 @@ func change_identity(p_role: String, _tag_letter: String, p_number: int, color: 
 	var c := _colors(color)
 	for k in c:
 		fig.set_color(k, c[k])
-	fig.set_number(number, _number_color(color))
+	fig.set_number(number, _number_color(color), (Teams.playing()[team] as TeamStyle).number)
 
 
 func set_side(s: float) -> void:

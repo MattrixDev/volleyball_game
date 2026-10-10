@@ -12,7 +12,7 @@ func _init() -> void:
 	for i in 4:
 		var pl := VPlayer.new()
 		root3.add_child(pl)
-		pl.setup(i % 2, "OH", "A", 7 + i, Color(0.16, 0.38, 0.86) if i % 2 == 0 else Color(0.85, 0.2, 0.18))
+		pl.setup(i % 2, "L" if i == 2 else "OH", "A", 7 + i, Color(0.16, 0.38, 0.86) if i % 2 == 0 else Color(0.85, 0.2, 0.18))
 		pl.position = Vector3(-9.8 + i * 1.2, 0, 2.0)
 		pl._last_pos = pl.position
 		pls.append([pl, yaws[i]])

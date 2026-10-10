@@ -164,7 +164,7 @@ func open() -> void:
 
 func focus() -> void:
 	if cfg:
-		_sub.text = "SV Nordhafen gegen TSV Eichenberg  ·  %s  ·  Stufe %s" % [
+		_sub.text = "%s gegen %s  ·  %s  ·  Stufe %s" % [Teams.playing()[0].name, Teams.playing()[1].name,
 			["1 Satz", "Best of 3", "Best of 5"][cfg.sets_to_win - 1], GameSettings.PRESET_TEXT[cfg.preset]]
 	if _controls.visible:
 		_back.grab_focus()

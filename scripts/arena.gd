@@ -4,7 +4,10 @@ extends Node3D
 ## Decke mit Lichtfeldern, Schiedsrichter auf dem Stuhl, Bank mit Auswechselspielern,
 ## Kampfgericht. Hell und freundlich.
 
-const TEAM_COLORS := [Color(0.16, 0.38, 0.86), Color(0.85, 0.2, 0.18)]
+var TEAM_COLORS: Array = Teams.playing().map(func(t): return t.jersey)
+## Kleidung der Schiedsrichter, Linienrichter und Schreiber
+const OFFICIAL := {"jersey": Color(0.86, 0.86, 0.84), "panel": Color(0.2, 0.21, 0.24), "collar": Color(0.2, 0.21, 0.24),
+	"trousers": Color(0.17, 0.18, 0.2), "shoes": Color(0.14, 0.14, 0.15), "accent": Color(0.14, 0.14, 0.15), "sole": Color(0.3, 0.3, 0.3)}
 const SPONSORS := ["NORDHAFEN WERFT", "EICHENBERG BRÄU", "VOLLEY TV", "BÄCKEREI KORN", "STADTWERKE", "SPORT MAYER", "HAFENBANK", "BERGQUELLE"]
 
 var referee: HumanFigure
@@ -194,7 +197,7 @@ func _stands() -> void:
 			# Sitzschalen: Bloecke in Vereinsfarben, in der Mitte grau
 			for b in 8:
 				var x0 := -15.0 + b * 4.0
-				var col := TEAM_COLORS[0] if x0 < -2.0 else (TEAM_COLORS[1] if x0 > 1.0 else Color(0.5, 0.52, 0.58))
+				var col: Color = TEAM_COLORS[0] if x0 < -2.0 else (TEAM_COLORS[1] if x0 > 1.0 else Color(0.5, 0.52, 0.58))
 				_box(Vector3(3.8, 0.08, 0.4), Vector3(x0 + 2.0, h + 0.04, z + sz * 0.3), _mat(col.lerp(Color.WHITE, 0.15)))
 		_box(Vector3(32.0, 0.06, 0.06), Vector3(0, 1.3, sz * 12.4), rail)
 		for k in 9:
@@ -261,8 +264,7 @@ func _officials() -> void:
 	_box(Vector3(0.9, 0.5, 0.06), Vector3(0, 1.7, -6.73), metal)
 	referee = HumanFigure.new()
 	add_child(referee)
-	referee.build({"jersey": Color(0.97, 0.97, 0.97), "shorts": Color(0.12, 0.13, 0.17), "skin": Color(0.9, 0.72, 0.58),
-		"hair": Color(0.45, 0.45, 0.47), "shoes": Color(0.1, 0.1, 0.1), "socks": Color(0.12, 0.13, 0.17), "trim": Color(0.12, 0.13, 0.17)}, false, 0)
+	referee.build(OFFICIAL.merged({"skin": Color(0.86, 0.68, 0.55), "hair": Color(0.42, 0.42, 0.43)}), false, 1, true)
 	referee.position = Vector3(0, 1.46, -6.3)
 	referee.rotation.y = PI  # schaut zum Feld (+z)
 	referee.pose(_ref_idle())
@@ -271,25 +273,28 @@ func _officials() -> void:
 	_box(Vector3(2.4, 0.75, 0.7), Vector3(0, 0.375, 8.6), _mat(Color(0.2, 0.3, 0.55)))
 	_box(Vector3(2.5, 0.05, 0.8), Vector3(0, 0.77, 8.6), _mat(Color(0.95, 0.95, 0.95)))
 	for x in [-0.6, 0.6]:
-		var f := _seated({"jersey": Color(0.95, 0.95, 0.95), "shorts": Color(0.15, 0.15, 0.2)}, Vector3(x, 0, 9.3), 0.0)
+		var f := _seated(OFFICIAL.merged({"skin": VPlayer.SKINS[1 if x < 0.0 else 3], "hair": VPlayer.HAIRS[2 if x < 0.0 else 4]}),
+			Vector3(x, 0, 9.3), 0.0, true)
 		f.pose(_sit_pose(true), 1.0)
 	# Bank: sechs Ersatzspieler je Team, in der Haelfte des eigenen Teams
 	for t in 2:
 		var sx := -1.0 if t == 0 else 1.0
 		_box(Vector3(4.2, 0.45, 0.5), Vector3(sx * 6.2, 0.225, 9.0), _mat(Color(0.3, 0.32, 0.38)))
 		for i in 6:
-			var c := {"jersey": TEAM_COLORS[t], "shorts": Color(0.08, 0.12, 0.3) if t == 0 else Color(0.95, 0.95, 0.95),
-				"skin": VPlayer.SKINS[(i * 3 + t) % VPlayer.SKINS.size()], "hair": VPlayer.HAIRS[(i + t * 2) % VPlayer.HAIRS.size()]}
+			var style: TeamStyle = Teams.playing()[t]
+			var c := style.colors()
+			c["skin"] = VPlayer.SKINS[(i * 3 + t) % VPlayer.SKINS.size()]
+			c["hair"] = VPlayer.HAIRS[(i + t * 2) % VPlayer.HAIRS.size()]
 			var f := _seated(c, Vector3(sx * (4.4 + i * 0.7), 0, 9.05), 0.0)
-			f.set_number(20 + i + t * 10, Color.WHITE)
+			f.set_number(20 + i + t * 10, style.number)
 			bench[t].append(f)
 
 
-func _seated(colors: Dictionary, pos: Vector3, rot_y: float) -> HumanFigure:
+func _seated(colors: Dictionary, pos: Vector3, rot_y: float, official := false) -> HumanFigure:
 	var f := HumanFigure.new()
 	add_child(f)
 	f.hips_height = 0.5
-	f.build(colors, false, int(pos.x * 10.0) % 3)
+	f.build(colors, false, posmod(int(pos.x * 10.0), HumanFigure.HAIR_STYLES), official)
 	f.position = pos
 	f.rotation.y = rot_y
 	f.pose(_sit_pose(false))

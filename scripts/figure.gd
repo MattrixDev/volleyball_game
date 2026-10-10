@@ -86,6 +86,12 @@ func _mat(name: String, c: Color) -> StandardMaterial3D:
 	return m
 
 
+func _hide_mat(name: String) -> void:
+	var m: StandardMaterial3D = _mats[name]
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	m.albedo_color.a = 0.0
+
+
 func _joint(name: String, parent: Node3D, pos: Vector3) -> Node3D:
 	var n := Node3D.new()
 	n.position = pos
@@ -95,42 +101,55 @@ func _joint(name: String, parent: Node3D, pos: Vector3) -> Node3D:
 
 
 const MODEL := preload("res://assets/models/player.glb")
-const MAT_NAMES := ["skin", "jersey", "trim", "shorts", "socks", "pads", "shoes", "sole", "eyes", "hair"]
+const MAT_NAMES := ["skin", "jersey", "panel", "collar", "logo", "shorts", "socks", "pads", "shoes", "accent", "sole", "trousers", "hair"]
+const DEFAULTS := {
+	"skin": Color(0.86, 0.66, 0.52), "hair": Color(0.3, 0.2, 0.13), "jersey": Color(0.15, 0.19, 0.32),
+	"panel": Color(0.9, 0.9, 0.88), "collar": Color(0.9, 0.9, 0.88), "logo": Color(0.9, 0.9, 0.88),
+	"shorts": Color(0.15, 0.19, 0.32), "socks": Color(0.9, 0.9, 0.88), "pads": Color(0.1, 0.1, 0.11),
+	"shoes": Color(0.9, 0.9, 0.88), "accent": Color(0.15, 0.19, 0.32), "sole": Color(0.85, 0.85, 0.84),
+	"trousers": Color(0.12, 0.12, 0.14),
+}
+const HAIR_STYLES := 4
+static var _markers := {}
 
 var _skel: Skeleton3D
 var _bone := {}  # Gelenkname -> Knochenindex
 var _rest_rot := {}  # Gelenkname -> Ruhe-Drehung des Knochens (Skelett-Raum)
 var _parent := {}  # Gelenkname -> Elterngelenk ("" fuer die Huefte)
+var _rest_pos := {}  # Gelenkname -> Knochenposition in Ruhehaltung (Modell-Raum)
+var _model_y := 0.0
+var _num_shorts: Label3D
+var _num_style := "player"
 
 
-## Koerper bauen. colors: jersey, shorts, skin, hair, shoes, socks, trim (fehlende = Standard).
-## hair_style ist fuer spaetere Frisur-Varianten reserviert.
-func build(colors: Dictionary, with_pads := true, _hair_style := 0) -> void:
+## Koerper bauen. colors: Schluessel wie MAT_NAMES (fehlende = Standard), meist aus
+## TeamStyle.colors() plus skin/hair. hair_style 0..3 waehlt die Frisur, height skaliert
+## die Figur leicht. official = lange Hose statt Shorts, Socken und Knieschoner.
+func build(colors: Dictionary, with_pads := true, hair_style := 0, official := false, height := 1.0) -> void:
 	for n in MAT_NAMES:
-		_mat(n, Color.WHITE)
-	set_color("jersey", colors.get("jersey", Color.WHITE))
-	set_color("shorts", colors.get("shorts", Color(0.1, 0.1, 0.15)))
-	set_color("skin", colors.get("skin", Color(0.93, 0.76, 0.62)))
-	set_color("hair", colors.get("hair", Color(0.25, 0.17, 0.1)))
-	set_color("shoes", colors.get("shoes", Color(0.95, 0.95, 0.95)))
-	set_color("socks", colors.get("socks", Color(0.95, 0.95, 0.95)))
-	set_color("trim", colors.get("trim", Color(1, 1, 1)))
-	set_color("pads", Color(0.13, 0.13, 0.15))
-	set_color("sole", Color(0.2, 0.2, 0.22))
-	set_color("eyes", Color(0.08, 0.07, 0.07))
-	(_mats["skin"] as StandardMaterial3D).roughness = 0.7
-	if not with_pads:
-		var pm: StandardMaterial3D = _mats["pads"]
-		pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-		pm.albedo_color.a = 0.0
+		var m := _mat(n, colors.get(n, DEFAULTS[n]))
+		m.vertex_color_use_as_albedo = true
+		m.roughness = 0.92
+	(_mats["skin"] as StandardMaterial3D).roughness = 0.8
+	if not with_pads or official:
+		_hide_mat("pads")
+	if official:
+		_hide_mat("shorts")
+		_hide_mat("socks")
+		_hide_mat("logo")
+	else:
+		_hide_mat("trousers")
 
 	root_node = Node3D.new()
 	add_child(root_node)
+	root_node.scale = Vector3.ONE * height
 	var model: Node3D = MODEL.instantiate()
 	root_node.add_child(model)
 	_skel = model.find_child("Skeleton3D", true, false)
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
 		var m := mi as MeshInstance3D
+		if m.name.begins_with("hair_"):
+			m.visible = m.name == "hair_%d" % (posmod(hair_style, HAIR_STYLES))
 		for i in m.mesh.get_surface_count():
 			var mat_name := m.mesh.surface_get_material(i).resource_name
 			if _mats.has(mat_name):
@@ -142,11 +161,13 @@ func build(colors: Dictionary, with_pads := true, _hair_style := 0) -> void:
 		_bone[name] = b
 		var g := _skel.get_bone_global_rest(b)
 		rest_pos[name] = g.origin
+		_rest_pos[name] = g.origin
 		_rest_rot[name] = g.basis.get_rotation_quaternion()
 		var pb := _skel.get_bone_parent(b)
 		_parent[name] = _skel.get_bone_name(pb) if pb >= 0 else ""
 	# Sitzende Figuren (Bank) haben die Huefte tiefer: ganzes Modell verschieben.
 	model.position.y = hips_height - rest_pos["hips"].y
+	_model_y = model.position.y
 	for name in JOINTS:
 		var par: String = _parent[name]
 		var parent_node: Node3D = root_node if par == "" else j[par]
@@ -187,29 +208,49 @@ func _process(_delta: float) -> void:
 		_skel.set_bone_pose_rotation(_bone[name], actual if par == "" else (g[par] as Quaternion).inverse() * actual)
 
 
-## Rueckennummer und kleine Nummer vorne.
-func set_number(n: int, col: Color) -> void:
+## Nummern: gross auf dem Ruecken, kleiner vorn auf der Brust und auf dem linken Hosenbein
+## (Positionen aus player_markers.json, die das Blender-Skript mitschreibt).
+func set_number(n: int, col: Color, shorts_col: Variant = null) -> void:
 	if _num_back == null:
-		_num_back = _num_label(0.165, 0.0, 0.0034)
-		_num_front = _num_label(-0.17, PI, 0.0018)
-		_num_front.position.y = 0.38
-		_num_front.position.x = 0.08
-	_num_back.text = str(n)
-	_num_front.text = str(n)
-	_num_back.modulate = col
-	_num_front.modulate = col
+		_num_back = _num_label("num_back", 0.0034)
+		_num_front = _num_label("num_front", 0.0021)
+		_num_shorts = _num_label("num_shorts", 0.0012)
+	for l in [_num_back, _num_front, _num_shorts]:
+		if l:
+			l.text = str(n)
+			l.modulate = col
+	if _num_shorts and shorts_col != null:
+		_num_shorts.modulate = shorts_col
 
 
-func _num_label(z: float, rot_y: float, px: float) -> Label3D:
+static func markers() -> Dictionary:
+	if _markers.is_empty():
+		var f := FileAccess.open("res://assets/models/player_markers.json", FileAccess.READ)
+		if f:
+			_markers = JSON.parse_string(f.get_as_text())
+	return _markers
+
+
+func _num_label(key: String, px: float) -> Label3D:
+	var mk: Dictionary = markers().get(key, {})
+	if mk.is_empty() or not j.has(mk.bone):
+		return null
+	var pos := Vector3(mk.pos[0], mk.pos[1], mk.pos[2])
+	var nrm := Vector3(mk.normal[0], mk.normal[1], mk.normal[2]).normalized()
 	var l := Label3D.new()
 	l.font_size = 64
 	l.outline_size = 0
 	l.pixel_size = px
 	l.double_sided = false
-	l.position = Vector3(0, 0.25, z)
-	l.rotation.y = rot_y
 	l.shaded = true
-	j["chest"].add_child(l)
+	var font := SystemFont.new()
+	font.font_names = PackedStringArray(["DejaVu Sans", "Arial", "Sans-Serif"])
+	font.font_weight = 800
+	l.font = font
+	# Label3D zeigt nach +Z: auf die Flaechennormale drehen, knapp ueber dem Stoff
+	l.position = pos + nrm * 0.012 - _rest_pos[mk.bone]
+	l.basis = Basis.looking_at(-nrm, Vector3.UP)
+	(j[mk.bone] as Node3D).add_child(l)
 	return l
 
 

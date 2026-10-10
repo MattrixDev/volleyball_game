@@ -31,9 +31,10 @@ const OVERCHARGE := 1.25  # ab hier ist der Schlag ueberzogen
 const OVER_OK := 12.0  # bis zu dieser Ballgeschwindigkeit (m/s) ist Pritschen sicher
 const OVER_RISKY := 17.0  # darueber droht "Ball gehalten"
 
-const TEAM_NAMES := ["SV Nordhafen", "TSV Eichenberg"]
-const TEAM_COLORS := [Color(0.16, 0.38, 0.86), Color(0.85, 0.2, 0.18)]
-const LIBERO_COLORS := [Color(0.98, 0.82, 0.15), Color(0.95, 0.95, 0.95)]
+## Namen und Trikots kommen aus teams/*.tres (siehe Teams, TeamStyle).
+var TEAM_NAMES: Array = Teams.playing().map(func(t): return t.name)
+var TEAM_COLORS: Array = Teams.playing().map(func(t): return t.jersey)
+var LIBERO_COLORS: Array = Teams.playing().map(func(t): return t.libero_jersey)
 ## Positionen je Spielsituation (lokal: Abstand zum Netz, seitlich; negativ = links).
 ## Beim Aufschlag und der Annahme stehen alle in Rotationsreihenfolge (Position 1 bis 6),
 ## damit die Aufstellung regelgerecht ist (keine Ueberlappung). Danach laufen die
