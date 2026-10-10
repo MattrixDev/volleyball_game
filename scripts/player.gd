@@ -51,6 +51,13 @@ var _run_phase := 0.0
 var _run_amt := 0.0
 var _last_pos := Vector3.ZERO
 var _jersey := Color.WHITE
+var _move_fwd := 1.0
+var _move_side := 0.0
+var _was_air := false
+var _takeoff_t := -10.0
+var _land_t := -10.0
+var _stiff := 20.0
+var _root_y := 0.0
 
 
 func setup(p_team: int, p_role: String, _tag_letter: String, p_number: int, color: Color) -> void:
@@ -197,8 +204,20 @@ func _animate(delta: float) -> void:
 	var moved := Vector3(position.x - _last_pos.x, 0.0, position.z - _last_pos.z)
 	_last_pos = position
 	var speed := moved.length() / maxf(delta, 0.0001)
-	_run_amt = lerpf(_run_amt, clampf(speed / 4.5, 0.0, 1.0) if not airborne else 0.0, clampf(delta * 10.0, 0.0, 1.0))
-	_run_phase += speed * delta * 2.6
+	var k := clampf(delta * 8.0, 0.0, 1.0)
+	_run_amt = lerpf(_run_amt, clampf(speed / 4.5, 0.0, 1.0) if not airborne else 0.0, k)
+	# Laufrichtung relativ zur Blickrichtung: vorwaerts, rueckwaerts oder seitlich (Nachstellschritt).
+	if speed > 0.3:
+		var loc := moved.rotated(Vector3.UP, -_yaw) / moved.length()
+		_move_fwd = lerpf(_move_fwd, -loc.z, k)
+		_move_side = lerpf(_move_side, loc.x, k)
+	# Schrittlaenge ca. 1,8 m pro Doppelschritt, damit die Fuesse nicht rutschen.
+	_run_phase += speed * delta * 3.5
+	if airborne and not _was_air:
+		_takeoff_t = now
+	if _was_air and not airborne:
+		_land_t = now
+	_was_air = airborne
 
 	# Blickrichtung: zum Ball, beim Block und Angriff zum Netz.
 	var face := look_target - position
@@ -208,26 +227,28 @@ func _animate(delta: float) -> void:
 		face = Vector3(-side, 0.0, 0.0)
 	face.y = 0.0
 	var want := atan2(-face.x, -face.z)
-	_yaw = lerp_angle(_yaw, want, clampf(delta * 8.0, 0.0, 1.0))
+	_yaw = lerp_angle(_yaw, want, clampf(delta * 7.0, 0.0, 1.0))
 	fig.rotation.y = _yaw
 
+	_stiff = 20.0
 	var p := _target_pose()
-	fig.pose(p, clampf(delta * 16.0, 0.0, 1.0))
-	# Huefthoehe so, dass die Fuesse am Boden bleiben (Knie gebeugt = tiefer).
-	var legs := 0.0
-	for sd in ["l", "r"]:
-		var a: float = fig.j["hip_" + sd].rotation.x
-		var b: float = fig.j["kn_" + sd].rotation.x
-		legs = maxf(legs, 0.46 * cos(a) + 0.44 * cos(a + b))
-	var drop := 0.9 - legs
-	fig.root_node.position.y = jump_h - drop
+	fig.pose_spring(p, delta, _stiff)
 	# Hechten: ganzer Koerper kippt nach vorn.
 	var tilt := 0.0
 	if dive_timer > 0.0:
-		var k := clampf(dive_timer / 0.7, 0.0, 1.0)
-		tilt = -1.15 * sin(k * PI)
-	fig.root_node.rotation.x = lerpf(fig.root_node.rotation.x, tilt, clampf(delta * 14.0, 0.0, 1.0))
-	fig.root_node.position.y -= absf(fig.root_node.rotation.x) * 0.2
+		# Ablauf: nach vorn abdruecken, flach auf den Bauch rutschen, wieder aufstehen.
+		var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+		tilt = -1.45 * smoothstep(0.0, 0.35, kd) * (1.0 - smoothstep(0.7, 1.0, kd))
+	fig.root_node.rotation.x = lerpf(fig.root_node.rotation.x, tilt, clampf(delta * 12.0, 0.0, 1.0))
+	# Hoehe: am Boden setzt der tiefste Koerperpunkt genau auf, in der Luft traegt die Sprunghoehe.
+	# So sinkt niemand in den Boden ein, egal wie Knie und Huefte gebeugt sind.
+	fig.root_node.position.y = 0.0
+	var low := fig.lowest_point(dive_timer > 0.0)
+	var y := -low
+	if airborne:
+		y = maxf(jump_h, -fig.lowest_point(false))
+	_root_y = maxf(lerpf(_root_y, y, clampf(delta * 25.0, 0.0, 1.0)), -low)
+	fig.root_node.position.y = _root_y
 
 
 func _arm(p: Dictionary, sd: String, fwd: float, out: float, elbow: float, wrist := 0.0, twist := 0.0) -> void:
@@ -245,7 +266,8 @@ func _leg(p: Dictionary, sd: String, thigh: float, knee: float, spread := 0.0) -
 
 
 func _p_idle() -> Dictionary:
-	var p := {"chest": Vector3(-0.04, 0, 0), "head": Vector3(0.05, 0, 0)}
+	var br := sin(now * 1.6 + number) * 0.03
+	var p := {"chest": Vector3(-0.04 + br, 0, 0), "head": Vector3(0.05 - br, 0, 0)}
 	_arm(p, "l", 0.1, 0.1, 0.25)
 	_arm(p, "r", 0.1, 0.1, 0.25)
 	_leg(p, "l", 0.1, 0.15, 0.05)
@@ -254,22 +276,37 @@ func _p_idle() -> Dictionary:
 
 
 func _p_ready() -> Dictionary:
-	var p := {"hips": Vector3(-0.15, 0, 0), "chest": Vector3(-0.3, 0, 0), "head": Vector3(0.35, 0, 0)}
-	_arm(p, "l", 0.65, 0.2, 0.9)
-	_arm(p, "r", 0.65, 0.2, 0.9)
-	_leg(p, "l", 0.6, 1.0, 0.12)
-	_leg(p, "r", 0.6, 1.0, 0.12)
+	# Leichtes Wippen und Gewicht verlagern, damit niemand wie eingefroren dasteht.
+	var t := now * 3.2 + number * 1.7
+	var bob := sin(t) * 0.07
+	var shift := sin(t * 0.37) * 0.05
+	var p := {"hips": Vector3(-0.15, 0, shift), "chest": Vector3(-0.3, 0, -shift * 0.6), "head": Vector3(0.35, 0, 0)}
+	_arm(p, "l", 0.65 + bob, 0.2, 0.9 + bob)
+	_arm(p, "r", 0.65 + bob, 0.2, 0.9 + bob)
+	_leg(p, "l", 0.6 + bob, 1.0 + bob * 1.8, 0.12)
+	_leg(p, "r", 0.6 + bob, 1.0 + bob * 1.8, 0.12)
 	return p
 
 
 func _p_run(a: float) -> Dictionary:
-	var ph := _run_phase
-	var p := {"hips": Vector3(-0.1 * a, 0, 0), "chest": Vector3(-0.25 * a, 0, 0), "head": Vector3(0.2 * a, 0, 0)}
+	var ph := _run_phase * (1.0 if _move_fwd >= -0.3 else -1.0)
 	var sl := sin(ph)
-	_leg(p, "l", 0.25 + sl * 0.7, 0.35 + maxf(0.0, -sl) * 1.1)
-	_leg(p, "r", 0.25 - sl * 0.7, 0.35 + maxf(0.0, sl) * 1.1)
-	_arm(p, "l", -sl * 0.7 + 0.2, 0.12, 1.4)
-	_arm(p, "r", sl * 0.7 + 0.2, 0.12, 1.4)
+	var side_w := clampf(absf(_move_side) * 1.4 - 0.3, 0.0, 1.0)
+	# Vorwaerts: Oberkoerper nach vorn, Arme gegengleich, Knie hoch beim Durchschwingen.
+	var p := {"hips": Vector3(-0.12 * a, sl * 0.12 * a, 0), "chest": Vector3(-0.22 * a, -sl * 0.18 * a, 0), "head": Vector3(0.22 * a, 0, 0)}
+	_leg(p, "l", 0.2 + sl * 0.75 * a, 0.3 + maxf(0.0, -cos(ph)) * 1.3 * a)
+	_leg(p, "r", 0.2 - sl * 0.75 * a, 0.3 + maxf(0.0, cos(ph)) * 1.3 * a)
+	_arm(p, "l", -sl * 0.8 * a + 0.25, 0.14, 1.45)
+	_arm(p, "r", sl * 0.8 * a + 0.25, 0.14, 1.45)
+	if side_w > 0.0:
+		# Seitlich: tiefer Nachstellschritt, Beine gehen auseinander und wieder zusammen.
+		var q := {"hips": Vector3(-0.2, 0, 0), "chest": Vector3(-0.3, 0, 0), "head": Vector3(0.35, 0, 0)}
+		var open := absf(sl)
+		_leg(q, "l", 0.55, 0.95, 0.1 + open * 0.3)
+		_leg(q, "r", 0.55, 0.95, 0.1 + open * 0.3)
+		_arm(q, "l", 0.7, 0.2, 0.95)
+		_arm(q, "r", 0.7, 0.2, 0.95)
+		p = _mix(p, q, side_w)
 	return p
 
 
@@ -292,15 +329,23 @@ func _p_set() -> Dictionary:
 
 
 ## Angriff in der Luft: rel = Zeit relativ zum Treffpunkt (negativ = davor).
+## Ablauf: beide Arme hoch, Schlagarm hinter den Kopf ziehen (Bogenspannung), dann durchschlagen.
 func _p_spike(rel: float) -> Dictionary:
 	var p := {}
-	var swing := clampf((rel + 0.06) / 0.16, 0.0, 1.0)
-	p["chest"] = Vector3(lerpf(0.25, -0.4, swing), lean * 0.35, 0)
-	p["head"] = Vector3(0.45, 0, 0)
-	_arm(p, "r", lerpf(2.95, 0.7, swing), lerpf(0.45, 0.15, swing), lerpf(2.0, 0.2, swing))
-	_arm(p, "l", lerpf(2.6, 0.9, swing), 0.15, lerpf(0.2, 0.6, swing))
-	_leg(p, "l", lerpf(0.5, 0.7, swing), lerpf(1.1, 0.8, swing), 0.1)
-	_leg(p, "r", lerpf(0.15, 0.6, swing), lerpf(0.9, 0.7, swing), 0.1)
+	var cock := smoothstep(-0.45, -0.12, rel)
+	var swing := smoothstep(-0.07, 0.1, rel)
+	var follow := smoothstep(0.1, 0.4, rel)
+	var arch := cock * (1.0 - swing)
+	p["hips"] = Vector3(lerpf(0.0, 0.12, arch) - swing * 0.15, 0, 0)
+	p["chest"] = Vector3(0.3 * arch - 0.45 * swing + 0.2 * follow, lean * 0.35 - 0.35 * arch + 0.3 * swing, 0)
+	p["head"] = Vector3(0.5 - 0.15 * swing, 0, 0)
+	# Schlagarm (rechts): hoch -> hinter den Kopf, Ellbogen hoch -> gestreckt durch -> nach unten aus
+	var sh_up := lerpf(2.4, 2.95, cock)
+	_arm(p, "r", lerpf(sh_up, 0.55, swing) + follow * 0.1, lerpf(0.25, 0.55, arch), lerpf(lerpf(0.3, 2.1, cock), 0.15, swing), 0.3 * swing)
+	# Gegenarm zeigt zum Ball, zieht beim Schlag nach unten zum Koerper
+	_arm(p, "l", lerpf(2.6, 0.7, swing), 0.12, lerpf(0.25, 1.0, swing))
+	_leg(p, "l", lerpf(0.35, 0.65, swing), lerpf(1.2, 0.7, swing), 0.1)
+	_leg(p, "r", lerpf(0.0, 0.55, swing), lerpf(1.25, 0.6, swing), 0.1)
 	return p
 
 
@@ -333,11 +378,14 @@ func _p_block() -> Dictionary:
 
 
 func _p_dive() -> Dictionary:
-	var p := {"chest": Vector3(-0.1, 0, 0), "head": Vector3(0.7, 0, 0)}
-	_arm(p, "l", 2.4, 0.15, 0.0)
-	_arm(p, "r", 2.4, 0.15, 0.0)
-	_leg(p, "l", -0.2, 0.3)
-	_leg(p, "r", 0.3, 0.6)
+	var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+	var flat := smoothstep(0.1, 0.4, kd) * (1.0 - smoothstep(0.7, 0.95, kd))
+	var p := {"chest": Vector3(0.1 * flat, 0, 0), "head": Vector3(0.7 + 0.3 * flat, 0, 0)}
+	_arm(p, "l", 2.6, 0.2, 0.05)
+	_arm(p, "r", 2.6, 0.2, 0.05)
+	# Abdruck: ein Bein gebeugt vorn; flach: beide Beine gestreckt nach hinten
+	_leg(p, "l", lerpf(0.9, -0.15, flat), lerpf(1.2, 0.25, flat))
+	_leg(p, "r", lerpf(0.1, -0.05, flat), lerpf(0.4, 0.4, flat))
 	return p
 
 
@@ -387,31 +435,53 @@ static func _mix(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
 
 func _target_pose() -> Dictionary:
 	if dive_timer > 0.0:
+		_stiff = 30.0
 		return _p_dive()
 	if celebrate_until > now:
+		_stiff = 16.0
 		return _p_celebrate()
 	var rel := now - anim_t
 	if anim_kind == "serve_hold":
 		return _p_serve_hold()
 	if anim_kind == "serve" and rel < 0.5:
+		_stiff = 42.0
 		return _p_serve(rel, anim_tech == "jump")
 	if block_pose:
+		_stiff = 30.0
 		return _p_block()
 	if anim_kind == "attack" and rel < 0.5:
 		if airborne:
+			_stiff = 45.0
 			return _p_spike(rel)
 		if rel > -0.9:
+			_stiff = 28.0
 			return _p_approach()
+	_stiff = 22.0 + _run_amt * 10.0
 	var base := _p_ready() if alert else _p_idle()
 	if _run_amt > 0.05:
 		base = _mix(base, _p_run(_run_amt), clampf(_run_amt * 1.6, 0.0, 1.0))
 	if airborne:
 		base = _mix(base, _p_spike(-0.5), 0.6)
-	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.6 and rel < 0.45:
-		var tech := _p_set() if anim_kind == "set" and anim_tech == "over" else (_p_set() if anim_tech == "over" else _p_bump())
-		var w := clampf((rel + 0.6) / 0.35, 0.0, 1.0) * clampf((0.45 - rel) / 0.2, 0.0, 1.0)
+	# Landung: kurz in die Knie federn.
+	var land := 1.0 - clampf((now - _land_t) / 0.35, 0.0, 1.0)
+	if land > 0.0:
+		base = _mix(base, _p_land(), sin(land * PI * 0.5) * 0.8)
+		_stiff = 30.0
+	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.7 and rel < 0.5:
+		var tech := _p_set() if anim_tech == "over" else _p_bump()
+		var w := smoothstep(-0.7, -0.3, rel) * (1.0 - smoothstep(0.2, 0.5, rel))
 		base = _mix(base, tech, w)
+		_stiff = 26.0
 	return base
+
+
+func _p_land() -> Dictionary:
+	var p := {"hips": Vector3(-0.3, 0, 0), "chest": Vector3(-0.25, 0, 0), "head": Vector3(0.3, 0, 0)}
+	_arm(p, "l", 0.5, 0.35, 0.6)
+	_arm(p, "r", 0.5, 0.35, 0.6)
+	_leg(p, "l", 0.95, 1.5, 0.15)
+	_leg(p, "r", 0.95, 1.5, 0.15)
+	return p
 
 
 ## Zustand fuer die Wiederholung aufzeichnen und wieder herstellen.
@@ -431,4 +501,22 @@ func restore(s: Array) -> void:
 	fig.apply(s[8])
 	fig.rotation.y = s[9]
 	_yaw = s[9]
+	_root_y = fig.root_node.position.y
+	_last_pos = position
+
+
+## Wie restore(), aber zwischen zwei Aufzeichnungen gemischt (w = 0..1), fuer weiche Zeitlupe.
+func restore_mix(a: Array, b: Array, w: float) -> void:
+	restore(a if w < 0.5 else b)
+	position = (a[0] as Vector3).lerp(b[0], w)
+	jump_h = lerpf(a[1], b[1], w)
+	var ca: Array = a[8]
+	var cb: Array = b[8]
+	var c := []
+	for i in ca.size():
+		c.append((ca[i] as Vector3).lerp(cb[i], w))
+	fig.apply(c)
+	fig.rotation.y = lerp_angle(a[9], b[9], w)
+	_yaw = fig.rotation.y
+	_root_y = fig.root_node.position.y
 	_last_pos = position

@@ -91,6 +91,7 @@ var clock := 0.0
 var players: Array = [[], []]
 var ball: Node3D
 var ball_mesh: MeshInstance3D
+var _replay_jump := false
 var ball_shadow: MeshInstance3D
 var ball_vel := Vector3.ZERO
 var ball_g := G
@@ -632,6 +633,7 @@ func start_rally() -> void:
 			pl.reset_state()
 	ball_vel = Vector3.ZERO
 	_hold_ball_at_server()
+	reset_physics_interpolation()
 	pause_until = clock + (0.15 if autoplay else 1.2)
 	if serving_team == human_team:
 		serve_aim = Vector2(5.5, 0.0)
@@ -1041,6 +1043,7 @@ func _start_replay() -> void:
 	_replay_i = 0
 	_replay_ev_i = 0
 	_replay_t = _replay[0][0]
+	_replay_jump = true
 	phase = Phase.REPLAY
 	points_since_replay = 0
 	stats["Wiederholungen"] = stats.get("Wiederholungen", 0) + 1
@@ -1057,13 +1060,21 @@ func _step_replay(real_delta: float, skip: bool) -> void:
 	_replay_t += real_delta * (0.33 if near else 0.6)
 	while _replay_i < _replay.size() - 1 and _replay[_replay_i + 1][0] <= _replay_t:
 		_replay_i += 1
+	# Zwischen zwei aufgezeichneten Bildern weich mischen, damit die Zeitlupe nicht ruckelt.
 	var f: Array = _replay[_replay_i]
-	ball.position = f[1]
+	var g: Array = _replay[mini(_replay_i + 1, _replay.size() - 1)]
+	var w := 0.0
+	if g[0] > f[0]:
+		w = clampf((_replay_t - f[0]) / (g[0] - f[0]), 0.0, 1.0)
+	ball.position = (f[1] as Vector3).lerp(g[1], w)
 	var k := 0
 	for t in 2:
 		for pl in players[t]:
-			pl.restore(f[2][k])
+			pl.restore_mix(f[2][k], g[2][k], w)
 			k += 1
+	if _replay_jump:
+		_replay_jump = false
+		reset_physics_interpolation()
 	while _replay_ev_i < _replay_ev.size() and _replay_ev[_replay_ev_i][0] <= _replay_t:
 		var e: Array = _replay_ev[_replay_ev_i]
 		contact.emit(e[1], e[2], e[3])
@@ -1079,6 +1090,7 @@ func _end_replay() -> void:
 			pl.restore(_replay_live[k])
 			k += 1
 	ball.position = _replay_live[k]
+	reset_physics_interpolation()
 	_replay = []
 	phase = Phase.POINT_PAUSE
 	pause_until = clock + 0.6
@@ -2269,6 +2281,7 @@ func _do_side_change() -> void:
 			pl.set_side(side_of(t))
 			pl.position = Vector3(-pl.position.x, 0.0, -pl.position.z)
 			pl.target = pl.position
+	reset_physics_interpolation()
 	phase = Phase.TIMEOUT
 	timeout_team = -1
 	pause_until = clock + (0.3 if autoplay else 3.5)

@@ -25,18 +25,25 @@ var _shot_phase_t := 0.0
 func _ready() -> void:
 	_setup_input()
 	arena = Arena.new()
+	# Spieler und Ball laufen mit 120 Hz Physik und werden fuer jeden Bildschirm-Frame
+	# weich dazwischen gerechnet (Physik-Interpolation). Was in _process bewegt wird
+	# (Kamera, Halle, Publikum, Effekte), braucht das nicht.
+	arena.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(arena)
 	camera = Camera3D.new()
+	camera.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	camera.fov = 52.0
 	add_child(camera)
 	camera.position = _cam_base
 	camera.look_at(Vector3(1.5, 1.0, 0.0))
 
 	fx = HitFx.new()
+	fx.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(fx)
 	sfx = SoundBank.new()
 	add_child(sfx)
 	crowd = CrowdView.new()
+	crowd.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	add_child(crowd)
 	hud = HudScript.new()
 	add_child(hud)

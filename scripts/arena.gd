@@ -239,7 +239,7 @@ func _scoreboards() -> void:
 		_box(Vector3(0.4, 3.0, 9.0), pos, _mat(Color(0.08, 0.09, 0.12), 0.4))
 		_box(Vector3(0.42, 0.2, 9.2), pos + Vector3(0, 1.55, 0), _mat(Color(1.0, 0.78, 0.25), 0.5, 0.4))
 		var inward := Vector3(0, 0, 1).rotated(Vector3.UP, rot) * 0.22
-		var l := _label("", pos + inward, rot, 96, Color(1.0, 0.95, 0.75), 0.0068)
+		var l := _label("", pos + inward, rot, 96, Color(1.0, 0.95, 0.75), 0.006)
 		l.shaded = false
 		_boards.append(l)
 

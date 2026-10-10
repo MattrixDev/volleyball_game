@@ -7,7 +7,8 @@ Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/cod
 ## Stand: Phase 2b – Sounds und Low-Poly-Look
 
 - Neue Geräusche: Pfiff, Ballkontakte, Netz, Boden, Schuhquietschen und Publikum klingen näher an einer echten Halle (mit Hall). Erzeugt mit `tools/make_sounds.py`, liegen als WAV in `assets/sounds/`
-- Eigene Low-Poly-Spieler mit Armen, Händen, Beinen, Trikotnummern, Knieschonern und Schuhen; Bewegungen für Laufen, Bereitschaft, Baggern, Pritschen, Angriff, Block, Hechten, Aufschlag und Jubel
+- Eigene Spielerfiguren, weich gerundet: Gesicht mit Augen und Brauen, Finger, Trikot mit Kragen und Säumen, Knieschoner und Schuhe mit Sohle; Bewegungen für Laufen (auch rückwärts und Seitschritt), Bereitschaft, Baggern, Pritschen, Angriff mit Ausholen, Block, Hechten flach auf den Boden, Landung, Aufschlag und Jubel
+- Flüssige Bewegungen: Gelenke federn weich in jede Haltung, der tiefste Körperpunkt steht immer genau auf dem Boden, Physik-Interpolation für jeden Bildschirm-Frame, Zeitlupe mischt zwischen den aufgezeichneten Bildern
 - Ganze Arena: Hallenboden mit Freizone, Tribünen mit Stufen, Deckenlampen, Werbebanden, Anzeigetafeln, Schiedsrichter als 3D-Figur auf dem Stuhl, Kampfgericht und Ersatzbänke
 - Helle, kräftige Farben; Ball mit Streifen, der sich dreht
 - Keine Namensschilder über den Köpfen, nur der eigene Spieler hat den gelben Ring
@@ -67,7 +68,8 @@ godot res://scenes/main.tscn -- --botplay --shot-phase=REPLAY:bild.png --quit-af
 | `scripts/match.gd` | Spielablauf, Regeln, KI, Ballberührungen |
 | `scripts/ballistics.gd` | Flugbahnen und Vorhersage |
 | `scripts/player.gd` | Spieler: Laufen, Springen, Hechten, Posen |
-| `scripts/figure.gd` | Low-Poly-Körper mit Gelenken |
+| `scripts/figure.gd` | Spielerkörper mit Gelenken, weiche Posen, Bodenkontakt |
+| `tools/anim_strip.gd`, `tools/closeup.gd`, `tools/pose_shot.gd` | Prüfbilder für Bewegungen und Figuren |
 | `scripts/arena.gd` | Halle, Tribünen, Anzeigetafel, Schiedsrichter, Bänke |
 | `scripts/main.gd` | Halle, Kamera, Steuerung, verbindet Geräusche und Effekte |
 | `scripts/sfx.gd` | Spielt Geräusche und Publikumsklänge ab |
