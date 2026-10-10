@@ -342,29 +342,14 @@ func _unshaded(c: Color) -> StandardMaterial3D:
 func _make_ball() -> void:
 	ball = Node3D.new()
 	add_child(ball)
+	# Ball aus Blender (assets/models/ball.glb, r = 10,5 cm), etwas groesser gezeichnet,
+	# damit man ihn gut sieht
+	var src: Node3D = preload("res://assets/models/ball.glb").instantiate()
+	var bm := src.find_children("*", "MeshInstance3D", true, false)[0] as MeshInstance3D
 	ball_mesh = MeshInstance3D.new()
-	var s := SphereMesh.new()
-	s.radius = 0.14  # etwas groesser gezeichnet, damit man ihn gut sieht
-	s.height = 0.28
-	s.radial_segments = 14
-	s.rings = 8
-	ball_mesh.mesh = s
-	# Volleyball-Muster: geschwungene Streifen in Gelb, Blau und Weiss
-	var img := Image.create(64, 32, false, Image.FORMAT_RGB8)
-	var cols := [Color(1.0, 0.85, 0.15), Color(0.12, 0.3, 0.75), Color(0.97, 0.97, 0.97)]
-	for y in 32:
-		for x in 64:
-			var u := x / 64.0
-			var v := y / 32.0
-			var band := int(floor((v + 0.12 * sin(u * TAU * 3.0)) * 6.0)) % 3
-			img.set_pixel(x, y, cols[band])
-	var m := StandardMaterial3D.new()
-	m.albedo_texture = ImageTexture.create_from_image(img)
-	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	m.roughness = 0.6
-	m.emission_enabled = true
-	m.emission = Color(0.12, 0.1, 0.03)
-	ball_mesh.material_override = m
+	ball_mesh.mesh = bm.mesh
+	ball_mesh.scale = Vector3.ONE * (0.14 / 0.105)
+	src.free()
 	ball.add_child(ball_mesh)
 
 	ball_shadow = MeshInstance3D.new()

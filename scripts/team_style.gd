@@ -25,6 +25,12 @@ extends Resource
 @export var libero_number := Color(0.15, 0.19, 0.32)
 
 
+## Name fuer die Anzeigetafel: das letzte Wort in Grossbuchstaben ("SV Nordhafen" -> NORDHAFEN).
+func board_name() -> String:
+	var parts := name.split(" ")
+	return parts[parts.size() - 1].to_upper()
+
+
 ## Farben fuer HumanFigure.build (Schluessel = Materialnamen im Modell).
 func colors(libero := false) -> Dictionary:
 	return {

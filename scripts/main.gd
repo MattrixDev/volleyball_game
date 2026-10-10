@@ -271,7 +271,9 @@ func _action(name: String, keys: Array, buttons: Array, axes: Array = []) -> voi
 ## Anzeigetafel, 3D-Schiedsrichter und Schuhquietschen beim Absprung und Hechten.
 func _update_hall() -> void:
 	var m = match_node
-	arena.set_scoreboard("%s  %d : %d  %s\nSATZ %d   ·   SÄTZE %d : %d" % ["NORDHAFEN", m.score[0], m.score[1], "EICHENBERG",
+	var tn: Array = Teams.playing()
+	arena.ball_pos = m.ball.position
+	arena.set_scoreboard("%s  %d : %d  %s\nSATZ %d   ·   SÄTZE %d : %d" % [tn[0].board_name(), m.score[0], m.score[1], tn[1].board_name(),
 		maxi(m.set_no, 1), m.sets_won[0], m.sets_won[1]])
 	var sig: String = hud.ref_pose_name()
 	var team: int = m.serving_team

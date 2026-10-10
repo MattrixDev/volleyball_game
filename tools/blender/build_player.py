@@ -356,7 +356,7 @@ def build_shorts(body):
         return 0.665 < c.z < 1.07 and abs(c.x) < 0.3
 
     def push(co):
-        return 0.02 + max(0.0, 0.93 - co.z) * 0.13  # Beine weiten sich nach unten
+        return 0.018 + max(0.0, 0.93 - co.z) * 0.06  # Beine weiten sich leicht nach unten
     s = shell(body, "shorts", "shorts", keep, push)
     s = facet(s, 700)
     return thicken(s, 0.007)

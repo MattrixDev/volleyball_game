@@ -2,9 +2,9 @@ class_name Arena
 extends Node3D
 ## Low-Poly-Sporthalle: Boden mit Spielfeld, Netz, Tribuenen, Werbebanden, Anzeigetafeln,
 ## Decke mit Lichtfeldern, Schiedsrichter auf dem Stuhl, Bank mit Auswechselspielern,
-## Kampfgericht. Hell und freundlich.
+## Kampfgericht, Linienrichter. Die Halle selbst kommt aus Blender (assets/models/arena.glb,
+## tools/blender/build_arena.py), hier werden Bildschirme, Licht und Figuren ergaenzt.
 
-var TEAM_COLORS: Array = Teams.playing().map(func(t): return t.jersey)
 ## Kleidung der Schiedsrichter, Linienrichter und Schreiber
 const OFFICIAL := {"jersey": Color(0.86, 0.86, 0.84), "panel": Color(0.2, 0.21, 0.24), "collar": Color(0.2, 0.21, 0.24),
 	"trousers": Color(0.17, 0.18, 0.2), "shoes": Color(0.14, 0.14, 0.15), "accent": Color(0.14, 0.14, 0.15), "sole": Color(0.3, 0.3, 0.3)}
@@ -17,6 +17,14 @@ var _ref_side := 0.0
 var _whistle_t := -10.0
 var _time := 0.0
 var bench: Array = [[], []]  # sitzende Figuren je Team
+var line_judges: Array = []  # [Figur, Ecke (Vector3)]
+var ball_pos := Vector3.ZERO  # vom Spiel gesetzt: wo der Ball gerade ist
+var _meshes := {}  # Name -> MeshInstance3D aus arena.glb
+const HALL := preload("res://assets/models/arena.glb")
+const FLAG := preload("res://assets/models/flag.glb")
+## Gedaempfte Bandenfarben (wie die Stilvorlage)
+const AD_COLORS := [Color(0.17, 0.21, 0.33), Color(0.45, 0.19, 0.22), Color(0.36, 0.45, 0.4), Color(0.66, 0.53, 0.28),
+	Color(0.32, 0.36, 0.42), Color(0.6, 0.36, 0.27), Color(0.25, 0.37, 0.41), Color(0.5, 0.44, 0.38)]
 
 
 func _mat(c: Color, rough := 0.85, emit := 0.0) -> StandardMaterial3D:
@@ -30,24 +38,6 @@ func _mat(c: Color, rough := 0.85, emit := 0.0) -> StandardMaterial3D:
 	if c.a < 1.0:
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	return m
-
-
-func _box(size: Vector3, pos: Vector3, mat: Material, parent: Node3D = null) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.mesh = HumanFigure.box(size)
-	mi.material_override = mat
-	mi.position = pos
-	(parent if parent else self).add_child(mi)
-	return mi
-
-
-func _cyl(r: float, h: float, pos: Vector3, mat: Material, seg := 8) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.mesh = HumanFigure.cyl(r, r, h, seg)
-	mi.material_override = mat
-	mi.position = pos
-	add_child(mi)
-	return mi
 
 
 func _label(text: String, pos: Vector3, rot_y: float, size: int, col: Color, px := 0.01) -> Label3D:
@@ -66,185 +56,89 @@ func _label(text: String, pos: Vector3, rot_y: float, size: int, col: Color, px 
 
 func _ready() -> void:
 	_environment()
-	_floor()
-	_net()
-	_walls_and_ceiling()
-	_stands()
-	_ad_boards()
-	_scoreboards()
+	_hall()
+	_screens()
 	_officials()
+	_line_judges()
 
 
+## Weiches, gedaempftes Hallenlicht wie in der Stilvorlage: viel Umgebungslicht, eine
+## schwache Hauptrichtung fuer die Facetten, weiche Schatten.
 func _environment() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.55, 0.62, 0.72)
+	e.background_color = Color(0.2, 0.21, 0.24)
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.92, 0.94, 1.0)
-	e.ambient_light_energy = 0.42
+	e.ambient_light_color = Color(0.93, 0.92, 0.9)
+	e.ambient_light_energy = 0.5
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	e.tonemap_exposure = 0.92
+	e.tonemap_exposure = 0.9
+	e.adjustment_enabled = true
+	e.adjustment_saturation = 0.88
+	e.adjustment_contrast = 1.03
 	env.environment = e
 	add_child(env)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-68.0, -28.0, 0.0)
-	sun.light_energy = 0.9
-	sun.light_color = Color(1.0, 0.97, 0.92)
+	sun.rotation_degrees = Vector3(-62.0, -32.0, 0.0)
+	sun.light_energy = 0.75
+	sun.light_color = Color(1.0, 0.96, 0.9)
 	sun.shadow_enabled = true
-	sun.shadow_opacity = 0.65
+	sun.shadow_opacity = 0.5
+	sun.shadow_blur = 2.0
 	sun.directional_shadow_max_distance = 60.0
 	add_child(sun)
 	# Zweites, schwaches Licht von der anderen Seite, damit nichts zu dunkel wird.
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-35.0, 150.0, 0.0)
-	fill.light_energy = 0.22
+	fill.light_energy = 0.3
+	fill.light_color = Color(0.9, 0.93, 1.0)
 	add_child(fill)
 
 
-func _floor() -> void:
-	# Freizone blau, Spielfeld orange (18 x 9 m), Linien 5 cm
-	_box(Vector3(44.0, 0.1, 30.0), Vector3(0, -0.05, 0), _mat(Color(0.22, 0.5, 0.82), 0.6))
-	_box(Vector3(18.0, 0.01, 9.0), Vector3(0, 0.003, 0), _mat(Color(0.9, 0.42, 0.18), 0.55))
-	var white := _mat(Color(0.98, 0.98, 0.98), 0.5)
-	var lw := 0.05
-	for x in [-9.0, 9.0]:
-		_box(Vector3(lw, 0.012, 9.0 + lw), Vector3(x, 0.006, 0), white)
-	for z in [-4.5, 4.5]:
-		_box(Vector3(18.0 + lw, 0.012, lw), Vector3(0, 0.006, z), white)
-	for x in [-3.0, 0.0, 3.0]:
-		_box(Vector3(lw, 0.012, 9.0), Vector3(x, 0.006, 0), white)
-	# Angriffslinien gestrichelt ueber das Feld hinaus verlaengert (FIVB)
-	for x in [-3.0, 3.0]:
-		for sz in [-1.0, 1.0]:
-			for k in 5:
-				_box(Vector3(lw, 0.012, 0.15), Vector3(x, 0.006, sz * (4.5 + 0.25 + k * 0.35)), white)
-	# Trainerzone und Aufwaermflaechen (dezent dunkler)
-	for sx in [-1.0, 1.0]:
-		_box(Vector3(3.0, 0.008, 3.0), Vector3(sx * 13.5, 0.004, 9.0), _mat(Color(0.19, 0.44, 0.74), 0.6))
+## Halle aus Blender (tools/blender/build_arena.py): Boden, Linien, Netz, Pfosten,
+## Schiedsrichterstuhl, Kampfgericht, Baenke, Tribuenen, Banden, Waende, Decke, Lampen.
+func _hall() -> void:
+	var hall: Node3D = HALL.instantiate()
+	add_child(hall)
+	for mi in hall.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		_meshes[String(m.name)] = m
+		# Nur was nah am Feld steht wirft Schatten; Decke, Traeger und Waende wuerden sonst
+		# grosse dunkle Flecken aufs Feld legen.
+		if not String(m.name) in ["net_mesh", "net_bands", "antennas", "posts", "referee_stand", "scorer_table",
+				"benches", "bench_props", "adboard_frames"]:
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
-## Netz als Gitter-Textur, Ober- und Unterband, Antennen rot-weiss, Pfosten mit Polster.
-func _net() -> void:
-	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0, 0, 0, 0))
-	for i in 64:
-		for k in 3:
-			img.set_pixel(i, k, Color(0.05, 0.05, 0.06, 0.95))
-			img.set_pixel(k, i, Color(0.05, 0.05, 0.06, 0.95))
-	var tex := ImageTexture.create_from_image(img)
-	var nm := StandardMaterial3D.new()
-	nm.albedo_texture = tex
-	nm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-	nm.alpha_scissor_threshold = 0.4
-	nm.cull_mode = BaseMaterial3D.CULL_DISABLED
-	nm.uv1_scale = Vector3(98.0, 10.0, 1.0)
-	nm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	var q := MeshInstance3D.new()
-	var qm := QuadMesh.new()
-	qm.size = Vector2(9.8, 0.95)
-	q.mesh = qm
-	q.material_override = nm
-	q.rotation.y = PI / 2.0
-	q.position = Vector3(0, 1.915, 0)
-	add_child(q)
-	var white := _mat(Color(0.98, 0.98, 0.98))
-	_box(Vector3(0.03, 0.07, 9.8), Vector3(0, 2.395, 0), white)
-	_box(Vector3(0.02, 0.05, 9.8), Vector3(0, 1.44, 0), white)
-	for z in [-4.5, 4.5]:
-		_box(Vector3(0.025, 0.95, 0.05), Vector3(0, 1.915, z), white)  # Seitenband
-		for k in 9:
-			var c := Color(0.92, 0.12, 0.12) if k % 2 == 0 else Color(0.98, 0.98, 0.98)
-			_cyl(0.011, 0.2, Vector3(0, 1.53 + 0.2 * k, z), _mat(c), 6)
-	for z in [-5.6, 5.6]:
-		_cyl(0.055, 2.6, Vector3(0, 1.3, z), _mat(Color(0.75, 0.77, 0.8), 0.4), 8)
-		_cyl(0.13, 1.8, Vector3(0, 0.9, z), _mat(Color(0.12, 0.3, 0.65)), 8)  # Polster
-		_box(Vector3(0.5, 0.06, 0.5), Vector3(0, 0.03, z), _mat(Color(0.3, 0.32, 0.36)))
-
-
-func _walls_and_ceiling() -> void:
-	var wall := _mat(Color(0.86, 0.88, 0.92))
-	var band := _mat(Color(0.2, 0.32, 0.55))
-	for sx in [-1.0, 1.0]:
-		_box(Vector3(0.5, 14.0, 52.0), Vector3(sx * 26.0, 7.0, 0), wall)
-		_box(Vector3(0.52, 1.6, 52.0), Vector3(sx * 25.98, 3.4, 0), band)
-		_box(Vector3(60.0, 14.0, 0.5), Vector3(0, 7.0, sx * 21.0), wall)
-		_box(Vector3(60.0, 1.6, 0.52), Vector3(0, 9.0, sx * 20.98), band)
-		# Fensterband oben, leuchtet etwas
-		for k in 8:
-			_box(Vector3(5.0, 1.4, 0.55), Vector3(-21.0 + k * 6.0, 11.6, sx * 20.97), _mat(Color(0.75, 0.88, 1.0), 0.3, 0.6))
-	# Decke mit Traegern und Lichtfeldern
-	_box(Vector3(60.0, 0.4, 44.0), Vector3(0, 14.2, 0), _mat(Color(0.42, 0.46, 0.55)))
-	var beam := _mat(Color(0.32, 0.35, 0.42))
-	for k in 7:
-		_box(Vector3(0.35, 0.7, 42.0), Vector3(-21.0 + k * 7.0, 13.6, 0), beam)
-	var lamp := _mat(Color(1.0, 0.98, 0.9), 0.3, 2.2)
-	for xi in 6:
-		for zi in 3:
-			_box(Vector3(2.4, 0.12, 1.0), Vector3(-17.5 + xi * 7.0, 13.25, -7.0 + zi * 7.0), lamp)
-
-
-## Tribuenen an beiden Laengsseiten und hinter den Grundlinien, Stufen mit farbigen Sitzreihen.
-## Die Zuschauer (crowd.gd) stehen auf denselben Stufen.
-func _stands() -> void:
-	var step := _mat(Color(0.62, 0.65, 0.72))
-	var rail := _mat(Color(0.85, 0.87, 0.9), 0.3)
-	for sz in [-1.0, 1.0]:
-		for i in CrowdView.ROWS:
-			var h := 0.6 + i * 0.6
-			var z: float = sz * (13.0 + i * 1.2)
-			_box(Vector3(32.0, h, 1.2), Vector3(0, h / 2.0, z), step)
-			# Sitzschalen: Bloecke in Vereinsfarben, in der Mitte grau
-			for b in 8:
-				var x0 := -15.0 + b * 4.0
-				var col: Color = TEAM_COLORS[0] if x0 < -2.0 else (TEAM_COLORS[1] if x0 > 1.0 else Color(0.5, 0.52, 0.58))
-				_box(Vector3(3.8, 0.08, 0.4), Vector3(x0 + 2.0, h + 0.04, z + sz * 0.3), _mat(col.lerp(Color.WHITE, 0.15)))
-		_box(Vector3(32.0, 0.06, 0.06), Vector3(0, 1.3, sz * 12.4), rail)
-		for k in 9:
-			_box(Vector3(0.06, 0.7, 0.06), Vector3(-16.0 + k * 4.0, 0.95, sz * 12.4), rail)
-	for sx in [-1.0, 1.0]:
-		for i in CrowdView.ROWS:
-			var h := 0.6 + i * 0.6
-			var x: float = sx * (18.5 + i * 1.2)
-			_box(Vector3(1.2, h, 22.0), Vector3(x, h / 2.0, 0), step)
-			var col: Color = TEAM_COLORS[0 if sx < 0.0 else 1]
-			_box(Vector3(0.4, 0.08, 21.0), Vector3(x + sx * 0.3, h + 0.04, 0), _mat(col.lerp(Color.WHITE, 0.15)))
-
-
-func _ad_boards() -> void:
-	var k := 0
-	# Laengsseiten (hinter Bank und Kampfgericht) und hinter den Grundlinien
-	for sz in [-1.0, 1.0]:
-		for b in 5:
-			var x := -12.0 + b * 6.0
-			_board(Vector3(x, 0.5, sz * 10.5), Vector3(5.8, 0.9, 0.12), PI if sz < 0.0 else 0.0, k)
-			k += 1
-	for sx in [-1.0, 1.0]:
-		for b in 3:
-			var z := -6.0 + b * 6.0
-			_board(Vector3(sx * 15.0, 0.5, z), Vector3(0.12, 0.9, 5.8), PI / 2.0 if sx < 0.0 else -PI / 2.0, k)
-			k += 1
-
-
-func _board(pos: Vector3, size: Vector3, rot_y: float, k: int) -> void:
-	var hue := fmod(k * 0.13, 1.0)
-	var bg := Color.from_hsv(hue, 0.55, 0.85)
-	_box(size, pos, _mat(bg, 0.5, 0.25))
-	# Schrift auf der Feldseite
-	var inward := Vector3(0, 0, 1).rotated(Vector3.UP, rot_y) * 0.07
-	_label(SPONSORS[k % SPONSORS.size()], pos + inward, rot_y, 64, Color(1, 1, 1), 0.0075)
-
-
-func _scoreboards() -> void:
-	for sx in [-1.0, 1.0]:
-		var pos := Vector3(sx * 25.6, 6.4, 0)
-		var rot := PI / 2.0 if sx < 0.0 else -PI / 2.0
-		_box(Vector3(0.4, 3.0, 9.0), pos, _mat(Color(0.08, 0.09, 0.12), 0.4))
-		_box(Vector3(0.42, 0.2, 9.2), pos + Vector3(0, 1.55, 0), _mat(Color(1.0, 0.78, 0.25), 0.5, 0.4))
-		var inward := Vector3(0, 0, 1).rotated(Vector3.UP, rot) * 0.22
-		var l := _label("", pos + inward, rot, 96, Color(1.0, 0.95, 0.75), 0.006)
+## Bandenwerbung und Anzeigetafeln: die Bildschirme im Modell bekommen Farbe und Schrift.
+func _screens() -> void:
+	for k in 16:
+		var m: MeshInstance3D = _meshes.get("adscreen_%d" % k)
+		if m == null:
+			continue
+		var col: Color = AD_COLORS[k % AD_COLORS.size()]
+		m.material_override = _mat(col, 0.6, 0.3)
+		var c := m.mesh.get_aabb().get_center()
+		var n := _facing(c)
+		_label(SPONSORS[k % SPONSORS.size()], c + n * 0.04, atan2(n.x, n.z), 64, Color(0.96, 0.94, 0.89), 0.0075)
+	for k in 2:
+		var m: MeshInstance3D = _meshes.get("scorescreen_%d" % k)
+		if m == null:
+			continue
+		m.material_override = _mat(Color(0.09, 0.1, 0.12), 0.4, 0.15)
+		var c := m.mesh.get_aabb().get_center()
+		var n := _facing(c)
+		var l := _label("", c + n * 0.05, atan2(n.x, n.z), 96, Color(0.97, 0.9, 0.72), 0.006)
 		l.shaded = false
 		_boards.append(l)
+
+
+## Richtung zum Feld (waagerecht, entlang der naeheren Achse).
+func _facing(c: Vector3) -> Vector3:
+	if absf(c.x) / 15.0 > absf(c.z) / 10.5:
+		return Vector3(-signf(c.x), 0, 0)
+	return Vector3(0, 0, -signf(c.z))
 
 
 func set_scoreboard(text: String) -> void:
@@ -255,31 +149,22 @@ func set_scoreboard(text: String) -> void:
 # ---------------------------------------------------------------- Schiedsrichter und Bank
 
 func _officials() -> void:
-	# Schiedsrichterstuhl am Netzpfosten (Seite z negativ), Plattform auf 1,4 m
-	var metal := _mat(Color(0.75, 0.77, 0.8), 0.4)
-	for dx in [-0.35, 0.35]:
-		for dz in [-0.35, 0.35]:
-			_cyl(0.03, 1.4, Vector3(dx, 0.7, -6.3 + dz), metal, 6)
-	_box(Vector3(0.9, 0.08, 0.9), Vector3(0, 1.42, -6.3), _mat(Color(0.2, 0.3, 0.55)))
-	_box(Vector3(0.9, 0.5, 0.06), Vector3(0, 1.7, -6.73), metal)
+	# Schiedsrichter auf dem Stuhl am Netzpfosten (Stuhl ist Teil von arena.glb)
 	referee = HumanFigure.new()
 	add_child(referee)
 	referee.build(OFFICIAL.merged({"skin": Color(0.86, 0.68, 0.55), "hair": Color(0.42, 0.42, 0.43)}), false, 1, true)
-	referee.position = Vector3(0, 1.46, -6.3)
+	referee.position = Vector3(0, 1.468, -6.3)
 	referee.rotation.y = PI  # schaut zum Feld (+z)
 	referee.pose(_ref_idle())
 
-	# Kampfgericht gegenueber, Tisch mit zwei Schreibern
-	_box(Vector3(2.4, 0.75, 0.7), Vector3(0, 0.375, 8.6), _mat(Color(0.2, 0.3, 0.55)))
-	_box(Vector3(2.5, 0.05, 0.8), Vector3(0, 0.77, 8.6), _mat(Color(0.95, 0.95, 0.95)))
+	# Kampfgericht gegenueber: zwei Schreiber am Tisch
 	for x in [-0.6, 0.6]:
 		var f := _seated(OFFICIAL.merged({"skin": VPlayer.SKINS[1 if x < 0.0 else 3], "hair": VPlayer.HAIRS[2 if x < 0.0 else 4]}),
-			Vector3(x, 0, 9.3), 0.0, true)
+			Vector3(x, 0, 9.3), 0.0, true, 0.55)
 		f.pose(_sit_pose(true), 1.0)
 	# Bank: sechs Ersatzspieler je Team, in der Haelfte des eigenen Teams
 	for t in 2:
 		var sx := -1.0 if t == 0 else 1.0
-		_box(Vector3(4.2, 0.45, 0.5), Vector3(sx * 6.2, 0.225, 9.0), _mat(Color(0.3, 0.32, 0.38)))
 		for i in 6:
 			var style: TeamStyle = Teams.playing()[t]
 			var c := style.colors()
@@ -290,15 +175,49 @@ func _officials() -> void:
 			bench[t].append(f)
 
 
-func _seated(colors: Dictionary, pos: Vector3, rot_y: float, official := false) -> HumanFigure:
+func _seated(colors: Dictionary, pos: Vector3, rot_y: float, official := false, seat := 0.5) -> HumanFigure:
 	var f := HumanFigure.new()
 	add_child(f)
-	f.hips_height = 0.5
+	f.hips_height = seat
 	f.build(colors, false, posmod(int(pos.x * 10.0), HumanFigure.HAIR_STYLES), official)
 	f.position = pos
 	f.rotation.y = rot_y
 	f.pose(_sit_pose(false))
 	return f
+
+
+## Vier Linienrichter an den Ecken (FIVB), jeder mit Fahne, Blick schraeg aufs Feld.
+func _line_judges() -> void:
+	var i := 0
+	for c in [Vector3(-10.4, 0, -5.9), Vector3(10.4, 0, 5.9), Vector3(-10.4, 0, 5.9), Vector3(10.4, 0, -5.9)]:
+		var f := HumanFigure.new()
+		add_child(f)
+		f.build(OFFICIAL.merged({"skin": VPlayer.SKINS[(i * 2 + 1) % VPlayer.SKINS.size()],
+			"hair": VPlayer.HAIRS[(i * 3) % VPlayer.HAIRS.size()]}), false, i, true, 0.97 + 0.02 * i)
+		f.position = c
+		# Blick zur Feldmitte (Figur schaut lokal nach -Z)
+		f.rotation.y = atan2(c.x, c.z)
+		var flag: Node3D = FLAG.instantiate()
+		f.j["wr_r"].add_child(flag)
+		flag.position = Vector3(0, -0.14, -0.02)
+		flag.rotation = Vector3(PI, 0, 0)  # Stiel liegt in der Hand, Tuch zeigt nach unten/aussen
+		f.pose(_judge_pose(""))
+		line_judges.append([f, c])
+		i += 1
+
+
+func _judge_pose(sig: String) -> Dictionary:
+	var p := {"chest": Vector3(-0.03, 0, 0), "head": Vector3(0.05, 0, 0),
+		"sh_l": Vector3(0.1, 0, -0.06), "sh_r": Vector3(0.25, 0, 0.06), "el_l": Vector3(0.2, 0, 0), "el_r": Vector3(0.5, 0, 0)}
+	match sig:
+		"in":  # Fahne nach unten auf den Boden zeigen
+			p["sh_r"] = Vector3(0.6, 0, 0.15)
+			p["el_r"] = Vector3(0.0, 0, 0)
+			p["chest"] = Vector3(-0.15, 0, 0)
+		"out":  # Fahne senkrecht nach oben
+			p["sh_r"] = Vector3(2.95, 0, 0.1)
+			p["el_r"] = Vector3(0.0, 0, 0)
+	return p
 
 
 func _sit_pose(writing: bool) -> Dictionary:
@@ -382,6 +301,18 @@ func _process(delta: float) -> void:
 		p["sh_" + o] = Vector3(2.0, 0, 0.0)
 		p["el_" + o] = Vector3(2.3, 0, 0)
 	referee.pose(p, clampf(delta * 10.0, 0.0, 1.0))
+	# Linienrichter: nur der dem Ball naechste zeigt "in" oder "aus"
+	var near := -1
+	if _ref_pose in ["in", "out"]:
+		var best := INF
+		for k in line_judges.size():
+			var d := (line_judges[k][1] as Vector3).distance_to(Vector3(ball_pos.x, 0, ball_pos.z))
+			if d < best:
+				best = d
+				near = k
+	for k in line_judges.size():
+		var lj: HumanFigure = line_judges[k][0]
+		lj.pose(_judge_pose(_ref_pose if k == near else ""), clampf(delta * 8.0, 0.0, 1.0))
 	# Bank: ab und zu ein bisschen Bewegung
 	for t in 2:
 		for i in bench[t].size():

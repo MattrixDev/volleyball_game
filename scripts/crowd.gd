@@ -1,13 +1,14 @@
 class_name CrowdView
 extends Node3D
-## Zuschauer auf den Tribuenen (Laengsseiten und hinter den Grundlinien): Low-Poly-Figuren in
-## Vereinsfarben, die bei Punkten aufspringen und die Arme hochreissen. Je Koerperteil eine
-## MultiMesh-Instanz, damit es schnell bleibt.
+## Zuschauer auf den Tribuenen (Laengsseiten und hinter den Grundlinien): sitzende Low-Poly-
+## Figuren aus Blender (assets/models/fan.glb) in Vereinsfarben, die bei Punkten aufspringen
+## und die Arme hochreissen. Je Koerperteil eine MultiMesh-Instanz, damit es schnell bleibt.
 
 const ROWS := 4
 const SPACING := 0.62
 
-var team_colors: Array = [Color(0.16, 0.38, 0.86), Color(0.85, 0.2, 0.18)]
+var team_colors: Array = Teams.playing().map(func(t): return t.jersey)
+const SEAT := 0.42  # Sitzflaeche ueber der Stufe (arena.glb)
 var _bodies: MultiMeshInstance3D
 var _heads: MultiMeshInstance3D
 var _arms: MultiMeshInstance3D  # zwei je Zuschauer
@@ -24,7 +25,7 @@ func _ready() -> void:
 	for side in [-1.0, 1.0]:
 		for i in ROWS:
 			var h := 0.6 + i * 0.6
-			var z: float = side * (13.0 + i * 1.2)
+			var z: float = side * (13.08 + i * 1.2)
 			var x := -15.0
 			while x <= 15.0:
 				var fan := 0 if x < -2.0 else (1 if x > 1.0 else -1)
@@ -34,21 +35,26 @@ func _ready() -> void:
 	for side in [-1.0, 1.0]:
 		for i in ROWS:
 			var h := 0.6 + i * 0.6
-			var x: float = side * (18.5 + i * 1.2)
+			var x: float = side * (18.58 + i * 1.2)
 			var z := -10.5
 			while z <= 10.5:
-				_add(Vector3(x, h, z), 0 if side < 0.0 else 1, -side * PI / 2.0)
+				_add(Vector3(x, h, z), 0 if side < 0.0 else 1, side * PI / 2.0)
 				z += SPACING
-	_bodies = _make_mm(HumanFigure.cyl(0.21, 0.17, 0.75, 6), _base.size())
-	_heads = _make_mm(HumanFigure.ball_mesh(0.12, 6, 4), _base.size())
-	_arms = _make_mm(HumanFigure.cyl(0.045, 0.04, 0.55, 5), _base.size() * 2)
+	var fan: Node3D = preload("res://assets/models/fan.glb").instantiate()
+	var parts := {}
+	for mi in fan.find_children("*", "MeshInstance3D", true, false):
+		parts[String(mi.name)] = (mi as MeshInstance3D).mesh
+	fan.free()
+	_bodies = _make_mm(parts["fan_body"], _base.size())
+	_heads = _make_mm(parts["fan_head"], _base.size())
+	_arms = _make_mm(parts["fan_arm"], _base.size() * 2)
 	for i in _base.size():
 		var b: Array = _base[i]
 		var c: Color
 		if b[2] >= 0 and _rng.randf() < 0.7:
-			c = (team_colors[b[2]] as Color).lerp(Color.WHITE, _rng.randf_range(0.0, 0.3))
+			c = (team_colors[b[2]] as Color).lerp(Color(0.85, 0.84, 0.8), _rng.randf_range(0.0, 0.25))
 		else:
-			c = Color.from_hsv(_rng.randf(), _rng.randf_range(0.15, 0.6), _rng.randf_range(0.35, 0.95))
+			c = Color.from_hsv(_rng.randf(), _rng.randf_range(0.1, 0.4), _rng.randf_range(0.35, 0.85))
 		_bodies.multimesh.set_instance_color(i, c)
 		var skin: Color = VPlayer.SKINS[_rng.randi() % VPlayer.SKINS.size()]
 		_heads.multimesh.set_instance_color(i, skin)
@@ -62,8 +68,7 @@ func _add(p: Vector3, fan: int, yaw: float) -> void:
 		return
 	if _rng.randf() < 0.25:
 		fan = -1
-	var jitter := Vector3(_rng.randf_range(-0.12, 0.12), 0.0, _rng.randf_range(-0.12, 0.12))
-	_base.append([p + jitter, _rng.randf() * TAU, fan, _rng.randf_range(0.6, 1.2), yaw])
+	_base.append([p, _rng.randf() * TAU, fan, _rng.randf_range(0.6, 1.2), yaw])
 
 
 func _make_mm(mesh: Mesh, count: int) -> MultiMeshInstance3D:
@@ -110,17 +115,18 @@ func _update() -> void:
 		# Ruhig: leichtes Wippen, Arme unten. Aufgeregt: Springen, Arme hoch und winken.
 		var idle := sin(_time * 1.3 + ph) * 0.02
 		var hop: float = absf(sin(_time * 7.5 * b[3] + ph)) * 0.3 * ex * b[3]
-		var p: Vector3 = b[0] + Vector3(0, 0.42 + idle + hop, 0)
+		var raise: float = clampf(ex * 1.6, 0.0, 1.0)
+		# Sitzt auf der Schale; aufgeregt steht er halb auf
+		var p: Vector3 = b[0] + Vector3(0, SEAT + idle + hop + raise * 0.25, 0)
 		var yaw := Basis(Vector3.UP, b[4])
 		_bodies.multimesh.set_instance_transform(i, Transform3D(yaw, p))
-		_heads.multimesh.set_instance_transform(i, Transform3D(yaw, p + Vector3(0, 0.52, 0)))
-		var raise: float = clampf(ex * 1.6, 0.0, 1.0)
+		var nod := Basis(Vector3(1, 0, 0), sin(_time * 0.7 + ph) * 0.08)
+		_heads.multimesh.set_instance_transform(i, Transform3D(yaw * nod, p + yaw * Vector3(0, 0.65, 0)))
 		for a in 2:
 			var sx := -1.0 if a == 0 else 1.0
 			var wave := sin(_time * 9.0 * b[3] + ph + a) * 0.25 * raise
 			# Arm haengt (Winkel 0) oder zeigt nach oben (PI), Drehpunkt an der Schulter
 			var ang := lerpf(0.15, 2.8, raise) + wave
 			var arm_basis := yaw * Basis(Vector3(0, 0, 1), sx * ang * 0.9) * Basis(Vector3(1, 0, 0), ang * 0.3)
-			var shoulder := p + yaw * Vector3(sx * 0.22, 0.3, 0)
-			var center := shoulder + arm_basis * Vector3(0, -0.27, 0)
-			_arms.multimesh.set_instance_transform(i * 2 + a, Transform3D(arm_basis, center))
+			var shoulder := p + yaw * Vector3(sx * 0.2, 0.58, 0)
+			_arms.multimesh.set_instance_transform(i * 2 + a, Transform3D(arm_basis, shoulder))

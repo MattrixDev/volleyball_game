@@ -4,7 +4,20 @@ Hallenvolleyball 6 gegen 6 für den PC, nach den FIVB-Regeln 2025–2028 (Männe
 
 Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/code/artifact/7f883522-0f38-4b3f-ad4d-9c40c197b89f).
 
-## Stand: Phase 2b – Sounds und Low-Poly-Look
+## Stand: Phase 2e – Einheitlicher Low-Poly-Stil
+
+- Alles im Stil der Vorlage (facettierte Dreiecke, gedämpfte Farben, weiches Licht), komplett in Blender gebaut
+- Spielerfigur: Gesicht ohne Augen und Mund nur aus Flächen, V-Ausschnitt mit Kragen, Seitenteile, Dreieck-Logo, Nummer hinten, vorn und auf dem linken Hosenbein, Knieschoner, hohe Schuhe. Vier Frisuren (wellig, kurz, länger, lockig) und leicht verschiedene Körpergrößen
+- Trikots pro Team als eigene Datei in `teams/` (Name, alle Trikotfarben, Libero-Trikot). Ein neues Team = eine neue `.tres`-Datei, siehe unten
+- Neue Halle aus Blender: Spielfeld, Netz mit Antennen, Pfosten mit Polster, Schiedsrichterstuhl mit Leiter, Kampfgericht, Bänke mit Flaschen und Handtüchern, Tribünen mit Sitzschalen, Banden, Anzeigetafeln, Fenster, Dachträger, Lampen, Fahnen an der Wand
+- Ball und sitzende Fans aus Blender; vier Linienrichter mit Fahne an den Ecken (der nächste zeigt „im Feld“ oder „Aus“)
+- Schiedsrichter, Linienrichter und Schreiber in langer Hose
+
+### Neues Team anlegen
+
+Eine Datei in `teams/` kopieren (zum Beispiel `teams/seewald.tres`), `id`, `name` und die Farben ändern. Im Godot-Editor geht das auch per Doppelklick mit Farbwählern. Welche zwei Teams spielen, steht in `scripts/teams.gd` (`home`, `away`).
+
+## Phase 2b – Sounds und Low-Poly-Look
 
 - Neue Geräusche: Pfiff, Ballkontakte, Netz, Boden, Schuhquietschen und Publikum klingen näher an einer echten Halle (mit Hall). Erzeugt mit `tools/make_sounds.py`, liegen als WAV in `assets/sounds/`
 - Eigene Spielerfiguren, weich gerundet: Gesicht mit Augen und Brauen, Finger, Trikot mit Kragen und Säumen, Knieschoner und Schuhe mit Sohle; Bewegungen für Laufen (auch rückwärts und Seitschritt), Bereitschaft, Baggern, Pritschen, Angriff mit Ausholen, Block, Hechten flach auf den Boden, Landung, Aufschlag und Jubel
@@ -71,7 +84,9 @@ godot res://scenes/main.tscn -- --botplay --shot-phase=REPLAY:bild.png --quit-af
 | `scripts/figure.gd` | Spielerfigur: lädt das Blender-Modell, Gelenke, weiche Posen, Bodenkontakt |
 | `tools/blender/build_player.py` | Baut das Spielermodell in Blender (`pip install bpy`) und schreibt `assets/models/player.glb` |
 | `tools/anim_strip.gd`, `tools/closeup.gd`, `tools/pose_shot.gd` | Prüfbilder für Bewegungen und Figuren |
-| `scripts/arena.gd` | Halle, Tribünen, Anzeigetafel, Schiedsrichter, Bänke |
+| `scripts/arena.gd` | Lädt die Halle, Licht, Banden- und Anzeigetafel-Schrift, Schiedsrichter, Linienrichter, Bänke |
+| `tools/blender/build_arena.py` | Baut Halle, Ball, Fahne und Fans in Blender (`assets/models/arena.glb`, `ball.glb`, `flag.glb`, `fan.glb`) |
+| `scripts/team_style.gd`, `scripts/teams.gd`, `teams/*.tres` | Teams: Name und Trikotfarben |
 | `scripts/main.gd` | Halle, Kamera, Steuerung, verbindet Geräusche und Effekte |
 | `scripts/sfx.gd` | Spielt Geräusche und Publikumsklänge ab |
 | `tools/make_sounds.py` | Erzeugt die Geräusche in `assets/sounds/` |
