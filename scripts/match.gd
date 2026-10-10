@@ -235,6 +235,8 @@ func _ready() -> void:
 			cfg.apply_preset(a.get_slice("=", 1))
 	if autoplay:
 		human_team = 0 if autopress else -1
+		Engine.time_scale = 12.0
+		Engine.max_physics_steps_per_frame = 64
 		new_match()
 	elif human_team < 0 or autopress:
 		new_match()
@@ -1209,19 +1211,19 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	var d := serve_aim.x
 	var l := serve_aim.y - contact.x * 1.5
 	var g := G
-	var umax := 16.0
+	var umax := 18.0
 	var clear := NET_H + 0.45
 	match style:
 		"topspin":
 			g = G * (1.45 if jump else 1.25)
-			umax = 22.0 if jump else 17.0
+			umax = 25.0 if jump else 19.0
 		"float":
-			umax = 20.0 if jump else 16.0
+			umax = 22.0 if jump else 17.5
 		"short":
 			d = minf(d, 3.2)
 			umax = 9.0
 			clear = NET_H + 0.8
-	var u := lerpf(9.0, umax, power)
+	var u := lerpf(10.0, umax, power)
 	if q == Q.GOOD:
 		clear += 0.3
 		u = minf(u, umax * 0.85)
@@ -1345,6 +1347,8 @@ func _try_team(team: int) -> bool:
 	# Ein Flatterball ist schwer zu lesen: kleineres Timing-Fenster bei der Annahme.
 	if flutter > 0.0 and last_action == "serve":
 		o.win_scale = 0.88
+	if kind == "dig" or (kind == "pass" and last_action == "serve"):
+		o.win_scale *= 1.0 - 0.22 * hard_ball(o.speed)
 	if o.human and (kind == "pass" or kind == "dig" or kind == "free"):
 		o.win_scale *= cfg.get_v("receive_help") / 100.0
 	if not o.human:
@@ -1361,6 +1365,11 @@ func _try_team(team: int) -> bool:
 	return true
 
 
+## 0 = normaler Ball, 1 = sehr harter Ball (ab ca. 16 m/s spuerbar, ab 28 m/s voll).
+func hard_ball(speed: float) -> float:
+	return clampf((speed - 16.0) / 12.0, 0.0, 1.0)
+
+
 ## KI-Abwehr: braucht eine Reaktionszeit, laeuft nicht beliebig schnell und wehrt harte
 ## Baelle seltener sauber ab. Wie gut, stellt "Gegner-Abwehr" ein.
 func _ai_dig_limits(o: Opp, tc: float) -> void:
@@ -1372,8 +1381,13 @@ func _ai_dig_limits(o: Opp, tc: float) -> void:
 	o.max_run = maxf(0.0, tc - react) * run
 	if flat_dist(o.player.position, o.point) > o.max_run + reach:
 		o.no_reach = true
-	var hard := clampf((o.speed - 14.0) / 12.0, 0.0, 1.0) * (1.0 - 0.6 * skill)
-	o.ai_e *= 1.0 + hard * 1.6
+	var hard := hard_ball(o.speed) * (1.0 - 0.45 * skill)
+	o.ai_e *= 1.0 + hard * 2.0
+	if last_action == "block":
+		# Nach einem Kill-Block faellt der Ball steil und schnell: die KI rettet ihn nur selten.
+		o.max_run *= 0.5
+		if rng.randf() > lerpf(0.12, 0.3, skill):
+			o.no_reach = true
 
 
 var _hitter := [null, null]
@@ -1726,6 +1740,9 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		libero_set_front[o.team] = true
 	if (o.kind == "pass" or o.kind == "dig" or o.kind == "free") and horiz > 0.8:
 		pl.dive()
+	if o.kind == "dig" and last_touch_team != o.team:
+		var dk: String = "Abgewehrt nach " + ("Block" if last_action == "block" else ("Angriff" if last_action == "attack" else last_action))
+		stats[dk] = stats.get(dk, 0) + 1
 	if possession != o.team:
 		possession = o.team
 		touches = 0
@@ -1753,7 +1770,7 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 			_do_free(o, q)
 	rally_touches += 1
 	if o.kind == "attack":
-		_fx("tip" if last_action == "tip" else "spike", before, clampf(ball_vel.length() / 26.0, 0.3, 1.0))
+		_fx("tip" if last_action == "tip" else "spike", before, clampf(ball_vel.length() / 30.0, 0.3, 1.0))
 	else:
 		_fx("set" if o.tech == "over" else "bump", before, clampf(o.speed / 20.0, 0.25, 1.0))
 	stats["Technik " + ("Pritschen" if o.tech == "over" else "Baggern")] = stats.get("Technik " + ("Pritschen" if o.tech == "over" else "Baggern"), 0) + (1 if o.kind != "attack" else 0)
@@ -1779,8 +1796,9 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	elif q == Q.WEAK:
 		spread = 1.8
 	if o.kind == "dig":
-		spread += 0.8
-		d += 1.2
+		var hb := hard_ball(o.speed)
+		spread += 0.8 + 1.2 * hb
+		d += 1.2 + 1.0 * hb
 	if was_flutter:
 		spread += 0.4
 	if o.tech == "over" and o.speed <= OVER_OK:
@@ -1858,7 +1876,7 @@ func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VP
 ## trifft, schlaegt ihn nach links. Ganz aussen: Cut Shot (kurz diagonal) oder Block-Out.
 func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float) -> Dictionary:
 	var hl := team_local(team, bp).y
-	var res := {"style": "spike", "g": G, "u": lerpf(14.0, 26.0, clampf(power, 0.0, 1.0)), "clear": 0.0}
+	var res := {"style": "spike", "g": G, "u": lerpf(16.0, 30.0, clampf(power, 0.0, 1.0)), "clear": 0.0}
 	var d := 7.8
 	var l := hl
 	if contact.y < -0.35:
@@ -1876,7 +1894,7 @@ func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float) -> Dict
 			res.style = "cut"
 			d = 2.8
 			l = toward * 4.0
-			res.u = lerpf(11.0, 17.0, power)
+			res.u = lerpf(12.0, 19.0, power)
 	else:
 		var top := clampf(contact.y, 0.0, 1.0)
 		d = 7.3 - top * 2.2
@@ -1964,6 +1982,8 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
 	if o.human:
 		big_hit.emit(1.0 if q == Q.PERFECT and o.power > 0.75 else 0.4)
+	elif last_attack_speed > 24.0:
+		big_hit.emit(0.35)
 
 
 ## Hoehe, in der der Ball die Netzebene kreuzt (99, wenn er nicht hinkommt).
@@ -2065,8 +2085,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	ball_g = G
 	# Wie gut steht der Block? Haende ganz oben, ueber das Netz gegriffen, mehrere Blocker.
 	# Der Mensch blockt immer gleich stark; die Staerke des KI-Blocks stellt "Gegner-Block" ein.
-	var base := 0.33 if def == human_team else lerpf(0.08, 0.32, cfg.unit("ai_block"))
-	var stuff_p := base + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0)
+	var base := 0.34 if def == human_team else lerpf(0.1, 0.34, cfg.unit("ai_block"))
+	var stuff_p := base + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0) + (0.1 if in_block >= 3 else 0.0)
 	if pl.jump_h < 0.6:
 		stuff_p *= 0.4
 	var out_p := 0.85 if last_shot_style == "blockout" else 0.4
@@ -2081,7 +2101,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	elif absf(hit_dz) < 0.3 and c.y < top2 - 0.25 + pl.hand_reach and last_action == "attack" and rng.randf() < stuff_p:
 		# Kompletter Block: Ball wird hart nach unten auf die Seite des Angreifers gedrueckt.
 		ball.position = Vector3(s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(s_att * rng.randf_range(1.2, 3.5), -rng.randf_range(3.5, 6.0), ball_vel.z * 0.2 + rng.randf_range(-1.0, 1.0))
+		ball_vel = Vector3(s_att * rng.randf_range(1.0, 3.0), -rng.randf_range(7.0, 10.0), ball_vel.z * 0.15 + rng.randf_range(-1.0, 1.0))
 		possession = 1 - def
 		touches = 0
 		last_action = "block"
@@ -2096,10 +2116,10 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			big_hit.emit(1.0 if in_block >= 2 else 0.7)
 			if in_block >= 2:
 				_hitstop_left = 0.45
-	elif last_action == "attack" and ball_vel.length() > 17.0 and rng.randf() < 0.55:
+	elif last_action == "attack" and ball_vel.length() > 19.0 and rng.randf() < 0.35:
 		# Harter Schlag: Ball geht durch den Block, wird etwas gebremst, bleibt aber schnell.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(ball_vel.x * rng.randf_range(0.55, 0.75), ball_vel.y * 0.5 + rng.randf_range(-1.0, 1.5), ball_vel.z * 0.6 + rng.randf_range(-2.0, 2.0))
+		ball_vel = Vector3(ball_vel.x * rng.randf_range(0.45, 0.6), ball_vel.y * 0.5 + rng.randf_range(-1.0, 1.5), ball_vel.z * 0.6 + rng.randf_range(-2.0, 2.0))
 		possession = def
 		touches = 0
 		last_action = "block_touch"
@@ -2108,11 +2128,12 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	else:
 		# Blockberuehrung: Ball geht weich weiter, zaehlt nicht als Beruehrung.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(ball_vel.x * 0.3, rng.randf_range(2.5, 4.5), ball_vel.z * 0.4)
+		# Soft-Touch: der Ball faellt steil hinter den Block auf die eigene Seite des Blockers.
+		ball_vel = Vector3(-s_att * rng.randf_range(1.5, 4.0), rng.randf_range(2.5, 4.5), ball_vel.z * 0.3)
 		possession = def
 		touches = 0
 		last_action = "block_touch"
-		popup(pl, "Blockberührung", Q_COLOR[Q.GOOD])
+		popup(pl, "Soft-Touch", Q_COLOR[Q.GOOD])
 	_fx("block", c, 1.0 if last_action == "block" else 0.55)
 	last_touch_team = def
 	last_toucher = null
@@ -2180,7 +2201,7 @@ func _is_highlight(reason: String) -> bool:
 		"Ass!", "Block-Punkt!":
 			strong = true
 		"Angriffspunkt!", "Block-Aus!":
-			strong = last_attack_speed >= 24.5 or rally_touches >= 20
+			strong = last_attack_speed >= 28.0 or rally_touches >= 20
 		"Gelegt!", "Ball im Feld":
 			strong = rally_touches >= 20
 	return strong and points_since_replay >= 4
