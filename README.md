@@ -4,6 +4,12 @@ Hallenvolleyball 6 gegen 6 für den PC, nach den FIVB-Regeln 2025–2028 (Männe
 
 Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/code/artifact/7f883522-0f38-4b3f-ad4d-9c40c197b89f).
 
+## Phase 2j – Zuspiel-Varianten und Block lesen
+
+- Zuspiel (wenn du Zuspieler bist): rechter Stick = Richtung, X/Q = hoher Ball, B/R = schneller Ball, Y/F = Schnellangriff, R2/E = Dump, A/Leertaste = baggern (nur hoher Ball)
+- Block lesen: Solange der Gegner den Ball zum Zuspieler spielt, stellst du den Mittelblocker mit dem linken Stick am Netz hin. Richtig gelesen: "Gelesen!", Doppelblock steht, Sprung sitzt. Falsch gelesen: Block kommt zu spät
+- Die KI-Zuspieler nutzen Tempi und Dump auch und weichen deinem Mittelblocker aus
+
 ## Stand: Phase 2e – Einheitlicher Low-Poly-Stil
 
 - Alles im Stil der Vorlage (facettierte Dreiecke, gedämpfte Farben, weiches Licht), komplett in Blender gebaut

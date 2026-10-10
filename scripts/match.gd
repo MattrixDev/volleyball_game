@@ -139,8 +139,10 @@ var timeout_team := -1
 var ai_timeout_wanted := [false, false]
 var whistle_done := false
 var serve_deadline := -1.0
-var commit_miss := [false, false]  # Commit war falsch: Block kommt aussen zu spaet
-var commit_block := [false, false]  # Commit-Block: Mitte gegen den Schnellangriff
+var commit_miss := [false, false]  # Block falsch gelesen: kommt zu spaet
+var commit_block := [false, false]  # Mensch hat vor dem Zuspiel den Block gestellt (Lesen)
+var read_z := 0.0  # Netzposition (z), auf die der Mensch seinen Mittelblocker gestellt hat
+var set_tempo := ["", ""]  # Tempo des letzten Zuspiels je Team (high, fast, quick)
 var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
 var trainer_wanted := false
 var notice := ""  # kurzer Hinweis fuer die Anzeige (z.B. "Libero muss raus")
@@ -849,7 +851,7 @@ func _hold_ball_at_server() -> void:
 
 
 func _empty_input() -> Dictionary:
-	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false,
+	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false,
 		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false}
 
 
@@ -860,6 +862,8 @@ func _read_input() -> Dictionary:
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
 	d.bump = Input.is_action_just_pressed("bump")
 	d.over = Input.is_action_just_pressed("overhand")
+	d.fast = Input.is_action_just_pressed("set_fast")
+	d.quick = Input.is_action_just_pressed("set_quick")
 	d.hit_down = Input.is_action_just_pressed("hit")
 	d.hit_up = Input.is_action_just_released("hit")
 	d.hit_held = Input.is_action_pressed("hit")
@@ -1131,7 +1135,14 @@ func _auto_input() -> Dictionary:
 					elif charging and _due(opp.t):
 						d.hit_up = true
 				elif _due(opp.t):
-					if opp.speed <= OVER_OK:
+					if opp.kind == "set" and opp.speed <= OVER_OK:
+						d.rs = Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+						var r := rng.randf()
+						d.over = r < 0.3
+						d.fast = r >= 0.3 and r < 0.55
+						d.quick = r >= 0.55 and r < 0.75
+						d.hit_down = r >= 0.75
+					elif opp.speed <= OVER_OK:
 						d.over = true
 					else:
 						d.bump = true
@@ -1140,7 +1151,7 @@ func _auto_input() -> Dictionary:
 				if _due(opp.t - JUMP_RISE):
 					d.hit_down = true
 			elif opp != null and opp.team != human_team and opp.kind == "set" and rng.randf() < 0.02:
-				d.over = true  # Commit-Block ausprobieren
+				d.mv = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # Block lesen ausprobieren
 			else:
 				_auto_t = -1.0
 	return d
@@ -1411,11 +1422,21 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 		mb = front[0]
 	var list: Array = []
 	var dirs: Array = []
+	# Mensch hat den Mittelblocker vorher hingestellt: nah am Angriffspunkt = gelesen,
+	# weit daneben = falsch gelesen, dazwischen ganz normaler Block.
 	var committed: bool = commit_block[def]
 	commit_block[def] = false
-	var commit_hit := committed and absf(p.z) < 1.5
-	commit_miss[def] = committed and not commit_hit
-	if absf(p.z) < 1.5:
+	var commit_hit := false
+	commit_miss[def] = false
+	if committed and mb != null:
+		var miss_by := absf(mb.position.z - p.z)
+		commit_hit = miss_by < 1.0
+		commit_miss[def] = miss_by > 2.2
+		if commit_hit:
+			popup(mb, "Gelesen!", Color(1.0, 0.85, 0.3))
+		elif commit_miss[def]:
+			popup(mb, "Falsch gelesen", Q_COLOR[Q.WEAK])
+	if absf(p.z) < 1.5 or commit_hit:
 		list = [mb]
 		dirs = [0.0]
 		var t_left := t_contact - clock
@@ -1491,23 +1512,34 @@ func _rally_input(inp: Dictionary) -> void:
 		pl.manual_dir = Vector3.ZERO
 	var mv: Vector2 = inp.mv
 	var hp := human_player()
-	# Commit-Block: Pritschen-Taste, solange der Gegner den Ball spielt (vor dem Angriff).
-	if inp.over and not commit_block[human_team] and (opp == null or opp.team != human_team) and opp != null and opp.kind != "attack" and possession != human_team:
-		commit_block[human_team] = true
-		var cp := _lane_player(human_team, "mid")
-		if cp != null:
-			popup(cp, "Commit: Mitte", Color(1.0, 0.85, 0.3))
+	# Block lesen: Solange der gegnerische Zuspieler den Ball noch bekommt, stellst du den
+	# Mittelblocker mit dem linken Stick am Netz hin. Wo er steht, wenn der Ball gespielt wird,
+	# entscheidet ueber den Block (richtig gelesen = starker Block, falsch = zu spaet).
+	if opp != null and not opp.done and opp.team != human_team and opp.kind == "set":
+		var rp := _lane_player(human_team, "mid")
+		if rp != null and is_front_row(rp) and mv.length() > 0.3:
+			rp.manual_dir = Vector3(0, 0, _stick_dir(mv).z)
+			read_z = rp.position.z
+			commit_block[human_team] = true
 	if opp != null and not opp.done and opp.team == human_team:
 		match opp.kind:
 			"attack":
 				_attack_input(inp)
 			"set":
+				# Linker Stick = laufen, rechter Stick = Richtung, Tasten = Tempo.
 				if not assist:
 					hp.manual_dir = _stick_dir(mv)
+				var lane := _set_choice(inp.rs)
 				if inp.bump:
-					_human_touch("bump", _set_choice(mv))
+					_human_touch("bump", lane + "|high")
 				elif inp.over:
-					_human_touch("over", _set_choice(mv))
+					_human_touch("over", lane + "|high")
+				elif inp.fast:
+					_human_touch("over", lane + "|fast")
+				elif inp.quick:
+					_human_touch("over", lane + "|quick")
+				elif inp.hit_down:
+					_human_touch("over", lane + "|dump")
 			_:
 				hp.manual_dir = _stick_dir(mv)
 				if inp.bump:
@@ -1796,10 +1828,32 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	last_action = "pass"
 
 
+## choice = "<Richtung>|<Tempo>": Richtung auto/left/right/mid/back (rechter Stick),
+## Tempo high (hoher Ball), fast (schneller Ball), quick (Schnellangriff) oder dump
+## (der Zuspieler spielt den Ball selbst ueber das Netz).
 func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	var setter := o.player
+	var parts := choice.split("|")
+	var lane_choice: String = parts[0]
+	var tempo: String = parts[1] if parts.size() > 1 else "auto"
+	if tempo == "auto":
+		tempo = _ai_set_tempo(o, q)
+	var bump_set := o.tech != "over"
+	if tempo != "high" and (bump_set or q == Q.WEAK):
+		if o.human:
+			popup(setter, "Nur hoher Ball" if bump_set else "Ball zu schlecht", Q_COLOR[Q.WEAK])
+		tempo = "high"
+	if tempo == "dump" and not _can_dump(o):
+		if o.human:
+			popup(setter, "Dump nicht möglich", Q_COLOR[Q.WEAK])
+		tempo = "high"
+	if tempo == "dump":
+		_do_dump(o, q, lane_choice)
+		return
 	var sl := team_local(o.team, setter.position)
-	var hitter := _pick_hitter(o.team, setter, choice, sl)
+	if tempo == "quick" and (lane_choice == "auto" or lane_choice == ""):
+		lane_choice = "mid"
+	var hitter := _pick_hitter(o.team, setter, lane_choice, sl)
 	var d := 1.0
 	var l := -3.6
 	var T := 1.15
@@ -1816,11 +1870,26 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 			d = 3.8  # Hinterfeldangriff hinter der 3-m-Linie
 			l = -0.5
 			T = 1.1
-	var bump_set := o.tech != "over"
+	# Tempo: hoch = viel Zeit fuer den Angreifer, aber der Block steht. Schnell und
+	# Schnellangriff = der Block kommt oft zu spaet, dafuer ungenauer.
+	var tempo_spread := 0.0
+	match tempo:
+		"high":
+			T = maxf(T, 1.0) * 1.15
+		"fast":
+			T = maxf(T * 0.82, 0.62)
+			tempo_spread = 0.25
+		"quick":
+			T = maxf(T * 0.62, 0.5)
+			tempo_spread = 0.5
 	if bump_set:
 		T = maxf(T, 0.9)  # gebaggert gibt es keinen schnellen Ball
+	set_tempo[o.team] = tempo
+	stats["Zuspiel " + tempo] = stats.get("Zuspiel " + tempo, 0) + 1
+	if o.human and tempo != "high":
+		popup(setter, "Schneller Ball" if tempo == "fast" else "Schnellangriff", Color(0.6, 0.9, 1.0))
 	l += excess(e, "set") * 10.0
-	var spread: float = [0.15, 0.45, 1.2][q]
+	var spread: float = [0.15, 0.45, 1.2][q] + tempo_spread
 	if bump_set:
 		spread = spread * 1.8 + 0.2
 	l += rng.randf_range(-spread, spread)
@@ -1834,14 +1903,76 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	last_action = "set"
 
 
+## Dump nur vom Zuspieler selbst: vorn am Netz, kein Libero, Ball nicht schlecht.
+func _can_dump(o: Opp) -> bool:
+	var pl := o.player
+	return pl.role != "L" and is_front_row(pl) and absf(ball.position.x) < 2.0 and ball.position.y > NET_H - 0.4
+
+
+## Setter-Dump: der Zuspieler spielt den zweiten Ball mit einer Hand ueber das Netz,
+## wenn der Gegner auf die Angreifer schaut. Die Richtung kommt vom Stick.
+func _do_dump(o: Opp, q: int, lane_choice: String) -> void:
+	var setter := o.player
+	var d := rng.randf_range(2.2, 4.0)
+	var l := 0.0
+	match lane_choice:
+		"left":
+			l = -3.2
+		"right":
+			l = 3.2
+		"back":
+			d = rng.randf_range(5.5, 7.0)
+		"mid":
+			d = rng.randf_range(2.0, 3.0)
+		_:
+			l = rng.randf_range(-3.0, 3.0)
+	var spread := 0.4 if q == Q.PERFECT else (0.9 if q == Q.GOOD else 1.6)
+	l = clampf(l + rng.randf_range(-spread, spread), -4.4, 4.4)
+	d += rng.randf_range(-spread * 0.5, spread * 0.5)
+	var target := court_pos(o.team, Vector2(-d, l))
+	target.y = R
+	ball_vel = Ballistics.launch_over_net(ball.position, target, NET_H + 0.3, 4.0, 11.0)
+	_hitter[o.team] = null
+	set_tempo[o.team] = "dump"
+	last_action = "tip"
+	setter.jump()
+	popup(setter, "Dump!", Color(1.0, 0.85, 0.3))
+	stats["Dump"] = stats.get("Dump", 0) + 1
+
+
+## KI-Zuspieler: waehlt das Tempo nach Annahme und Block des Gegners.
+func _ai_set_tempo(o: Opp, q: int) -> String:
+	if q == Q.WEAK or o.tech != "over":
+		return "high"
+	var r := rng.randf()
+	var mid_blocker := _lane_player(1 - o.team, "mid")
+	var leaning := mid_blocker != null and absf(mid_blocker.position.z) > 2.0  # Block steht aussen: Mitte/Dump offen
+	if _can_dump(o) and o.player.role == "S" and r < (0.2 if leaning else 0.07):
+		return "dump"
+	if pass_quality <= Q.GOOD and r < 0.55:
+		return "quick" if (leaning and r < 0.3) else "fast"
+	return "high" if r < 0.8 else "fast"
+
+
 func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VPlayer:
 	var lane := choice
 	if choice == "auto" or choice == "":
 		var r := rng.randf()
+		var wl := 0.4
+		var wr := 0.3
+		# Steht der menschliche Mittelblocker aussen, spielt die KI eher dorthin, wo er nicht ist.
+		var rb := _lane_player(1 - team, "mid")
+		if rb != null and (1 - team) == human_team:
+			var zl := court_pos(team, Vector2(1.0, -3.6)).z
+			var zr := court_pos(team, Vector2(1.0, 3.6)).z
+			var dl := absf(rb.position.z - zl)
+			var dr := absf(rb.position.z - zr)
+			wl = 0.3 + 0.35 * dl / (dl + dr + 0.01)
+			wr = 0.3 + 0.35 * dr / (dl + dr + 0.01)
 		if pass_quality <= Q.GOOD and sl.x < 2.5:
-			lane = "left" if r < 0.4 else ("right" if r < 0.7 else "mid")
+			lane = "left" if r < wl else ("right" if r < wl + wr else "mid")
 		else:
-			lane = "left" if r < 0.6 else "right"
+			lane = "left" if r < wl / (wl + wr) else "right"
 	var h := _lane_player(team, lane)
 	if h == null and lane == "right":
 		h = _lane_player(team, "back")  # kein Diagonalangreifer vorn: Hinterfeldangriff
@@ -2342,6 +2473,11 @@ func _update_players(delta: float) -> void:
 			for pl in players[t]:
 				if not (phase == Phase.PRE_SERVE and pl == server()):
 					pl.target = formation_pos(t, pl, form)
+			# Gelesener Block: der Mittelblocker bleibt dort stehen, wo der Mensch ihn hingestellt hat.
+			if t == human_team and commit_block[t]:
+				var rp := _lane_player(t, "mid")
+				if rp != null and opp != null and opp.team != t and opp.kind == "set":
+					rp.target = Vector3(rp.target.x, 0.0, read_z)
 		for pl in players[t]:
 			pl.run_speed = 6.0
 		if opp != null and opp.team != t and opp.kind == "attack" and not blockers[t].is_empty():
@@ -2577,11 +2713,13 @@ func hint() -> String:
 					"set":
 						if opp.player.role == "L" and absf(opp.point.x) < 3.0:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
-						return "Zuspiel: Stick links Außen · rechts Diagonal · vor Mitte · zurück Hinterfeld, dann X/Q pritschen"
+						return "Zuspiel: rechter Stick = Richtung (links Außen · rechts Diagonal · vor Mitte · zurück Hinterfeld) · X/Q hoher Ball · B/R schneller Ball · Y/F Schnellangriff · R2/E Dump · A/Leertaste baggern"
 					"attack":
 						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":
 						return "Ball rüberspielen: X/Q pritschen oder A/Leertaste baggern"
 			if human_player() != null:
-				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände · vor dem Zuspiel X/Q = Commit auf die Mitte"
+				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände"
+			if opp != null and opp.team != human_team and opp.kind == "set":
+				return "Block lesen: linker Stick stellt den Mittelblocker am Netz hin, bevor der Ball zum Angreifer fliegt"
 	return ""
