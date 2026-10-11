@@ -250,6 +250,7 @@ func _setup_input() -> void:
 	_action("aim_down", [KEY_K], [], [[JOY_AXIS_RIGHT_Y, 1.0]])
 	_action("bump", [KEY_SPACE, KEY_ENTER], [JOY_BUTTON_A])
 	_action("overhand", [KEY_Q], [JOY_BUTTON_X])
+	_action("set_dump", [KEY_V], [JOY_BUTTON_RIGHT_SHOULDER])
 	_action("set_fast", [KEY_R], [JOY_BUTTON_B])
 	_action("set_quick", [KEY_F], [JOY_BUTTON_Y])
 	_action("hit", [KEY_E], [], [[JOY_AXIS_TRIGGER_RIGHT, 1.0]])
