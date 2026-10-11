@@ -19,6 +19,8 @@ const SLIDERS := [
 	["ai_block", "Gegner-Block", 0, 100, 5, "", "Wie oft der Gegner dich blockt"],
 	["faults", "Fehler-Strenge", 0, 100, 5, "%", "Wie oft Netzfehler, Doppelberührung und Ball gehalten passieren"],
 	["whistle", "Lautstärke Pfiff", 0, 100, 5, "%", "Wie laut der Schiedsrichter pfeift (0 = aus)"],
+	["sfx", "Lautstärke Ball", 0, 100, 5, "%", "Baggern, Pritschen, Schlag, Block und Aufprall (0 = aus)"],
+	["crowd", "Lautstärke Publikum", 0, 100, 5, "%", "Gemurmel, Jubel und Raunen in der Halle (0 = aus)"],
 	["serve_time", "Zeit für den Aufschlag", 8, 30, 1, "s", "So lange hast du nach dem Pfiff Zeit zum Aufschlagen (Regel: 8 Sekunden)"],
 ]
 
@@ -37,6 +39,10 @@ var values := {}
 ## Spielregeln (gehoeren zu keiner Stufe): Gewinnsaetze und Libero-Wechsel.
 var sets_to_win := 2  # 1 = ein Satz, 2 = Best of 3, 3 = Best of 5
 var libero_auto := false
+var replays := true  # Wiederholung starker Punkte
+
+## Lautstaerken gehoeren zu keiner Stufe.
+const AUDIO := {"whistle": 35, "sfx": 70, "crowd": 60}
 
 
 func _init() -> void:
@@ -45,9 +51,11 @@ func _init() -> void:
 
 func apply_preset(name: String) -> void:
 	preset = name
-	var keep: float = float(values.get("whistle", 35))  # Lautstärke gehört zu keiner Stufe
+	var keep := {}
+	for k in AUDIO:
+		keep[k] = float(values.get(k, AUDIO[k]))
 	values = (PRESETS[name] as Dictionary).duplicate()
-	values["whistle"] = keep
+	values.merge(keep)
 
 
 func set_value(key: String, v: float) -> void:
@@ -68,7 +76,7 @@ func _detect_preset() -> void:
 
 
 func get_v(key: String) -> float:
-	return float(values.get(key, PRESETS["normal"].get(key, 35)))
+	return float(values.get(key, PRESETS["normal"].get(key, AUDIO.get(key, 35))))
 
 
 ## Spieltempo in einer Phase (1 = normal, 0,1 = zehnmal langsamer).
@@ -86,6 +94,7 @@ func save() -> void:
 	cf.set_value("spiel", "stufe", preset)
 	cf.set_value("spiel", "gewinnsaetze", sets_to_win)
 	cf.set_value("spiel", "libero_auto", libero_auto)
+	cf.set_value("spiel", "wiederholungen", replays)
 	for k in values:
 		cf.set_value("werte", k, values[k])
 	cf.save(PATH)
@@ -97,9 +106,11 @@ func load_file() -> void:
 		return
 	sets_to_win = clampi(int(cf.get_value("spiel", "gewinnsaetze", 2)), 1, 3)
 	libero_auto = bool(cf.get_value("spiel", "libero_auto", false))
+	replays = bool(cf.get_value("spiel", "wiederholungen", true))
 	var p: String = cf.get_value("spiel", "stufe", "normal")
 	apply_preset(p if PRESETS.has(p) else "normal")
-	values["whistle"] = float(cf.get_value("werte", "whistle", 35))
+	for k in AUDIO:
+		values[k] = float(cf.get_value("werte", k, AUDIO[k]))
 	if p == "eigene":
 		for s in SLIDERS:
 			values[s[0]] = cf.get_value("werte", s[0], values[s[0]])

@@ -8,6 +8,9 @@ extends Node3D
 ## Loslassen, Trefferpunkt am Ball mit dem rechten Stick, Block mit dem linken Stick.
 
 signal big_hit(strength: float)
+## Fuer Geraeusche und Effekte: Ballkontakt (serve, bump, set, spike, tip, block, net, floor).
+signal contact(kind: String, pos: Vector3, strength: float)
+signal point_won(winner: int, reason: String, highlight: bool)
 
 const G := 9.81
 const R := Ballistics.BALL_R
@@ -16,7 +19,7 @@ const NET_BOTTOM := 1.43
 const HALF_L := 9.0
 const HALF_W := 4.5
 const H_PASS := 0.85
-const H_SET := 2.35
+const H_SET := 2.1
 const H_ATTACK := 3.25
 const JUMP_RISE := 0.404
 const SET_POINTS := 25
@@ -28,9 +31,10 @@ const OVERCHARGE := 1.25  # ab hier ist der Schlag ueberzogen
 const OVER_OK := 12.0  # bis zu dieser Ballgeschwindigkeit (m/s) ist Pritschen sicher
 const OVER_RISKY := 17.0  # darueber droht "Ball gehalten"
 
-const TEAM_NAMES := ["SV Nordhafen", "TSV Eichenberg"]
-const TEAM_COLORS := [Color(0.16, 0.38, 0.86), Color(0.85, 0.2, 0.18)]
-const LIBERO_COLORS := [Color(0.98, 0.82, 0.15), Color(0.95, 0.95, 0.95)]
+## Namen und Trikots kommen aus teams/*.tres (siehe Teams, TeamStyle).
+var TEAM_NAMES: Array = Teams.playing().map(func(t): return t.name)
+var TEAM_COLORS: Array = Teams.playing().map(func(t): return t.jersey)
+var LIBERO_COLORS: Array = Teams.playing().map(func(t): return t.libero_jersey)
 ## Positionen je Spielsituation (lokal: Abstand zum Netz, seitlich; negativ = links).
 ## Beim Aufschlag und der Annahme stehen alle in Rotationsreihenfolge (Position 1 bis 6),
 ## damit die Aufstellung regelgerecht ist (keine Ueberlappung). Danach laufen die
@@ -39,8 +43,6 @@ const GRID := {
 	"serve": {1: Vector2(10.0, 2.5), 2: Vector2(2.0, 3.0), 3: Vector2(2.0, 0.0), 4: Vector2(2.0, -3.0), 5: Vector2(6.5, -3.0), 6: Vector2(7.0, 0.0)},
 	"receive": {1: Vector2(6.0, 3.0), 2: Vector2(1.8, 3.4), 3: Vector2(1.6, -0.4), 4: Vector2(3.0, -3.4), 5: Vector2(6.0, -3.0), 6: Vector2(6.4, 0.0)},
 }
-## Zuspieler im Hinterfeld versteckt sich bei der Annahme hinter dem Vorderspieler.
-const SETTER_HIDE := {1: Vector2(3.2, 4.1), 6: Vector2(3.4, 1.4), 5: Vector2(3.4, -1.4)}
 const FORM := {
 	"defense": {"front": {"left": Vector2(0.6, -3.0), "mid": Vector2(0.6, 0.0), "right": Vector2(0.6, 3.0)},
 		"back": {5: Vector2(6.5, -3.2), 6: Vector2(7.8, 0.0), 1: Vector2(6.5, 3.2)}},
@@ -52,7 +54,7 @@ const FORM := {
 const LANE_PREF := {"OH": -1.0, "MB": 0.0, "OP": 1.0, "S": 2.0, "L": 0.5}
 const SETTER_TARGET := Vector2(1.2, 1.0)
 
-enum Phase { INTRO, PRE_SERVE, TOSS, RALLY, POINT_PAUSE, TIMEOUT, SET_OVER, MATCH_OVER }
+enum Phase { INTRO, PRE_SERVE, TOSS, RALLY, POINT_PAUSE, TIMEOUT, SET_OVER, MATCH_OVER, REPLAY }
 enum Q { PERFECT, GOOD, WEAK, MISS }
 const Q_TEXT := ["PERFEKT!", "Gut", "Schwach", "Daneben"]
 const Q_COLOR := [Color(1.0, 0.85, 0.1), Color(0.55, 1.0, 0.55), Color(1.0, 0.6, 0.3), Color(1.0, 0.3, 0.3)]
@@ -88,6 +90,7 @@ var clock := 0.0
 var players: Array = [[], []]
 var ball: Node3D
 var ball_mesh: MeshInstance3D
+var _replay_jump := false
 var ball_shadow: MeshInstance3D
 var ball_vel := Vector3.ZERO
 var ball_g := G
@@ -134,8 +137,11 @@ var timeout_team := -1
 var ai_timeout_wanted := [false, false]
 var whistle_done := false
 var serve_deadline := -1.0
-var commit_miss := [false, false]  # Commit war falsch: Block kommt aussen zu spaet
-var commit_block := [false, false]  # Commit-Block: Mitte gegen den Schnellangriff
+var commit_miss := [false, false]  # Block falsch gelesen: kommt zu spaet
+var commit_block := [false, false]  # Mensch hat vor dem Zuspiel den Block gestellt (Lesen)
+var read_hit := [false, false]  # Block richtig gelesen: mehr Kill-Chance
+var read_z := 0.0  # Netzposition (z), auf die der Mensch seinen Mittelblocker gestellt hat
+var set_tempo := ["", ""]  # Tempo des letzten Zuspiels je Team (high, fast, quick)
 var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
 var trainer_wanted := false
 var notice := ""  # kurzer Hinweis fuer die Anzeige (z.B. "Libero muss raus")
@@ -143,9 +149,26 @@ var notice_until := 0.0
 var match_wins := [0, 0]
 var matches_done := 0
 var autoplay := false
+var attract := false  # Startmenue: im Hintergrund spielt KI gegen KI
+## Wiederholung: die letzten Sekunden werden aufgezeichnet (Ball, Spieler, Kontakte).
+const REC_SECONDS := 5.0
+var _rec: Array = []  # [clock, Ballposition, [Spielerzustaende]]
+var _rec_events: Array = []  # [clock, Art, Position, Staerke]
+var _rally_end := -100.0
+var replay_pending := false
+var _replay: Array = []
+var _replay_ev: Array = []
+var _replay_i := 0
+var _replay_ev_i := 0
+var _replay_t := 0.0
+var _replay_live: Array = []
+var rally_touches := 0
+var points_since_replay := 99
+var last_attack_speed := 0.0
 var autoplay_rallies := 200
 var trace := false
 var test_score := []  # Test: Startstand des ersten Satzes, z.B. --score=24:10
+var test_rot := -1  # Test: --rot=N dreht das Heimteam N-mal weiter, Gegner schlaegt auf
 var check_rules := false  # Test: prueft bei jedem Aufschlag die Aufstellung
 var autopress := false  # Test: drueckt fuer den Menschen automatisch
 var hud = null
@@ -202,6 +225,8 @@ func _ready() -> void:
 			autopress = true  # wie --autopress, aber mit Kamera, Zeitlupe und Anzeigen
 		elif a == "--trace":
 			trace = true
+		elif a.begins_with("--rot="):
+			test_rot = int(a.get_slice("=", 1))
 		elif a == "--check":
 			check_rules = true
 		elif a.begins_with("--seed="):
@@ -214,11 +239,16 @@ func _ready() -> void:
 			cfg.apply_preset(a.get_slice("=", 1))
 	if autoplay:
 		human_team = 0 if autopress else -1
+		Engine.time_scale = 12.0
+		Engine.max_physics_steps_per_frame = 64
 		new_match()
 	elif human_team < 0 or autopress:
 		new_match()
-	elif hud:
-		hud.show_intro()
+	else:
+		# Startmenue: dahinter laeuft ein Spiel KI gegen KI, bis du "Spielen" waehlst.
+		attract = true
+		human_team = -1
+		new_match()
 
 
 func _input(event: InputEvent) -> void:
@@ -318,16 +348,14 @@ func _unshaded(c: Color) -> StandardMaterial3D:
 func _make_ball() -> void:
 	ball = Node3D.new()
 	add_child(ball)
+	# Ball aus Blender (assets/models/ball.glb, r = 10,5 cm), etwas groesser gezeichnet,
+	# damit man ihn gut sieht
+	var src: Node3D = preload("res://assets/models/ball.glb").instantiate()
+	var bm := src.find_children("*", "MeshInstance3D", true, false)[0] as MeshInstance3D
 	ball_mesh = MeshInstance3D.new()
-	var s := SphereMesh.new()
-	s.radius = 0.14  # etwas groesser gezeichnet, damit man ihn gut sieht
-	s.height = 0.28
-	ball_mesh.mesh = s
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(1.0, 0.92, 0.35)
-	m.emission_enabled = true
-	m.emission = Color(0.35, 0.3, 0.05)
-	ball_mesh.material_override = m
+	ball_mesh.mesh = bm.mesh
+	ball_mesh.scale = Vector3.ONE * (0.14 / 0.105)
+	src.free()
 	ball.add_child(ball_mesh)
 
 	ball_shadow = MeshInstance3D.new()
@@ -352,7 +380,55 @@ func _torus(inner: float, outer: float, c: Color) -> MeshInstance3D:
 	return mi
 
 
+## Regellinien zwischen den Spielern (nur vor dem Aufschlag, nur fuer das Team des Menschen).
+var _form_lines: Array = []
+
+
+func _make_form_lines() -> void:
+	for i in Formation.PAIRS.size():
+		var mi := MeshInstance3D.new()
+		mi.mesh = BoxMesh.new()
+		var m := _unshaded(Color(1, 1, 1, 0.85))
+		m.no_depth_test = false
+		mi.material_override = m
+		mi.visible = false
+		add_child(mi)
+		_form_lines.append(mi)
+
+
+func _update_form_lines() -> void:
+	var show := human_team >= 0 and (phase == Phase.PRE_SERVE or phase == Phase.TOSS)
+	if show:
+		var t := human_team
+		var serving := t == serving_team
+		var spots: Dictionary = {}
+		for pl in players[t]:
+			spots[pl.slot] = team_local(t, pl.position)
+		var ls := Formation.links(spots, [1] if serving else [])
+		for i in _form_lines.size():
+			var mi: MeshInstance3D = _form_lines[i]
+			if i >= ls.size():
+				mi.visible = false
+				continue
+			var l: Dictionary = ls[i]
+			var a := court_pos(t, l.a)
+			var b := court_pos(t, l.b)
+			var mid := (a + b) * 0.5
+			var len := a.distance_to(b)
+			var dir := (b - a).normalized()
+			mi.position = Vector3(mid.x, 0.025, mid.z)
+			mi.rotation = Vector3(0, atan2(-dir.z, dir.x), 0)
+			mi.scale = Vector3(len, 0.01, 0.13)
+			var col := Color(1.0, 0.82, 0.2, 0.9) if l.kind == "lat" else Color(0.45, 0.92, 1.0, 0.9)
+			(mi.material_override as StandardMaterial3D).albedo_color = col
+			mi.visible = true
+	else:
+		for mi in _form_lines:
+			mi.visible = false
+
+
 func _make_markers() -> void:
+	_make_form_lines()
 	_ring_target = _torus(0.42, 0.5, Color(1, 1, 1, 0.9))
 	_ring_target_mat = _ring_target.material_override
 	_ring_timer = _torus(0.44, 0.52, Color(1.0, 0.85, 0.1))
@@ -473,7 +549,7 @@ func ai_e(kind: String) -> float:
 
 
 func popup(pl: VPlayer, text: String, color: Color) -> void:
-	if autoplay:
+	if autoplay or attract:
 		return
 	var l := Label3D.new()
 	l.text = text
@@ -504,6 +580,25 @@ func new_match() -> void:
 	_start_set()
 
 
+## Aus dem Startmenue: neues Spiel mit dir als Team 0, frische Kader.
+func start_game() -> void:
+	_abort_replay()
+	attract = false
+	human_team = 0
+	for t in 2:
+		rosters[t] = TeamRoster.new(t)
+	new_match()
+
+
+func back_to_title() -> void:
+	_abort_replay()
+	attract = true
+	human_team = -1
+	for t in 2:
+		rosters[t] = TeamRoster.new(t)
+	new_match()
+
+
 func set_target() -> int:
 	return DECIDING_POINTS if deciding else SET_POINTS
 
@@ -527,6 +622,10 @@ func _start_set() -> void:
 	libero_set_front = [false, false]
 	for t in 2:
 		rosters[t].new_set()
+		if t == 0 and test_rot >= 0:
+			for _i in test_rot:
+				rosters[t].rotate()
+			serving_team = 1
 		for j in 6:
 			_apply_identity(players[t][j], rosters[t].lineup[j])
 			players[t][j].set_side(side_of(t))
@@ -538,8 +637,14 @@ func _start_set() -> void:
 	start_rally()
 
 
+var _lines_hint_shown := false
+
+
 func start_rally() -> void:
 	phase = Phase.PRE_SERVE
+	if human_team >= 0 and not _lines_hint_shown and not autoplay:
+		_lines_hint_shown = true
+		_notice("Linien verbinden die Nachbarn: nicht überschreiten")
 	opp = null
 	blockers = [[], []]
 	block_dirs = [[], []]
@@ -561,10 +666,12 @@ func start_rally() -> void:
 	serve_deadline = -1.0
 	libero_set_front = [false, false]
 	commit_block = [false, false]
+	rally_touches = 0
+	last_attack_speed = 0.0
+	_rec.clear()
+	_rec_events.clear()
 	for t in 2:
 		_prepare_lineup(t)
-	if check_rules:
-		_check_rules()
 	for t in 2:
 		var form := "serve" if t == serving_team else "receive"
 		for pl in players[t]:
@@ -572,8 +679,11 @@ func start_rally() -> void:
 			pl.position = p
 			pl.target = p
 			pl.reset_state()
+	if check_rules:
+		_check_rules()
 	ball_vel = Vector3.ZERO
 	_hold_ball_at_server()
+	reset_physics_interpolation()
 	pause_until = clock + (0.15 if autoplay else 1.2)
 	if serving_team == human_team:
 		serve_aim = Vector2(5.5, 0.0)
@@ -626,6 +736,12 @@ func _check_rules() -> void:
 			roles[pl.role] = roles.get(pl.role, 0) + 1
 		if roles.get("S", 0) != 1 or roles.get("L", 0) > 1:
 			bad += " Rollen %s;" % str(roles)
+		var spots := {}
+		for pl in players[t]:
+			spots[pl.slot] = team_local(t, pl.target)
+		var viol := Formation.violations(spots, [1] if t == serving_team else [])
+		if not viol.is_empty():
+			bad += " Stellungsfehler %s;" % str(viol)
 		if bad != "":
 			print("REGELFEHLER T%d Satz %d %d:%d:%s lineup=%s" % [t, set_no, score[0], score[1], bad, str(r.lineup)])
 		if trace:
@@ -634,13 +750,42 @@ func _check_rules() -> void:
 			print("AUFSTELLUNG T%d Satz %d %d:%d P1..6=%s libero=%d" % [t, set_no, score[0], score[1], str(r.lineup), r.libero_on])
 
 
+## Annahme-Aufstellung des Teams (Position -> lokaler Punkt), regelgerecht und je Rotation anders.
+## Wird nur neu berechnet, wenn sich die Rollen auf den Positionen aendern.
+var _rcv_cache := [{}, {}]
+
+
+func _receive_spots(t: int) -> Dictionary:
+	var roles := {}
+	var sig := ""
+	for pl in players[t]:
+		roles[pl.slot] = pl.role
+	for s in range(1, 7):
+		sig += str(roles.get(s, "-"))
+	var c: Dictionary = _rcv_cache[t]
+	if c.get("sig", "") != sig:
+		c = {"sig": sig, "spots": Formation.receive_spots(roles), "passers": Formation.passer_slots(roles)}
+		_rcv_cache[t] = c
+	return c["spots"]
+
+
+## Annahme-Verantwortung: Libero zuerst, dann Aussenangreifer, die uebrigen nur im Notfall.
+func _receiver_weight(pl: VPlayer) -> float:
+	_receive_spots(pl.team)
+	if pl.role == "L":
+		return 0.8
+	if _rcv_cache[pl.team]["passers"].has(pl.slot):
+		return 1.0
+	return 1.8
+
+
 ## Position eines Spielers in einer Spielsituation (Welt-Koordinaten).
 func formation_pos(t: int, pl: VPlayer, form: String) -> Vector3:
 	var v: Vector2
 	if form == "serve" or form == "receive":
 		v = GRID[form][pl.slot]
-		if form == "receive" and pl.role == "S" and SETTER_HIDE.has(pl.slot):
-			v = SETTER_HIDE[pl.slot]
+		if form == "receive":
+			v = _receive_spots(t)[pl.slot]
 	else:
 		var f: Dictionary = FORM[form]
 		if pl.role == "S" and f.has("S"):
@@ -699,7 +844,18 @@ func libero_enter(t: int, slot: int, libero_id: int) -> String:
 	r.libero_enter(slot, libero_id)
 	_apply_identity(pl, libero_id)
 	_sync_slots(t)
+	_sub_banner(t, "Libero rein", libero_id, out_id, 3.0)
 	return ""
+
+
+## Einblendung unten links: wer kommt, wer geht (auch beim Gegner).
+func _sub_banner(t: int, what: String, in_id: int, out_id: int, secs: float) -> void:
+	if hud == null or autoplay:
+		return
+	var r: TeamRoster = rosters[t]
+	var a: Dictionary = r.m(in_id)
+	var b: Dictionary = r.m(out_id)
+	hud.show_sub(t, TEAM_NAMES[t], what, "#%d %s" % [a.number, a.name], "#%d %s" % [b.number, b.name], secs)
 
 
 func _libero_out(t: int) -> void:
@@ -708,6 +864,7 @@ func _libero_out(t: int) -> void:
 	var back := r.libero_leave()
 	_apply_identity(_figure_of(t, lib_id), back)
 	_sync_slots(t)
+	_sub_banner(t, "Libero raus", back, lib_id, 3.0)
 
 
 func libero_leave(t: int) -> String:
@@ -727,6 +884,7 @@ func substitute(t: int, out_id: int, in_id: int) -> String:
 	stats["Wechsel " + TEAM_NAMES[t]] = stats.get("Wechsel " + TEAM_NAMES[t], 0) + 1
 	_apply_identity(pl, in_id)
 	_sync_slots(t)
+	_sub_banner(t, "Wechsel", in_id, out_id, 5.0)
 	if hud:
 		hud.ref_signal([["sub", "Wechsel %s: %s kommt für %s" % [TEAM_NAMES[t], r.m(in_id).name, r.m(out_id).name], 1.6]])
 		hud.whistle(false)
@@ -752,7 +910,7 @@ func call_timeout(t: int) -> String:
 	if hud:
 		hud.whistle(false)
 		hud.ref_signal([["timeout", "Auszeit %s" % TEAM_NAMES[t], 8.0]])
-		hud.show_message("Auszeit %s\n\nNoch %d Auszeit(en) in diesem Satz" % [TEAM_NAMES[t], r.timeouts_left])
+		hud.show_banner("Auszeit %s" % TEAM_NAMES[t], "Noch %d Auszeit(en) in diesem Satz" % r.timeouts_left)
 	return ""
 
 
@@ -790,7 +948,7 @@ func _hold_ball_at_server() -> void:
 
 
 func _empty_input() -> Dictionary:
-	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false,
+	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "tempo_rs": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_down": false, "dump_held": false,
 		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false}
 
 
@@ -799,8 +957,20 @@ func _read_input() -> Dictionary:
 	d.mv = Input.get_vector("move_left", "move_right", "move_down", "move_up")
 	var stick := _held_stick(Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up"))
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
+	d.tempo_rs = stick  # rechter Stick (ohne Maus): Tempo des Zuspiels
+	d.mouse_rs = mouse_rs
+	d.dump_down = Input.is_action_just_pressed("set_dump")
+	d.dump_held = Input.is_action_pressed("set_dump")
 	d.bump = Input.is_action_just_pressed("bump")
 	d.over = Input.is_action_just_pressed("overhand")
+	var dp := Input.get_vector("set_dir_left", "set_dir_right", "set_dir_down", "set_dir_up")
+	if dp.length() > 0.5:
+		_set_dir = dp
+		_set_dir_ms = Time.get_ticks_msec()
+	if Time.get_ticks_msec() - _set_dir_ms < 2500:
+		d.dpad = _set_dir
+	d.fast = Input.is_action_just_pressed("set_fast")
+	d.quick = Input.is_action_just_pressed("set_quick")
 	d.hit_down = Input.is_action_just_pressed("hit")
 	d.hit_up = Input.is_action_just_released("hit")
 	d.hit_held = Input.is_action_pressed("hit")
@@ -818,6 +988,11 @@ func _read_input() -> Dictionary:
 ## Der rechte Stick federt beim Loslassen zur Mitte zurueck. Damit die gewaehlte
 ## Schlagrichtung dabei nicht verloren geht, gilt der letzte deutliche Ausschlag
 ## noch eine einstellbare Zeit lang weiter ("Stick nachhalten").
+var _combo_t := -1.0  # R1/R2 gedrueckt: Auswertung nach kurzer Wartezeit
+var _combo_r1 := false
+var _combo_r2 := false
+var _set_dir := Vector2.ZERO  # zuletzt am Steuerkreuz gewaehlte Zuspiel-Richtung (bleibt kurz gemerkt)
+var _set_dir_ms := -10000
 var _rs_hold := Vector2.ZERO
 var _rs_hold_ms := 0
 
@@ -901,11 +1076,15 @@ func _physics_process(delta: float) -> void:
 			_ai_actions()
 			_step_ball(delta)
 		Phase.POINT_PAUSE:
-			if clock >= pause_until:
+			if replay_pending and clock >= _rally_end + 1.1:
+				_start_replay()
+			elif clock >= pause_until:
 				if side_change_pending:
 					_do_side_change()
 				else:
 					start_rally()
+		Phase.REPLAY:
+			_step_replay(real_delta, start)
 		Phase.TIMEOUT:
 			if clock >= pause_until or (start and clock >= pause_until - 6.5):
 				_end_timeout()
@@ -922,11 +1101,111 @@ func _physics_process(delta: float) -> void:
 			elif start or (human_team < 0 and clock >= pause_until + 3.0):
 				new_match()
 
-	_update_players(delta)
+	if phase != Phase.REPLAY:
+		_update_players(delta)
+		_record()
 	_update_time_and_camera(real_delta)
 	_update_visuals()
+	_update_form_lines()
+	if phase == Phase.REPLAY:
+		for t in 2:
+			for pl in players[t]:
+				pl.set_controlled(false)
 	if hud:
 		hud.update_view(self)
+
+
+# ---------------------------------------------------------------- Wiederholung
+
+func _record() -> void:
+	if autoplay or hud == null:
+		return
+	if not (phase == Phase.TOSS or phase == Phase.RALLY or (phase == Phase.POINT_PAUSE and clock < _rally_end + 0.6)):
+		return
+	var snaps := []
+	for t in 2:
+		for pl in players[t]:
+			snaps.append(pl.snapshot())
+	_rec.append([clock, ball.position, snaps])
+	while not _rec.is_empty() and _rec[0][0] < clock - REC_SECONDS:
+		_rec.pop_front()
+
+
+func _start_replay() -> void:
+	replay_pending = false
+	var t0 := _rally_end - 2.6
+	_replay = _rec.filter(func(f): return f[0] >= t0)
+	_replay_ev = _rec_events.filter(func(e): return e[0] >= t0)
+	if _replay.size() < 20:
+		return
+	_replay_live = []
+	for t in 2:
+		for pl in players[t]:
+			_replay_live.append(pl.snapshot())
+	_replay_live.append(ball.position)
+	_replay_i = 0
+	_replay_ev_i = 0
+	_replay_t = _replay[0][0]
+	_replay_jump = true
+	phase = Phase.REPLAY
+	points_since_replay = 0
+	stats["Wiederholungen"] = stats.get("Wiederholungen", 0) + 1
+	if hud:
+		hud.show_replay(true)
+
+
+## Spielt die Aufzeichnung ab: langsam, und um den entscheidenden Moment noch langsamer.
+func _step_replay(real_delta: float, skip: bool) -> void:
+	if skip and _replay_t > _replay[0][0] + 0.25:
+		_end_replay()
+		return
+	var near := absf(_replay_t - (_rally_end - 0.35)) < 0.55
+	_replay_t += real_delta * (0.33 if near else 0.6)
+	while _replay_i < _replay.size() - 1 and _replay[_replay_i + 1][0] <= _replay_t:
+		_replay_i += 1
+	# Zwischen zwei aufgezeichneten Bildern weich mischen, damit die Zeitlupe nicht ruckelt.
+	var f: Array = _replay[_replay_i]
+	var g: Array = _replay[mini(_replay_i + 1, _replay.size() - 1)]
+	var w := 0.0
+	if g[0] > f[0]:
+		w = clampf((_replay_t - f[0]) / (g[0] - f[0]), 0.0, 1.0)
+	ball.position = (f[1] as Vector3).lerp(g[1], w)
+	var k := 0
+	for t in 2:
+		for pl in players[t]:
+			pl.restore_mix(f[2][k], g[2][k], w)
+			k += 1
+	if _replay_jump:
+		_replay_jump = false
+		reset_physics_interpolation()
+	while _replay_ev_i < _replay_ev.size() and _replay_ev[_replay_ev_i][0] <= _replay_t:
+		var e: Array = _replay_ev[_replay_ev_i]
+		contact.emit(e[1], e[2], e[3])
+		_replay_ev_i += 1
+	if _replay_i >= _replay.size() - 1:
+		_end_replay()
+
+
+func _end_replay() -> void:
+	var k := 0
+	for t in 2:
+		for pl in players[t]:
+			pl.restore(_replay_live[k])
+			k += 1
+	ball.position = _replay_live[k]
+	reset_physics_interpolation()
+	_replay = []
+	phase = Phase.POINT_PAUSE
+	pause_until = clock + 0.6
+	if hud:
+		hud.show_replay(false)
+
+
+func _abort_replay() -> void:
+	if phase == Phase.REPLAY:
+		_end_replay()
+	replay_pending = false
+	timeout_team = -1
 
 
 func _start_charge() -> void:
@@ -969,7 +1248,19 @@ func _auto_input() -> Dictionary:
 					elif charging and _due(opp.t):
 						d.hit_up = true
 				elif _due(opp.t):
-					if opp.speed <= OVER_OK:
+					if opp.kind == "set" and opp.speed <= OVER_OK:
+						d.rs = Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+						var r := rng.randf()
+						d.mouse_rs = d.rs
+						d.tempo_rs = Vector2(rng.randf_range(0.0, 1.0), 0.0)
+						d.over = r < 0.45
+						d.fast = r >= 0.45 and r < 0.6
+						d.quick = r >= 0.6 and r < 0.7
+						d.dump_down = r >= 0.7 and r < 0.85
+						d.dump_held = d.dump_down
+						d.hit_down = r >= 0.8 and r < 0.9  # R2 allein (schneller) oder mit R1 (Schlag)
+						d.hit_held = d.hit_down
+					elif opp.speed <= OVER_OK:
 						d.over = true
 					else:
 						d.bump = true
@@ -978,7 +1269,7 @@ func _auto_input() -> Dictionary:
 				if _due(opp.t - JUMP_RISE):
 					d.hit_down = true
 			elif opp != null and opp.team != human_team and opp.kind == "set" and rng.randf() < 0.02:
-				d.over = true  # Commit-Block ausprobieren
+				d.mv = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # Block lesen ausprobieren
 			else:
 				_auto_t = -1.0
 	return d
@@ -1047,19 +1338,19 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	var d := serve_aim.x
 	var l := serve_aim.y - contact.x * 1.5
 	var g := G
-	var umax := 16.0
+	var umax := 18.0
 	var clear := NET_H + 0.45
 	match style:
 		"topspin":
 			g = G * (1.45 if jump else 1.25)
-			umax = 22.0 if jump else 17.0
+			umax = 25.0 if jump else 19.0
 		"float":
-			umax = 20.0 if jump else 16.0
+			umax = 22.0 if jump else 17.5
 		"short":
 			d = minf(d, 3.2)
 			umax = 9.0
 			clear = NET_H + 0.8
-	var u := lerpf(9.0, umax, power)
+	var u := lerpf(10.0, umax, power)
 	if q == Q.GOOD:
 		clear += 0.3
 		u = minf(u, umax * 0.85)
@@ -1096,6 +1387,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	serve_time = clock
 	phase = Phase.RALLY
 	popup(srv, Q_TEXT[q], Q_COLOR[q])
+	_fx("serve", ball.position, power * (1.0 if jump else 0.65))
 	if serving_team == human_team and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
 	plan_next()
@@ -1166,6 +1458,8 @@ func _try_team(team: int) -> bool:
 		var s := player_by_role(team, "S")
 		if s != null and s != excluded and flat_dist(s.position, p) <= s.run_speed * tc + 0.8:
 			pl = s
+	if pl == null and kind == "pass" and last_action == "serve":
+		pl = _receiver(team, p, excluded)
 	if pl == null:
 		pl = _nearest(team, p, excluded, kind == "attack")
 	if pl == null:
@@ -1182,6 +1476,8 @@ func _try_team(team: int) -> bool:
 	# Ein Flatterball ist schwer zu lesen: kleineres Timing-Fenster bei der Annahme.
 	if flutter > 0.0 and last_action == "serve":
 		o.win_scale = 0.88
+	if kind == "dig" or (kind == "pass" and last_action == "serve"):
+		o.win_scale *= 1.0 - 0.22 * hard_ball(o.speed)
 	if o.human and (kind == "pass" or kind == "dig" or kind == "free"):
 		o.win_scale *= cfg.get_v("receive_help") / 100.0
 	if not o.human:
@@ -1198,6 +1494,11 @@ func _try_team(team: int) -> bool:
 	return true
 
 
+## 0 = normaler Ball, 1 = sehr harter Ball (ab ca. 16 m/s spuerbar, ab 28 m/s voll).
+func hard_ball(speed: float) -> float:
+	return clampf((speed - 16.0) / 12.0, 0.0, 1.0)
+
+
 ## KI-Abwehr: braucht eine Reaktionszeit, laeuft nicht beliebig schnell und wehrt harte
 ## Baelle seltener sauber ab. Wie gut, stellt "Gegner-Abwehr" ein.
 func _ai_dig_limits(o: Opp, tc: float) -> void:
@@ -1209,8 +1510,13 @@ func _ai_dig_limits(o: Opp, tc: float) -> void:
 	o.max_run = maxf(0.0, tc - react) * run
 	if flat_dist(o.player.position, o.point) > o.max_run + reach:
 		o.no_reach = true
-	var hard := clampf((o.speed - 14.0) / 12.0, 0.0, 1.0) * (1.0 - 0.6 * skill)
-	o.ai_e *= 1.0 + hard * 1.6
+	var hard := hard_ball(o.speed) * (1.0 - 0.45 * skill)
+	o.ai_e *= 1.0 + hard * 2.0
+	if last_action == "block":
+		# Nach einem Kill-Block faellt der Ball steil und schnell: die KI rettet ihn nur selten.
+		o.max_run *= 0.5
+		if rng.randf() > lerpf(0.12, 0.3, skill):
+			o.no_reach = true
 
 
 var _hitter := [null, null]
@@ -1218,6 +1524,21 @@ var _hitter := [null, null]
 
 func _chosen_hitter(team: int) -> VPlayer:
 	return _hitter[team]
+
+
+## Annahme nach dem Aufschlag: Naehe zaehlt, aber der Libero nimmt bevorzugt an,
+## die Annahmespieler vor den uebrigen.
+func _receiver(team: int, p: Vector3, excluded: VPlayer) -> VPlayer:
+	var best: VPlayer = null
+	var bs := 1e9
+	for pl in players[team]:
+		if pl == excluded:
+			continue
+		var sc := flat_dist(pl.position, p) * _receiver_weight(pl)
+		if sc < bs:
+			bs = sc
+			best = pl
+	return best
 
 
 func _nearest(team: int, p: Vector3, excluded: VPlayer, no_libero: bool) -> VPlayer:
@@ -1248,11 +1569,23 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 		mb = front[0]
 	var list: Array = []
 	var dirs: Array = []
+	# Mensch hat den Mittelblocker vorher hingestellt: nah am Angriffspunkt = gelesen,
+	# weit daneben = falsch gelesen, dazwischen ganz normaler Block.
 	var committed: bool = commit_block[def]
 	commit_block[def] = false
-	var commit_hit := committed and absf(p.z) < 1.5
-	commit_miss[def] = committed and not commit_hit
-	if absf(p.z) < 1.5:
+	var commit_hit := false
+	commit_miss[def] = false
+	read_hit[def] = false
+	if committed and mb != null:
+		var miss_by := absf(mb.position.z - p.z)
+		commit_hit = miss_by < 1.0
+		read_hit[def] = commit_hit
+		commit_miss[def] = miss_by > 2.2
+		if commit_hit:
+			popup(mb, "Gelesen!", Color(1.0, 0.85, 0.3))
+		elif commit_miss[def]:
+			popup(mb, "Falsch gelesen", Q_COLOR[Q.WEAK])
+	if absf(p.z) < 1.5 or commit_hit:
 		list = [mb]
 		dirs = [0.0]
 		var t_left := t_contact - clock
@@ -1328,23 +1661,56 @@ func _rally_input(inp: Dictionary) -> void:
 		pl.manual_dir = Vector3.ZERO
 	var mv: Vector2 = inp.mv
 	var hp := human_player()
-	# Commit-Block: Pritschen-Taste, solange der Gegner den Ball spielt (vor dem Angriff).
-	if inp.over and not commit_block[human_team] and (opp == null or opp.team != human_team) and opp != null and opp.kind != "attack" and possession != human_team:
-		commit_block[human_team] = true
-		var cp := _lane_player(human_team, "mid")
-		if cp != null:
-			popup(cp, "Commit: Mitte", Color(1.0, 0.85, 0.3))
+	# Block lesen: Solange der gegnerische Zuspieler den Ball noch bekommt, stellst du den
+	# Mittelblocker mit dem linken Stick am Netz hin. Wo er steht, wenn der Ball gespielt wird,
+	# entscheidet ueber den Block (richtig gelesen = starker Block, falsch = zu spaet).
+	if opp != null and not opp.done and opp.team != human_team and opp.kind == "set":
+		var rp := _lane_player(human_team, "mid")
+		if rp != null and is_front_row(rp) and mv.length() > 0.3:
+			rp.manual_dir = Vector3(0, 0, _stick_dir(mv).z)
+			read_z = rp.position.z
+			commit_block[human_team] = true
 	if opp != null and not opp.done and opp.team == human_team:
 		match opp.kind:
 			"attack":
 				_attack_input(inp)
 			"set":
+				# Linker Stick = laufen, Steuerkreuz = Richtung, rechter Stick = Tempo (Mitte hoch,
+				# halb schnell, voll Schnellangriff). R2 = ein Tempo schneller, R1 = Dump,
+				# R1 + R2 zusammen = der Zuspieler schlaegt selbst.
 				if not assist:
 					hp.manual_dir = _stick_dir(mv)
-				if inp.bump:
-					_human_touch("bump", _set_choice(mv))
+				var lane := _set_choice(inp.dpad if inp.dpad.length() > 0.5 else inp.mouse_rs)
+				var tl: float = inp.tempo_rs.length()
+				var stick_tempo := "high" if tl < 0.35 else ("fast" if tl < 0.8 else "quick")
+				# R1/R2 koennen etwas versetzt gedrueckt werden: kurz sammeln, dann auswerten.
+				if inp.dump_down or inp.hit_down:
+					if _combo_t < 0.0:
+						_combo_r1 = false
+						_combo_r2 = false
+						_combo_t = clock
+				if _combo_t >= 0.0:
+					_combo_r1 = _combo_r1 or inp.dump_down or inp.dump_held
+					_combo_r2 = _combo_r2 or inp.hit_down or inp.hit_held
+					if clock - _combo_t >= 0.05:
+						var t0 := _combo_t  # Timing zaehlt ab dem ersten Tastendruck
+						_combo_t = -1.0
+						if _combo_r1 and _combo_r2:
+							_human_touch("over", lane + "|attack", t0)
+						elif _combo_r1:
+							_human_touch("over", lane + "|dump", t0)
+						else:
+							_human_touch("over", lane + "|" + _faster(stick_tempo), t0)
+				elif inp.bump:
+					_human_touch("bump", lane + "|high")
 				elif inp.over:
-					_human_touch("over", _set_choice(mv))
+					_human_touch("over", lane + "|" + stick_tempo)
+				elif inp.fast:
+					_human_touch("over", lane + "|fast")
+				elif inp.quick:
+					_human_touch("over", lane + "|quick")
+				if opp == null or opp.pending or opp.done:
+					_set_dir = Vector2.ZERO  # Richtung gilt nur fuer dieses Zuspiel
 			_:
 				hp.manual_dir = _stick_dir(mv)
 				if inp.bump:
@@ -1392,10 +1758,10 @@ func _attack_input(inp: Dictionary) -> void:
 		_press(opp, e, "spike")
 
 
-func _human_touch(tech: String, choice: String) -> void:
-	if opp.pending:
+func _human_touch(tech: String, choice: String, t_press := -1.0) -> void:
+	if opp == null or opp.pending:
 		return
-	var e := clock - opp.t
+	var e := (t_press if t_press >= 0.0 else clock) - opp.t
 	if e < -maxf(0.35, windows(opp.kind)[2] * opp.win_scale + 0.05):
 		return  # viel zu frueh gedrueckt: ignorieren
 	opp.tech = tech
@@ -1563,6 +1929,9 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		libero_set_front[o.team] = true
 	if (o.kind == "pass" or o.kind == "dig" or o.kind == "free") and horiz > 0.8:
 		pl.dive()
+	if o.kind == "dig" and last_touch_team != o.team:
+		var dk: String = "Abgewehrt nach " + ("Block" if last_action == "block" else ("Angriff" if last_action == "attack" else last_action))
+		stats[dk] = stats.get(dk, 0) + 1
 	if possession != o.team:
 		possession = o.team
 		touches = 0
@@ -1588,6 +1957,11 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 			_do_attack(o, q, e)
 		"free":
 			_do_free(o, q)
+	rally_touches += 1
+	if o.kind == "attack":
+		_fx("tip" if last_action == "tip" else "spike", before, clampf(ball_vel.length() / 30.0, 0.3, 1.0))
+	else:
+		_fx("set" if o.tech == "over" else "bump", before, clampf(o.speed / 20.0, 0.25, 1.0))
 	stats["Technik " + ("Pritschen" if o.tech == "over" else "Baggern")] = stats.get("Technik " + ("Pritschen" if o.tech == "over" else "Baggern"), 0) + (1 if o.kind != "attack" else 0)
 	if trace:
 		print("  T%d %s %s %s q=%s e=%.3f pos=%s vel=%s" % [o.team, pl.role, o.kind, o.tech, Q_TEXT[q], e, before, ball_vel])
@@ -1611,8 +1985,9 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	elif q == Q.WEAK:
 		spread = 1.8
 	if o.kind == "dig":
-		spread += 0.8
-		d += 1.2
+		var hb := hard_ball(o.speed)
+		spread += 0.8 + 1.2 * hb
+		d += 1.2 + 1.0 * hb
 	if was_flutter:
 		spread += 0.4
 	if o.tech == "over" and o.speed <= OVER_OK:
@@ -1628,10 +2003,35 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	last_action = "pass"
 
 
+## choice = "<Richtung>|<Tempo>": Richtung auto/left/right/mid/back (rechter Stick),
+## Tempo high (hoher Ball), fast (schneller Ball), quick (Schnellangriff) oder dump
+## (der Zuspieler spielt den Ball selbst ueber das Netz).
 func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	var setter := o.player
+	var parts := choice.split("|")
+	var lane_choice: String = parts[0]
+	var tempo: String = parts[1] if parts.size() > 1 else "auto"
+	if tempo == "auto":
+		tempo = _ai_set_tempo(o, q)
+	var bump_set := o.tech != "over"
+	if tempo != "high" and (bump_set or q == Q.WEAK):
+		if o.human:
+			popup(setter, "Nur hoher Ball" if bump_set else "Ball zu schlecht", Q_COLOR[Q.WEAK])
+		tempo = "high"
+	if (tempo == "dump" or tempo == "attack") and not _can_dump(o):
+		if o.human:
+			popup(setter, "Dump nicht möglich" if tempo == "dump" else "Schlag nicht möglich", Q_COLOR[Q.WEAK])
+		tempo = "high"
+	if tempo == "dump":
+		_do_dump(o, q, lane_choice)
+		return
+	if tempo == "attack":
+		_do_setter_attack(o, q, e, lane_choice)
+		return
 	var sl := team_local(o.team, setter.position)
-	var hitter := _pick_hitter(o.team, setter, choice, sl)
+	if tempo == "quick" and (lane_choice == "auto" or lane_choice == ""):
+		lane_choice = "mid"
+	var hitter := _pick_hitter(o.team, setter, lane_choice, sl)
 	var d := 1.0
 	var l := -3.6
 	var T := 1.15
@@ -1648,11 +2048,26 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 			d = 3.8  # Hinterfeldangriff hinter der 3-m-Linie
 			l = -0.5
 			T = 1.1
-	var bump_set := o.tech != "over"
+	# Tempo: hoch = viel Zeit fuer den Angreifer, aber der Block steht. Schnell und
+	# Schnellangriff = der Block kommt oft zu spaet, dafuer ungenauer.
+	var tempo_spread := 0.0
+	match tempo:
+		"high":
+			T = maxf(T, 1.0) * 1.15
+		"fast":
+			T = maxf(T * 0.82, 0.62)
+			tempo_spread = 0.25
+		"quick":
+			T = maxf(T * 0.62, 0.5)
+			tempo_spread = 0.5
 	if bump_set:
 		T = maxf(T, 0.9)  # gebaggert gibt es keinen schnellen Ball
+	set_tempo[o.team] = tempo
+	stats["Zuspiel " + tempo] = stats.get("Zuspiel " + tempo, 0) + 1
+	if o.human and tempo != "high":
+		popup(setter, "Schneller Ball" if tempo == "fast" else "Schnellangriff", Color(0.6, 0.9, 1.0))
 	l += excess(e, "set") * 10.0
-	var spread: float = [0.15, 0.45, 1.2][q]
+	var spread: float = [0.15, 0.45, 1.2][q] + tempo_spread
 	if bump_set:
 		spread = spread * 1.8 + 0.2
 	l += rng.randf_range(-spread, spread)
@@ -1666,14 +2081,119 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	last_action = "set"
 
 
+func _faster(tempo: String) -> String:
+	return "fast" if tempo == "high" else "quick"
+
+
+## Dump nur vom Zuspieler selbst: vorn am Netz, kein Libero, Ball nicht schlecht.
+func _can_dump(o: Opp) -> bool:
+	var pl := o.player
+	return pl.role != "L" and is_front_row(pl) and absf(ball.position.x) < 2.0 and ball.position.y > NET_H - 0.4
+
+
+## Setter-Dump: der Zuspieler spielt den zweiten Ball mit einer Hand ueber das Netz,
+## wenn der Gegner auf die Angreifer schaut. Die Richtung kommt vom Stick.
+func _do_dump(o: Opp, q: int, lane_choice: String) -> void:
+	var setter := o.player
+	var d := rng.randf_range(2.2, 4.0)
+	var l := 0.0
+	match lane_choice:
+		"left":
+			l = -3.2
+		"right":
+			l = 3.2
+		"back":
+			d = rng.randf_range(5.5, 7.0)
+		"mid":
+			d = rng.randf_range(2.0, 3.0)
+		_:
+			l = rng.randf_range(-3.0, 3.0)
+	var spread := 0.4 if q == Q.PERFECT else (0.9 if q == Q.GOOD else 1.6)
+	l = clampf(l + rng.randf_range(-spread, spread), -4.4, 4.4)
+	d += rng.randf_range(-spread * 0.5, spread * 0.5)
+	var target := court_pos(o.team, Vector2(-d, l))
+	target.y = R
+	ball_vel = Ballistics.launch_over_net(ball.position, target, NET_H + 0.3, 4.0, 11.0)
+	_hitter[o.team] = null
+	set_tempo[o.team] = "dump"
+	last_action = "tip"
+	setter.jump()
+	popup(setter, "Dump!", Color(1.0, 0.85, 0.3))
+	stats["Dump"] = stats.get("Dump", 0) + 1
+
+
+## Zuspieler schlaegt den zweiten Ball selbst (R1 + R2): hart, aber weniger stark als ein
+## Angreifer, und ein Mittelblocker kann ihn stoppen.
+func _do_setter_attack(o: Opp, q: int, e: float, lane_choice: String) -> void:
+	var setter := o.player
+	var cx := 0.0
+	var cy := 0.45
+	match lane_choice:
+		"left":
+			cx = 0.5
+		"right":
+			cx = -0.5
+		"back":
+			cy = 0.85
+	o.rs = Vector2(cx, cy)
+	o.power = 0.78
+	o.over = 0.78
+	set_tempo[o.team] = "attack"
+	setter.jump()
+	popup(setter, "Zuspieler schlägt!", Color(1.0, 0.85, 0.3))
+	stats["Zuspieler-Schlag"] = stats.get("Zuspieler-Schlag", 0) + 1
+	var rb := _lane_player(1 - o.team, "mid")
+	var stop_p := lerpf(0.15, 0.4, cfg.unit("ai_block")) if (1 - o.team) != human_team else 0.3
+	if rb != null and is_front_row(rb) and rng.randf() < stop_p:
+		# Mittelblocker steht richtig: Ball wird auf die Seite des Zuspielers gedrueckt.
+		var s_att := side_of(o.team)
+		ball.position = Vector3(s_att * (R + 0.05), ball.position.y, ball.position.z)
+		ball_vel = Vector3(s_att * rng.randf_range(1.0, 3.0), -rng.randf_range(7.0, 10.0), ball_vel.z * 0.1)
+		possession = 1 - o.team
+		touches = 0
+		last_action = "block"
+		last_touch_team = 1 - o.team
+		last_toucher = null
+		popup(rb, "BLOCK!", Q_COLOR[Q.PERFECT])
+		stats["BLOCK!"] = stats.get("BLOCK!", 0) + 1
+		_fx("block", ball.position, 1.0)
+		return
+	_do_attack(o, q, e)
+
+
+## KI-Zuspieler: waehlt das Tempo nach Annahme und Block des Gegners.
+func _ai_set_tempo(o: Opp, q: int) -> String:
+	if q == Q.WEAK or o.tech != "over":
+		return "high"
+	var r := rng.randf()
+	var mid_blocker := _lane_player(1 - o.team, "mid")
+	var leaning := mid_blocker != null and absf(mid_blocker.position.z) > 2.0  # Block steht aussen: Mitte/Dump offen
+	if _can_dump(o) and o.player.role == "S" and r < (0.2 if leaning else 0.07):
+		return "dump"
+	if pass_quality <= Q.GOOD and r < 0.55:
+		return "quick" if (leaning and r < 0.3) else "fast"
+	return "high" if r < 0.8 else "fast"
+
+
 func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VPlayer:
 	var lane := choice
 	if choice == "auto" or choice == "":
 		var r := rng.randf()
+		var wl := 0.4
+		var wr := 0.3
+		# Steht der menschliche Mittelblocker aussen, spielt die KI eher dorthin, wo er nicht ist.
+		var rb := _lane_player(1 - team, "mid")
+		if rb != null and (1 - team) == human_team:
+			var zl := court_pos(team, Vector2(1.0, -3.6)).z
+			var zr := court_pos(team, Vector2(1.0, 3.6)).z
+			var dl := absf(rb.position.z - zl)
+			var dr := absf(rb.position.z - zr)
+			wl = 0.3 + 0.35 * dl / (dl + dr + 0.01)
+			wr = 0.3 + 0.35 * dr / (dl + dr + 0.01)
 		if pass_quality <= Q.GOOD and sl.x < 2.5:
-			lane = "left" if r < 0.4 else ("right" if r < 0.7 else "mid")
+			lane = "left" if r < wl else ("right" if r < wl + wr else "mid")
 		else:
-			lane = "left" if r < 0.6 else "right"
+			lane = "left" if r < wl / (wl + wr) else "right"
 	var h := _lane_player(team, lane)
 	if h == null and lane == "right":
 		h = _lane_player(team, "back")  # kein Diagonalangreifer vorn: Hinterfeldangriff
@@ -1690,7 +2210,7 @@ func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VP
 ## trifft, schlaegt ihn nach links. Ganz aussen: Cut Shot (kurz diagonal) oder Block-Out.
 func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float) -> Dictionary:
 	var hl := team_local(team, bp).y
-	var res := {"style": "spike", "g": G, "u": lerpf(14.0, 26.0, clampf(power, 0.0, 1.0)), "clear": 0.0}
+	var res := {"style": "spike", "g": G, "u": lerpf(16.0, 30.0, clampf(power, 0.0, 1.0)), "clear": 0.0}
 	var d := 7.8
 	var l := hl
 	if contact.y < -0.35:
@@ -1708,7 +2228,7 @@ func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float) -> Dict
 			res.style = "cut"
 			d = 2.8
 			l = toward * 4.0
-			res.u = lerpf(11.0, 17.0, power)
+			res.u = lerpf(12.0, 19.0, power)
 	else:
 		var top := clampf(contact.y, 0.0, 1.0)
 		d = 7.3 - top * 2.2
@@ -1791,10 +2311,13 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 			vel = Ballistics.launch_with_speed(bp, target, u, g)
 	ball_vel = vel
 	last_action = "attack"
+	last_attack_speed = vel.length()
 	_slow_tail_until = clock + 0.12
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
 	if o.human:
 		big_hit.emit(1.0 if q == Q.PERFECT and o.power > 0.75 else 0.4)
+	elif last_attack_speed > 24.0:
+		big_hit.emit(0.35)
 
 
 ## Hoehe, in der der Ball die Netzebene kreuzt (99, wenn er nicht hinkommt).
@@ -1823,6 +2346,9 @@ func _do_free(o: Opp, q: int) -> void:
 
 func _step_ball(delta: float) -> void:
 	var prev := ball.position
+	var spin_axis := Vector3.UP.cross(ball_vel)
+	if spin_axis.length() > 0.05:
+		ball_mesh.rotate(spin_axis.normalized(), ball_vel.length() * delta / 0.14 * 0.4)
 	var res := Ballistics.advance(prev, ball_vel, delta, ball_g)
 	var nxt: Vector3 = res[0]
 	ball_vel = res[1]
@@ -1838,6 +2364,7 @@ func _step_ball(delta: float) -> void:
 			ball_g = G
 			flutter = 0.0
 			net_touched = true
+			_fx("net", c, 0.5)
 			if possession != last_touch_team:
 				possession = last_touch_team
 			plan_next()
@@ -1892,8 +2419,12 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	ball_g = G
 	# Wie gut steht der Block? Haende ganz oben, ueber das Netz gegriffen, mehrere Blocker.
 	# Der Mensch blockt immer gleich stark; die Staerke des KI-Blocks stellt "Gegner-Block" ein.
-	var base := 0.33 if def == human_team else lerpf(0.08, 0.32, cfg.unit("ai_block"))
-	var stuff_p := base + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0)
+	var base := 0.34 if def == human_team else lerpf(0.1, 0.34, cfg.unit("ai_block"))
+	var stuff_p := base + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0) + (0.1 if in_block >= 3 else 0.0)
+	if read_hit[def]:
+		stuff_p += 0.2  # richtig gelesen
+	elif commit_miss[def]:
+		stuff_p *= 0.6
 	if pl.jump_h < 0.6:
 		stuff_p *= 0.4
 	var out_p := 0.85 if last_shot_style == "blockout" else 0.4
@@ -1908,7 +2439,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	elif absf(hit_dz) < 0.3 and c.y < top2 - 0.25 + pl.hand_reach and last_action == "attack" and rng.randf() < stuff_p:
 		# Kompletter Block: Ball wird hart nach unten auf die Seite des Angreifers gedrueckt.
 		ball.position = Vector3(s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(s_att * rng.randf_range(1.2, 3.5), -rng.randf_range(3.5, 6.0), ball_vel.z * 0.2 + rng.randf_range(-1.0, 1.0))
+		ball_vel = Vector3(s_att * rng.randf_range(1.0, 3.0), -rng.randf_range(7.0, 10.0), ball_vel.z * 0.15 + rng.randf_range(-1.0, 1.0))
 		possession = 1 - def
 		touches = 0
 		last_action = "block"
@@ -1923,10 +2454,10 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			big_hit.emit(1.0 if in_block >= 2 else 0.7)
 			if in_block >= 2:
 				_hitstop_left = 0.45
-	elif last_action == "attack" and ball_vel.length() > 17.0 and rng.randf() < 0.55:
+	elif last_action == "attack" and ball_vel.length() > 19.0 and rng.randf() < 0.35:
 		# Harter Schlag: Ball geht durch den Block, wird etwas gebremst, bleibt aber schnell.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(ball_vel.x * rng.randf_range(0.55, 0.75), ball_vel.y * 0.5 + rng.randf_range(-1.0, 1.5), ball_vel.z * 0.6 + rng.randf_range(-2.0, 2.0))
+		ball_vel = Vector3(ball_vel.x * rng.randf_range(0.45, 0.6), ball_vel.y * 0.5 + rng.randf_range(-1.0, 1.5), ball_vel.z * 0.6 + rng.randf_range(-2.0, 2.0))
 		possession = def
 		touches = 0
 		last_action = "block_touch"
@@ -1935,11 +2466,13 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	else:
 		# Blockberuehrung: Ball geht weich weiter, zaehlt nicht als Beruehrung.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(ball_vel.x * 0.3, rng.randf_range(2.5, 4.5), ball_vel.z * 0.4)
+		# Soft-Touch: der Ball faellt steil hinter den Block auf die eigene Seite des Blockers.
+		ball_vel = Vector3(-s_att * rng.randf_range(1.5, 4.0), rng.randf_range(2.5, 4.5), ball_vel.z * 0.3)
 		possession = def
 		touches = 0
 		last_action = "block_touch"
-		popup(pl, "Blockberührung", Q_COLOR[Q.GOOD])
+		popup(pl, "Soft-Touch", Q_COLOR[Q.GOOD])
+	_fx("block", c, 1.0 if last_action == "block" else 0.55)
 	last_touch_team = def
 	last_toucher = null
 	plan_next()
@@ -1947,6 +2480,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 
 
 func _on_ball_landed() -> void:
+	_fx("floor", ball.position, clampf(ball_vel.length() / 22.0, 0.2, 1.0))
 	var side_team := team_at_x(ball.position.x)
 	var inside := absf(ball.position.x) <= HALF_L + R and absf(ball.position.z) <= HALF_W + R
 	var winner: int
@@ -1988,6 +2522,29 @@ func _on_ball_landed() -> void:
 	_end_rally(winner, reason)
 
 
+func _fx(kind: String, pos: Vector3, strength: float) -> void:
+	if autoplay:
+		return
+	_rec_events.append([clock, kind, pos, strength])
+	contact.emit(kind, pos, strength)
+
+
+## Starke Punkte bekommen eine Wiederholung: Ass, Blockpunkt, sehr harter Angriff, langer
+## Ballwechsel. Damit es nicht nervt, kommt nach einer Wiederholung fruehestens 4 Punkte
+## spaeter die naechste.
+func _is_highlight(reason: String) -> bool:
+	points_since_replay += 1
+	var strong := false
+	match reason:
+		"Ass!", "Block-Punkt!":
+			strong = true
+		"Angriffspunkt!", "Block-Aus!":
+			strong = last_attack_speed >= 28.0 or rally_touches >= 20
+		"Gelegt!", "Ball im Feld":
+			strong = rally_touches >= 20
+	return strong and points_since_replay >= 4
+
+
 func _end_rally(winner: int, reason: String) -> void:
 	if phase != Phase.RALLY and phase != Phase.TOSS and phase != Phase.PRE_SERVE:
 		return
@@ -2013,9 +2570,15 @@ func _end_rally(winner: int, reason: String) -> void:
 	var over: bool = score[winner] >= set_target() and score[winner] - score[1 - winner] >= 2
 	if over and trace:
 		print("SATZENDE Satz %d: %d:%d (deciding=%s)" % [set_no, score[0], score[1], deciding])
+	for pl in players[winner]:
+		pl.celebrate_until = clock + 1.6
+	var highlight := _is_highlight(reason)
+	_rally_end = clock
+	point_won.emit(winner, reason, highlight)
 	if hud:
 		hud.whistle(true)
 		hud.ref_signal(_ref_sequence(winner, reason, over))
+		hud.flash_score(winner)
 	if over:
 		_finish_set(winner)
 	else:
@@ -2025,8 +2588,7 @@ func _end_rally(winner: int, reason: String) -> void:
 			side_change_pending = true  # im Entscheidungssatz wird bei 8 Punkten gewechselt
 			side_changed_deciding = true
 		_ai_coach_after_point()
-		if hud:
-			hud.show_message("%s\nPunkt für %s" % [reason, TEAM_NAMES[winner]])
+		replay_pending = highlight and cfg.replays and hud != null and not autoplay
 
 
 func _finish_set(winner: int) -> void:
@@ -2043,13 +2605,13 @@ func _finish_set(winner: int) -> void:
 		match_wins[winner] += 1
 		stats["Spiele " + TEAM_NAMES[winner]] = stats.get("Spiele " + TEAM_NAMES[winner], 0) + 1
 		if hud:
-			hud.show_message("%s gewinnt das Spiel %d:%d\n(%s)\n\nA / Leertaste: neues Spiel" % [
-				TEAM_NAMES[winner], sets_won[winner], sets_won[1 - winner], history])
+			hud.show_banner("%s gewinnt das Spiel %d:%d" % [TEAM_NAMES[winner], sets_won[winner], sets_won[1 - winner]],
+				"Sätze: %s   ·   A / Leertaste: neues Spiel" % history)
 	else:
 		phase = Phase.SET_OVER
 		if hud:
-			hud.show_message("Satz %d geht an %s  %d:%d\nSätze: %d:%d\n\nSeitenwechsel · A / Leertaste: nächster Satz" % [
-				set_no, TEAM_NAMES[winner], score[winner], score[1 - winner], sets_won[0], sets_won[1]])
+			hud.show_banner("Satz %d geht an %s  %d:%d" % [set_no, TEAM_NAMES[winner], score[winner], score[1 - winner]],
+				"Sätze %d:%d   ·   Seitenwechsel   ·   A / Leertaste: nächster Satz" % [sets_won[0], sets_won[1]])
 
 
 ## Seitenwechsel im Entscheidungssatz bei 8 Punkten: alle gehen auf die andere Seite.
@@ -2064,13 +2626,14 @@ func _do_side_change() -> void:
 			pl.set_side(side_of(t))
 			pl.position = Vector3(-pl.position.x, 0.0, -pl.position.z)
 			pl.target = pl.position
+	reset_physics_interpolation()
 	phase = Phase.TIMEOUT
 	timeout_team = -1
 	pause_until = clock + (0.3 if autoplay else 3.5)
 	if hud:
 		hud.ref_signal([["sidechange", "Seitenwechsel", 3.5]])
 		hud.whistle(false)
-		hud.show_message("Seitenwechsel\n%s %d : %d %s" % [TEAM_NAMES[0], score[0], score[1], TEAM_NAMES[1]])
+		hud.show_banner("Seitenwechsel", "%s %d : %d %s" % [TEAM_NAMES[0], score[0], score[1], TEAM_NAMES[1]])
 
 
 ## Schiedsrichter-Zeichen nach einem Ballwechsel: erst der Grund, dann Aufschlag fuer das Team.
@@ -2126,6 +2689,8 @@ func _formation(t: int) -> String:
 			if opp == null:
 				return ""
 			if opp.team == t:
+				if opp.kind == "pass" and last_action == "serve":
+					return "receive"  # Annahmeformation bleibt stehen, bis der Ball gespielt ist
 				return "cover" if opp.kind == "attack" else "build"
 			return "defense"
 	return ""
@@ -2138,6 +2703,11 @@ func _update_players(delta: float) -> void:
 			for pl in players[t]:
 				if not (phase == Phase.PRE_SERVE and pl == server()):
 					pl.target = formation_pos(t, pl, form)
+			# Gelesener Block: der Mittelblocker bleibt dort stehen, wo der Mensch ihn hingestellt hat.
+			if t == human_team and commit_block[t]:
+				var rp := _lane_player(t, "mid")
+				if rp != null and opp != null and opp.team != t and opp.kind == "set":
+					rp.target = Vector3(rp.target.x, 0.0, read_z)
 		for pl in players[t]:
 			pl.run_speed = 6.0
 		if opp != null and opp.team != t and opp.kind == "attack" and not blockers[t].is_empty():
@@ -2157,18 +2727,28 @@ func _update_players(delta: float) -> void:
 				if not (pl in list) and is_front_row(pl):
 					var lane: Vector2 = FORM["defense"]["front"][pl.lane if pl.lane in ["left", "mid", "right"] else "right"]
 					pl.target = court_pos(t, Vector2(3.0, lane.y))
+	# Vor dem Aufschlag: Sprungaufschlaeger steht weiter hinten (Platz zum Anlauf).
+	if phase == Phase.PRE_SERVE:
+		var srv0 := server()
+		var back := 11.4 if serve_kind == 1 else 10.0
+		srv0.target = Vector3(side_of(serving_team) * back, 0.0, srv0.position.z)
 	# Sprungaufschlag: Anlauf unter den Ball und Absprung hinter der Grundlinie.
 	if phase == Phase.TOSS and serve_kind == 1 and not serve_done:
 		var srv := server()
 		var bx := ball.position.x - side_of(serving_team) * 0.2
 		bx = side_of(serving_team) * maxf(absf(bx), HALF_L + 0.1)
-		srv.target = Vector3(bx, 0.0, ball.position.z)
-		srv.run_speed = 4.0
+		var goal := Vector3(bx, 0.0, ball.position.z)
+		# Anlauf aus dem Stand: der Aufschlaeger startet so, dass er genau zum Absprung ankommt.
+		var run_dur := flat_dist(srv.position, goal) / 5.0
+		if clock < serve_ideal - JUMP_RISE - run_dur - 0.1:
+			goal = srv.position
+		srv.target = goal
+		srv.run_speed = 5.0
 		if clock >= serve_ideal - JUMP_RISE and not srv.has_jumped:
 			srv.jump()
 	if opp != null and not opp.done:
 		var pl := opp.player
-		var p := Vector3(opp.point.x, 0.0, opp.point.z)
+		var p := _stand_pos(opp, Vector3(opp.point.x, 0.0, opp.point.z))
 		if opp.kind == "attack":
 			var t_jump := opp.t - JUMP_RISE
 			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.05
@@ -2189,9 +2769,65 @@ func _update_players(delta: float) -> void:
 			pl.target = opp.start_pos + (p - opp.start_pos).limit_length(opp.max_run)
 		else:
 			pl.target = p
+	# Posen: wer gerade den Ball spielt, wer aufschlaegt, wohin alle schauen.
+	var rally_on := phase == Phase.RALLY or phase == Phase.TOSS or phase == Phase.PRE_SERVE
+	for t in 2:
+		for pl in players[t]:
+			pl.now = clock
+			pl.look_target = ball.position
+			pl.alert = rally_on
+	if opp != null and not opp.done:
+		opp.player.anim_kind = opp.kind
+		opp.player.anim_tech = opp.tech
+		opp.player.anim_t = opp.t
+		opp.player.contact_pt = opp.point
+		opp.player.contact_aim = _contact_aim(opp)
+		opp.player.contact_on = true
+	if phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done):
+		var sv := server()
+		sv.anim_kind = "serve_hold" if phase == Phase.PRE_SERVE else "serve"
+		sv.anim_tech = "jump" if serve_kind == 1 else "stand"
+		sv.anim_t = serve_ideal if phase == Phase.TOSS else clock + 5.0
+		sv.contact_pt = ball.position   # der Ball der Aufschlaghand (Wurf)
+		sv.contact_aim = Vector3(-side_of(serving_team) * 4.0, 0.0, 0.0)
+		sv.contact_on = phase == Phase.TOSS
 	for t in 2:
 		for pl in players[t]:
 			pl.tick(delta)
+
+
+## Wohin der Spieler den Ball spielt: Annahme zum Zuspieler, Zuspiel zum Angreifer, Angriff
+## auf das Ziel im gegnerischen Feld. Der Koerper dreht sich beim Kontakt dorthin.
+func _contact_aim(o: Opp) -> Vector3:
+	var sd := side_of(o.team)
+	match o.kind:
+		"pass", "dig":
+			var st := player_by_role(o.team, "S")
+			if st != null and st != o.player:
+				return Vector3(st.position.x, 0.0, st.position.z)
+			return Vector3(sd * 1.5, 0.0, 0.5)
+		"set":
+			var h: VPlayer = _hitter[o.team]
+			if h != null and h != o.player:
+				return Vector3(h.position.x, 0.0, h.position.z)
+			return Vector3(sd * 0.5, 0.0, o.point.z)
+		"attack":
+			var info := attack_shot(o.team, o.point, o.rs, o.power)
+			return info.target
+	return Vector3(-sd * 4.0, 0.0, 0.0)
+
+
+## Wo der Spieler beim Kontakt steht: der Ball trifft vor dem Koerper auf (Baggern ca. 45 cm,
+## Pritschen 15 cm vor dem Rumpf in Spielrichtung); beim Angriff steht der Spieler hinter dem Ball.
+func _stand_pos(o: Opp, p: Vector3) -> Vector3:
+	if o.kind == "attack":
+		return p + Vector3(side_of(o.team) * 0.3, 0.0, 0.0)
+	var aim := _contact_aim(o)
+	var dv := Vector3(aim.x - p.x, 0.0, aim.z - p.z)
+	if dv.length() < 0.1:
+		return p
+	var off := 0.15 if (o.kind == "set" or o.tech == "over") else 0.38
+	return p - dv.normalized() * off
 
 
 ## Zeitlupe und Kamera: In jeder Spielphase gilt das eingestellte Tempo (Menue), die
@@ -2231,6 +2867,8 @@ func _update_time_and_camera(real_delta: float) -> void:
 		want = minf(want, SLOW)
 	if not zoom_on:
 		cam_mode = ""
+	if phase == Phase.REPLAY:
+		cam_mode = "replay"
 	if phase != Phase.RALLY and phase != Phase.TOSS:
 		want = 1.0
 	Engine.time_scale = clampf(want, 0.1, 1.0)
@@ -2333,6 +2971,8 @@ func hint() -> String:
 	match phase:
 		Phase.INTRO:
 			return ""
+		Phase.REPLAY:
+			return "Wiederholung  ·  A / Leertaste: überspringen"
 		Phase.PRE_SERVE:
 			if serving_team == human_team and whistle_done:
 				var left := int(ceilf(serve_deadline - clock))
@@ -2353,11 +2993,13 @@ func hint() -> String:
 					"set":
 						if opp.player.role == "L" and absf(opp.point.x) < 3.0:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
-						return "Zuspiel: Stick links Außen · rechts Diagonal · vor Mitte · zurück Hinterfeld, dann X/Q pritschen"
+						return "Zuspiel: Steuerkreuz = Richtung (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · rechter Stick = Tempo (halb schnell, voll Schnellangriff) · X/Q spielen · R2 schneller · R1 Dump · R1+R2 Zuspieler schlägt · A baggern"
 					"attack":
 						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":
 						return "Ball rüberspielen: X/Q pritschen oder A/Leertaste baggern"
 			if human_player() != null:
-				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände · vor dem Zuspiel X/Q = Commit auf die Mitte"
+				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände"
+			if opp != null and opp.team != human_team and opp.kind == "set":
+				return "Block lesen: linker Stick stellt den Mittelblocker am Netz hin, bevor der Ball zum Angreifer fliegt"
 	return ""
