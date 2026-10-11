@@ -237,7 +237,9 @@ static func markers() -> Dictionary:
 ## Pose aus einer Meshy-Animation (Gehen, Laufen), u = 0..1 durch einen Doppelschritt.
 ## Bei u = 0,25 ist das linke Bein vorn (wie sin(Phase) in VPlayer._p_run). Leer, wenn es die
 ## Animation nicht gibt.
-static func clip_pose(clip: String, u: float) -> Dictionary:
+## u: Anteil 0..1 der Animation. loop = true: Schleife (Laufen), Phase so verschoben, dass das
+## linke Bein bei u = 0,25 vorn ist. loop = false: einmal von vorn bis hinten (Schlag, Jubel).
+static func clip_pose(clip: String, u: float, loop := true) -> Dictionary:
 	if _clips.is_empty():
 		var f := FileAccess.open("res://assets/models/player_clips.json", FileAccess.READ)
 		_clips = JSON.parse_string(f.get_as_text()) if f else {"_": {}}
@@ -256,11 +258,20 @@ static func clip_pose(clip: String, u: float) -> Dictionary:
 	if not _clips.has(clip):
 		return {}
 	var frames: Array = _clips[clip].frames
-	var n := frames.size() - 1  # letztes Bild = erstes (Schleife)
-	var t := fposmod(u + _clip_off[clip], 1.0) * n
-	var i0 := int(t) % n
-	var i1 := (i0 + 1) % n
-	var w := t - floorf(t)
+	var n := frames.size() - 1  # Schleife: letztes Bild = erstes
+	var i0: int
+	var i1: int
+	var w: float
+	if loop:
+		var t := fposmod(u + _clip_off.get(clip, 0.0), 1.0) * n
+		i0 = int(t) % n
+		i1 = (i0 + 1) % n
+		w = t - floorf(t)
+	else:
+		var t := clampf(u, 0.0, 1.0) * n
+		i0 = mini(int(t), n)
+		i1 = mini(i0 + 1, n)
+		w = t - floorf(t)
 	var out := {}
 	for name in JOINTS:
 		var q0 := _clip_quat(frames[i0], name)
@@ -344,9 +355,14 @@ func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> 
 	var wr: Node3D = j["wr_" + sd]
 	var s := -1.0 if sd == "l" else 1.0
 	var y0 := sh.rotation.y
+	# Ellbogen-Drehung um die anderen Achsen (Meshy-Animationen) bleibt erhalten.
+	var ey := el.rotation.y
+	var ez := el.rotation.z
 	var v := Vector3(sh.rotation.x, sh.rotation.z * s, el.rotation.x)  # vor, seitlich, Ellbogen
 	var v_start := v
-	var pos := Callable(self, "_ik_wrist").bind(sh, el, wr, y0, s)
+	var lo := Vector3(minf(-0.6, v.x), minf(-0.5, v.y), minf(0.0, v.z))
+	var hi := Vector3(maxf(3.1, v.x), maxf(2.0, v.y), maxf(2.6, v.z))
+	var pos := Callable(self, "_ik_wrist").bind(sh, el, wr, y0, s, ey, ez)
 	var err := 0.0
 	for it in iters:
 		var p0: Vector3 = pos.call(v)
@@ -364,16 +380,16 @@ func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> 
 			Vector3(c2.dot(c0), c2.dot(c1), c2.dot(c2) + damp))
 		var step := a.inverse() * Vector3(c0.dot(e), c1.dot(e), c2.dot(e))
 		v += step.limit_length(0.6)
-		v = Vector3(clampf(v.x, -0.6, 3.1), clampf(v.y, -0.5, 2.0), clampf(v.z, 0.0, 2.6))
+		v = v.clamp(lo, hi)
 	var fin: Vector3 = v_start.lerp(v, clampf(w, 0.0, 1.0))
 	sh.rotation = Vector3(fin.x, y0, fin.y * s)
-	el.rotation = Vector3(fin.z, 0.0, 0.0)
+	el.rotation = Vector3(fin.z, ey, ez)
 	return ((pos.call(fin) as Vector3) - target).length()
 
 
-func _ik_wrist(v: Vector3, sh: Node3D, el: Node3D, wr: Node3D, y0: float, s: float) -> Vector3:
+func _ik_wrist(v: Vector3, sh: Node3D, el: Node3D, wr: Node3D, y0: float, s: float, ey := 0.0, ez := 0.0) -> Vector3:
 	sh.rotation = Vector3(v.x, y0, v.y * s)
-	el.rotation = Vector3(v.z, 0.0, 0.0)
+	el.rotation = Vector3(v.z, ey, ez)
 	return wr.global_position
 
 

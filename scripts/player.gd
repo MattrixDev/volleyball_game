@@ -251,7 +251,9 @@ func _animate(delta: float) -> void:
 	fig.pose_spring(p, delta, _stiff)
 	# Hechten: ganzer Koerper kippt nach vorn.
 	var tilt := 0.0
-	if dive_timer > 0.0:
+	if dive_timer > 0.0 and not HumanFigure.clip_pose("vb_hechtbagger", 0.0, false).is_empty():
+		pass  # Meshy-Hechtbagger kippt den Koerper selbst
+	elif dive_timer > 0.0:
 		# Ablauf: nach vorn abdruecken, flach auf den Bauch rutschen, wieder aufstehen.
 		var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
 		tilt = -1.45 * smoothstep(0.0, 0.35, kd) * (1.0 - smoothstep(0.7, 1.0, kd))
@@ -354,6 +356,11 @@ func _p_idle() -> Dictionary:
 
 
 func _p_ready() -> Dictionary:
+	# Meshy: Bereitschaftshaltung, langsam vor und zurueck abgespielt (wirkt wie Wippen).
+	var cu := 0.05 + 0.55 * (0.5 - 0.5 * cos((now + number * 0.9) * PI / 2.2))
+	var clip := HumanFigure.clip_pose("vb_bereitschaft", cu, false)
+	if not clip.is_empty():
+		return clip
 	# Leichtes Wippen und Gewicht verlagern, damit niemand wie eingefroren dasteht.
 	var t := now * 3.2 + number * 1.7
 	var bob := sin(t) * 0.05
@@ -382,7 +389,10 @@ func _p_run(a: float) -> Dictionary:
 	if not run.is_empty():
 		var walk := HumanFigure.clip_pose("Walking", u)
 		p = run if walk.is_empty() else _mix(walk, run, smoothstep(0.3, 0.75, a))
-	if side_w > 0.0:
+	var side_clip := HumanFigure.clip_pose("seitschritt_rechts" if _move_side > 0.0 else "seitschritt_links", fposmod(_run_phase / 4.4, 1.0))
+	if side_w > 0.0 and not side_clip.is_empty():
+		p = _mix(p, side_clip, side_w)
+	elif side_w > 0.0:
 		# Seitlich: tiefer Nachstellschritt, Beine gehen auseinander und wieder zusammen.
 		var q := {"hips": Vector3(-0.2, 0, 0), "chest": Vector3(-0.3, 0, 0), "head": Vector3(0.35, 0, 0)}
 		var open := absf(sl)
@@ -464,6 +474,19 @@ func _p_approach() -> Dictionary:
 
 
 func _p_block() -> Dictionary:
+	var p := _p_block_code()
+	# Meshy-Block: Beine und Huefte (Ausholen, Absprung, Landung), Arme bleiben am Netz gesteuert.
+	var cu := 0.2
+	if airborne:
+		cu = 0.3 + clampf((now - _takeoff_t) / 0.6, 0.0, 1.0) * 0.15
+	var clip := HumanFigure.clip_pose("vb_block", cu, false)
+	for k in ["hips", "hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+		if clip.has(k):
+			p[k] = clip[k]
+	return p
+
+
+func _p_block_code() -> Dictionary:
 	# Haende seitlich verschieben: Welt-z in die lokale Seitenrichtung umrechnen.
 	var local_shift := -side * hand_shift
 	var fwd := 3.05 - hand_reach * 1.2
@@ -483,6 +506,9 @@ func _p_block() -> Dictionary:
 
 func _p_dive() -> Dictionary:
 	var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+	var clip := HumanFigure.clip_pose("vb_hechtbagger", 0.08 + kd * 0.42, false)
+	if not clip.is_empty():
+		return clip
 	var flat := smoothstep(0.1, 0.4, kd) * (1.0 - smoothstep(0.7, 0.95, kd))
 	var p := {"chest": Vector3(0.1 * flat, 0, 0), "head": Vector3(0.7 + 0.3 * flat, 0, 0)}
 	_arm(p, "l", 2.6, 0.2, 0.05)
@@ -518,6 +544,9 @@ func _p_serve_hold() -> Dictionary:
 
 
 func _p_celebrate() -> Dictionary:
+	var clip := HumanFigure.clip_pose("jubel_faust", 1.0 - clampf((celebrate_until - now) / 1.6, 0.0, 1.0), false)
+	if not clip.is_empty():
+		return clip
 	var pump := sin(now * 9.0 + number) * 0.25
 	var p := {"chest": Vector3(0.15, 0, 0), "head": Vector3(0.5, 0, 0)}
 	_arm(p, "l", 2.7 + pump, 0.55, 0.7)
@@ -525,6 +554,23 @@ func _p_celebrate() -> Dictionary:
 	_leg(p, "l", 0.1, 0.15, 0.1)
 	_leg(p, "r", 0.1, 0.15, 0.1)
 	return p
+
+
+## Meshy-Animation einmal abspielen: Stuetzpunkte [[rel, u], ...] bilden die Zeit zum
+## Ballkontakt (rel) auf den Anteil u der Animation ab (dazwischen linear, ausserhalb geklemmt).
+static func _clip_at(clip: String, rel: float, keys: Array) -> Dictionary:
+	var u: float = keys[0][1]
+	for i in keys.size() - 1:
+		var a: Array = keys[i]
+		var b: Array = keys[i + 1]
+		if rel >= a[0]:
+			u = lerpf(a[1], b[1], clampf((rel - a[0]) / (b[0] - a[0]), 0.0, 1.0))
+	return HumanFigure.clip_pose(clip, u, false)
+
+
+## Zeitpunkte der Meshy-Volleyball-Animationen (aus den Bildfolgen abgelesen)
+const SPIKE_KEYS := [[-1.1, 0.12], [-0.404, 0.335], [0.0, 0.45], [0.45, 0.53]]
+const SET_KEYS := [[-0.6, 0.2], [0.0, 0.55], [0.35, 0.72]]
 
 
 static func _mix(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
@@ -555,6 +601,13 @@ func _target_pose() -> Dictionary:
 		_stiff = 30.0
 		return _p_block()
 	if anim_kind == "attack" and rel < 0.5:
+		var clip := _clip_at("vb_angriff_anlauf_schlag", rel, SPIKE_KEYS)
+		if not clip.is_empty() and rel > -1.1:
+			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
+			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
+			_stiff = 45.0 if airborne else 28.0
+			var wi := smoothstep(-1.1, -0.85, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
+			return _mix(run0, clip, wi)
 		if airborne:
 			_stiff = 45.0
 			return _p_spike(rel)
@@ -577,13 +630,19 @@ func _target_pose() -> Dictionary:
 		_stiff = 30.0
 	# Taste gehalten: schon vorher in die Grundhaltung fuer Baggern oder Pritschen.
 	if prep != "" and not airborne:
-		base = _mix(base, _p_set(-0.45) if prep == "over" else _p_bump(-0.45), 0.8)
+		base = _mix(base, _p_over(-0.45) if prep == "over" else _p_bump(-0.45), 0.8)
 	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.9 and rel < 0.6:
-		var tech := _p_set(rel) if anim_tech == "over" else _p_bump(rel)
+		var tech := _p_over(rel) if anim_tech == "over" else _p_bump(rel)
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
 		base = _mix(base, tech, w)
 		_stiff = 20.0
 	return base
+
+
+## Pritschen: Meshy-Animation, falls vorhanden, sonst die eigene Haltung.
+func _p_over(rel: float) -> Dictionary:
+	var clip := _clip_at("vb_pritschen", rel, SET_KEYS)
+	return _p_set(rel) if clip.is_empty() else clip
 
 
 func _p_land() -> Dictionary:
