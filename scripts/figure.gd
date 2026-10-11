@@ -1,7 +1,7 @@
 class_name HumanFigure
 extends Node3D
-## Spielerfigur: das in Blender gebaute Modell (assets/models/player.glb, erzeugt von
-## tools/blender/build_player.py) mit Skelett. Die Posen werden wie bisher als Gelenkwinkel
+## Spielerfigur: Mattis' Meshy-Modell (assets/models/player.glb, Schiedsrichter referee.glb,
+## erzeugt von tools/blender/build_figure_rigged.py) mit Skelett. Die Posen werden wie bisher als Gelenkwinkel
 ## gesetzt (siehe pose()); unsichtbare Gelenk-Knoten tragen die Winkel und jedes Bild werden
 ## die Knochen des Modells danach ausgerichtet. Blickrichtung ist lokal -Z.
 
@@ -101,6 +101,7 @@ func _joint(name: String, parent: Node3D, pos: Vector3) -> Node3D:
 
 
 const MODEL := preload("res://assets/models/player.glb")
+const REF_MODEL := preload("res://assets/models/referee.glb")
 const MAT_NAMES := ["skin", "jersey", "panel", "collar", "logo", "shorts", "socks", "pads", "shoes", "accent", "sole", "trousers", "hair"]
 const DEFAULTS := {
 	"skin": Color(0.86, 0.66, 0.52), "hair": Color(0.3, 0.2, 0.13), "jersey": Color(0.15, 0.19, 0.32),
@@ -111,6 +112,8 @@ const DEFAULTS := {
 }
 const HAIR_STYLES := 4
 static var _markers := {}
+static var _clips := {}  # Animationen aus Meshy (player_clips.json): Name -> {fps, frames}
+static var _clip_off := {}  # Name -> Phasenversatz, damit das linke Bein bei u = 0,25 vorn ist
 
 var _skel: Skeleton3D
 var _bone := {}  # Gelenkname -> Knochenindex
@@ -143,7 +146,7 @@ func build(colors: Dictionary, with_pads := true, hair_style := 0, official := f
 	root_node = Node3D.new()
 	add_child(root_node)
 	root_node.scale = Vector3.ONE * height
-	var model: Node3D = MODEL.instantiate()
+	var model: Node3D = (REF_MODEL if official else MODEL).instantiate()
 	root_node.add_child(model)
 	_skel = model.find_child("Skeleton3D", true, false)
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
@@ -229,6 +232,50 @@ static func markers() -> Dictionary:
 		if f:
 			_markers = JSON.parse_string(f.get_as_text())
 	return _markers
+
+
+## Pose aus einer Meshy-Animation (Gehen, Laufen), u = 0..1 durch einen Doppelschritt.
+## Bei u = 0,25 ist das linke Bein vorn (wie sin(Phase) in VPlayer._p_run). Leer, wenn es die
+## Animation nicht gibt.
+static func clip_pose(clip: String, u: float) -> Dictionary:
+	if _clips.is_empty():
+		var f := FileAccess.open("res://assets/models/player_clips.json", FileAccess.READ)
+		_clips = JSON.parse_string(f.get_as_text()) if f else {"_": {}}
+		for name in _clips:
+			var fr: Array = _clips[name].get("frames", [])
+			if fr.size() < 2:
+				continue
+			var best := 0
+			var best_x := -INF
+			for i in fr.size() - 1:
+				var x := _clip_euler(fr[i], "hip_l").x
+				if x > best_x:
+					best_x = x
+					best = i
+			_clip_off[name] = float(best) / float(fr.size() - 1) - 0.25
+	if not _clips.has(clip):
+		return {}
+	var frames: Array = _clips[clip].frames
+	var n := frames.size() - 1  # letztes Bild = erstes (Schleife)
+	var t := fposmod(u + _clip_off[clip], 1.0) * n
+	var i0 := int(t) % n
+	var i1 := (i0 + 1) % n
+	var w := t - floorf(t)
+	var out := {}
+	for name in JOINTS:
+		var q0 := _clip_quat(frames[i0], name)
+		var q1 := _clip_quat(frames[i1], name)
+		out[name] = Basis(q0.slerp(q1, w)).get_euler()
+	return out
+
+
+static func _clip_quat(fr: Dictionary, name: String) -> Quaternion:
+	var a: Array = fr[name]
+	return Quaternion(a[0], a[1], a[2], a[3]).normalized()
+
+
+static func _clip_euler(fr: Dictionary, name: String) -> Vector3:
+	return Basis(_clip_quat(fr, name)).get_euler()
 
 
 func _num_label(key: String, px: float) -> Label3D:

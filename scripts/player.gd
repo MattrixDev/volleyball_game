@@ -375,6 +375,12 @@ func _p_run(a: float) -> Dictionary:
 	_leg(p, "r", 0.2 - sl * 0.75 * a, 0.3 + maxf(0.0, cos(ph)) * 1.3 * a)
 	_arm(p, "l", -sl * 0.8 * a + 0.25, 0.14, 1.45)
 	_arm(p, "r", sl * 0.8 * a + 0.25, 0.14, 1.45)
+	# Mattis' Meshy-Animationen: langsam gehen, schnell laufen (im selben Schritt-Takt).
+	var u := fposmod(ph / TAU, 1.0)
+	var run := HumanFigure.clip_pose("Running", u)
+	if not run.is_empty():
+		var walk := HumanFigure.clip_pose("Walking", u)
+		p = run if walk.is_empty() else _mix(walk, run, smoothstep(0.3, 0.75, a))
 	if side_w > 0.0:
 		# Seitlich: tiefer Nachstellschritt, Beine gehen auseinander und wieder zusammen.
 		var q := {"hips": Vector3(-0.2, 0, 0), "chest": Vector3(-0.3, 0, 0), "head": Vector3(0.35, 0, 0)}
