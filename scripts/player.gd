@@ -569,8 +569,10 @@ static func _clip_at(clip: String, rel: float, keys: Array) -> Dictionary:
 
 
 ## Zeitpunkte der Meshy-Volleyball-Animationen (aus den Bildfolgen abgelesen)
-const SPIKE_KEYS := [[-1.1, 0.12], [-0.404, 0.335], [0.0, 0.45], [0.45, 0.53]]
-const SET_KEYS := [[-0.6, 0.2], [0.0, 0.55], [0.35, 0.72]]
+## kern_*: Meshy-Kernanimationen (Text-to-Motion, nach echter Technik beschrieben)
+const SPIKE_KEYS := [[-1.1, 0.18], [-0.404, 0.40], [0.0, 0.60], [0.4, 0.70], [0.6, 0.78]]
+const SET_KEYS := [[-0.7, 0.17], [0.0, 0.42], [0.35, 0.56]]
+const BUMP_KEYS := [[-0.6, 0.3], [0.0, 0.58], [0.35, 0.7]]
 
 
 static func _mix(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
@@ -601,11 +603,16 @@ func _target_pose() -> Dictionary:
 		_stiff = 30.0
 		return _p_block()
 	if anim_kind == "attack" and rel < 0.5:
-		var clip := _clip_at("vb_angriff_anlauf_schlag", rel, SPIKE_KEYS)
+		var clip := _clip_at("kern_angriff", rel, SPIKE_KEYS)
 		if not clip.is_empty() and rel > -1.1:
 			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
 			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
 			_stiff = 45.0 if airborne else 28.0
+			if airborne:
+				# Beine in der Luft nur halb so weit nach hinten anwinkeln wie im Clip.
+				var own := _p_spike(rel)
+				for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+					clip[k] = (clip[k] as Vector3).lerp(own.get(k, Vector3.ZERO), 0.5)
 			var wi := smoothstep(-1.1, -0.85, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
 			return _mix(run0, clip, wi)
 		if airborne:
@@ -630,9 +637,9 @@ func _target_pose() -> Dictionary:
 		_stiff = 30.0
 	# Taste gehalten: schon vorher in die Grundhaltung fuer Baggern oder Pritschen.
 	if prep != "" and not airborne:
-		base = _mix(base, _p_over(-0.45) if prep == "over" else _p_bump(-0.45), 0.8)
+		base = _mix(base, _p_over(-0.45) if prep == "over" else _p_under(-0.45), 0.8)
 	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.9 and rel < 0.6:
-		var tech := _p_over(rel) if anim_tech == "over" else _p_bump(rel)
+		var tech := _p_over(rel) if anim_tech == "over" else _p_under(rel)
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
 		base = _mix(base, tech, w)
 		_stiff = 20.0
@@ -641,8 +648,14 @@ func _target_pose() -> Dictionary:
 
 ## Pritschen: Meshy-Animation, falls vorhanden, sonst die eigene Haltung.
 func _p_over(rel: float) -> Dictionary:
-	var clip := _clip_at("vb_pritschen", rel, SET_KEYS)
+	var clip := _clip_at("kern_pritschen", rel, SET_KEYS)
 	return _p_set(rel) if clip.is_empty() else clip
+
+
+## Baggern: Meshy-Kernanimation (gestreckte Arme, Schwung aus den Beinen), sonst eigene Haltung.
+func _p_under(rel: float) -> Dictionary:
+	var clip := _clip_at("kern_baggern", rel, BUMP_KEYS)
+	return _p_bump(rel) if clip.is_empty() else clip
 
 
 func _p_land() -> Dictionary:
