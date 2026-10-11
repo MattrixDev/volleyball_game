@@ -402,11 +402,9 @@ func _update_form_lines() -> void:
 		var t := human_team
 		var serving := t == serving_team
 		var spots: Dictionary = {}
-		if serving:
-			spots = GRID["serve"]
-		else:
-			spots = _receive_spots(t)
-		var ls := Formation.lines(spots, [1] if serving else [])
+		for pl in players[t]:
+			spots[pl.slot] = team_local(t, pl.position)
+		var ls := Formation.links(spots, [1] if serving else [])
 		for i in _form_lines.size():
 			var mi: MeshInstance3D = _form_lines[i]
 			if i >= ls.size():
@@ -420,7 +418,7 @@ func _update_form_lines() -> void:
 			var dir := (b - a).normalized()
 			mi.position = Vector3(mid.x, 0.025, mid.z)
 			mi.rotation = Vector3(0, atan2(-dir.z, dir.x), 0)
-			mi.scale = Vector3(len, 0.01, 0.15)
+			mi.scale = Vector3(len, 0.01, 0.13)
 			var col := Color(1.0, 0.82, 0.2, 0.9) if l.kind == "lat" else Color(0.45, 0.92, 1.0, 0.9)
 			(mi.material_override as StandardMaterial3D).albedo_color = col
 			mi.visible = true
@@ -646,7 +644,7 @@ func start_rally() -> void:
 	phase = Phase.PRE_SERVE
 	if human_team >= 0 and not _lines_hint_shown and not autoplay:
 		_lines_hint_shown = true
-		_notice("Aufstellung: gelb = links/rechts, blau = vorn/hinten. Beim Aufschlag nicht überschreiten.")
+		_notice("Linien verbinden die Nachbarn: nicht überschreiten")
 	opp = null
 	blockers = [[], []]
 	block_dirs = [[], []]

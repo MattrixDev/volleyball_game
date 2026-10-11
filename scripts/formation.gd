@@ -161,3 +161,16 @@ static func lines(spots: Dictionary, skip: Array = []) -> Array:
 		else:
 			res.append({"a": Vector2(mid.x, mid.y - 1.7), "b": Vector2(mid.x, mid.y + 1.7), "kind": "depth"})
 	return res
+
+
+## Verbindungslinien von Spieler zu Spieler: ein Ring ueber alle Nachbarn (4-3-2-1-6-5-4) plus die
+## Mittellinie 3-6. Ein Spieler darf nicht auf die andere Seite der Linie zu seinem Nachbarn.
+static func links(spots: Dictionary, skip: Array = []) -> Array:
+	var res: Array = []
+	for pr in PAIRS:
+		var a: int = pr[0]
+		var b: int = pr[1]
+		if skip.has(a) or skip.has(b) or not spots.has(a) or not spots.has(b):
+			continue
+		res.append({"a": spots[a], "b": spots[b], "kind": pr[2]})
+	return res
