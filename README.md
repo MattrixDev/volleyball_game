@@ -6,7 +6,7 @@ Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/cod
 
 ## Phase 2j – Zuspiel-Varianten und Block lesen
 
-- Zuspiel (wenn du Zuspieler bist): Steuerkreuz = Richtung (links Außen, rechts Diagonal, oben Mitte, unten Hinterfeld), rechter Stick = Tempo (Mitte hoher Ball, halb schneller Ball, voll Schnellangriff), X/Q = Ball spielen, R2 = ein Tempo schneller, R1 = Setter-Dump, R1 + R2 zusammen = Zuspieler schlägt den zweiten Ball selbst (Mittelblocker kann ihn stoppen), A/Leertaste = baggern (nur hoher Ball). Tastatur: Maus = Richtung, V = R1, E = R2, R/F = schneller Ball/Schnellangriff
+- Zuspiel (wenn du Zuspieler bist): Steuerkreuz drücken = Zuspiel in diese Richtung (links Außen, rechts Diagonal, oben Mitte, unten Hinterfeld), Pritschen oder Baggern wählt das Spiel. R2 gehalten = schneller Ball (nach Mitte: Schnellangriff), R1 = Setter-Dump, R1 + R2 = Zuspieler schlägt den zweiten Ball selbst (Mittelblocker kann ihn stoppen). Tastatur: Maus = Richtung, Q/Leertaste spielen den Ball, V = R1, E = R2
 - Block lesen: Solange der Gegner den Ball zum Zuspieler spielt, stellst du den Mittelblocker mit dem linken Stick am Netz hin. Richtig gelesen: "Gelesen!", Doppelblock steht, Sprung sitzt. Falsch gelesen: Block kommt zu spät
 - Die KI-Zuspieler nutzen Tempi und Dump auch und weichen deinem Mittelblocker aus
 
