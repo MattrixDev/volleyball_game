@@ -291,7 +291,7 @@ func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 ## Loest Schulter vor/seitlich und Ellbogen numerisch (gedaempfte Gauss-Newton-Schritte),
 ## ausgehend von der aktuellen Haltung. w blendet zwischen Pose (0) und Ziel (1). Rueckgabe:
 ## verbleibender Abstand in m (zum Pruefen, ob die Figur den Ball erreicht).
-func ik_arm(sd: String, target: Vector3, w: float, iters := 4) -> float:
+func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> float:
 	var sh: Node3D = j["sh_" + sd]
 	var el: Node3D = j["el_" + sd]
 	var wr: Node3D = j["wr_" + sd]
@@ -312,9 +312,9 @@ func ik_arm(sd: String, target: Vector3, w: float, iters := 4) -> float:
 		var c1: Vector3 = ((pos.call(v + Vector3(0, d, 0)) as Vector3) - p0) / d
 		var c2: Vector3 = ((pos.call(v + Vector3(0, 0, d)) as Vector3) - p0) / d
 		var a := Basis(
-			Vector3(c0.dot(c0) + 0.02, c0.dot(c1), c0.dot(c2)),
-			Vector3(c1.dot(c0), c1.dot(c1) + 0.02, c1.dot(c2)),
-			Vector3(c2.dot(c0), c2.dot(c1), c2.dot(c2) + 0.02))
+			Vector3(c0.dot(c0) + damp, c0.dot(c1), c0.dot(c2)),
+			Vector3(c1.dot(c0), c1.dot(c1) + damp, c1.dot(c2)),
+			Vector3(c2.dot(c0), c2.dot(c1), c2.dot(c2) + damp))
 		var step := a.inverse() * Vector3(c0.dot(e), c1.dot(e), c2.dot(e))
 		v += step.limit_length(0.6)
 		v = Vector3(clampf(v.x, -0.6, 3.1), clampf(v.y, -0.5, 2.0), clampf(v.z, 0.0, 2.6))

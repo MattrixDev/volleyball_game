@@ -19,7 +19,7 @@ const NET_BOTTOM := 1.43
 const HALF_L := 9.0
 const HALF_W := 4.5
 const H_PASS := 0.85
-const H_SET := 2.35
+const H_SET := 2.1
 const H_ATTACK := 3.25
 const JUMP_RISE := 0.404
 const SET_POINTS := 25
@@ -854,7 +854,7 @@ func _hold_ball_at_server() -> void:
 
 
 func _empty_input() -> Dictionary:
-	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false,
+	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO,
 		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false}
 
 
@@ -865,6 +865,12 @@ func _read_input() -> Dictionary:
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
 	d.bump = Input.is_action_just_pressed("bump")
 	d.over = Input.is_action_just_pressed("overhand")
+	var dp := Input.get_vector("set_dir_left", "set_dir_right", "set_dir_down", "set_dir_up")
+	if dp.length() > 0.5:
+		_set_dir = dp
+		_set_dir_ms = Time.get_ticks_msec()
+	if Time.get_ticks_msec() - _set_dir_ms < 2500:
+		d.dpad = _set_dir
 	d.fast = Input.is_action_just_pressed("set_fast")
 	d.quick = Input.is_action_just_pressed("set_quick")
 	d.hit_down = Input.is_action_just_pressed("hit")
@@ -884,6 +890,8 @@ func _read_input() -> Dictionary:
 ## Der rechte Stick federt beim Loslassen zur Mitte zurueck. Damit die gewaehlte
 ## Schlagrichtung dabei nicht verloren geht, gilt der letzte deutliche Ausschlag
 ## noch eine einstellbare Zeit lang weiter ("Stick nachhalten").
+var _set_dir := Vector2.ZERO  # zuletzt am Steuerkreuz gewaehlte Zuspiel-Richtung (bleibt kurz gemerkt)
+var _set_dir_ms := -10000
 var _rs_hold := Vector2.ZERO
 var _rs_hold_ms := 0
 
@@ -1546,7 +1554,7 @@ func _rally_input(inp: Dictionary) -> void:
 				# Linker Stick = laufen, rechter Stick = Richtung, Tasten = Tempo.
 				if not assist:
 					hp.manual_dir = _stick_dir(mv)
-				var lane := _set_choice(inp.rs)
+				var lane := _set_choice(inp.dpad if inp.dpad.length() > 0.5 else inp.rs)
 				if inp.bump:
 					_human_touch("bump", lane + "|high")
 				elif inp.over:
@@ -1557,6 +1565,8 @@ func _rally_input(inp: Dictionary) -> void:
 					_human_touch("over", lane + "|quick")
 				elif inp.hit_down:
 					_human_touch("over", lane + "|dump")
+				if opp.pending or opp.done:
+					_set_dir = Vector2.ZERO  # Richtung gilt nur fuer dieses Zuspiel
 			_:
 				hp.manual_dir = _stick_dir(mv)
 				if inp.bump:
@@ -2525,13 +2535,23 @@ func _update_players(delta: float) -> void:
 				if not (pl in list) and is_front_row(pl):
 					var lane: Vector2 = FORM["defense"]["front"][pl.lane if pl.lane in ["left", "mid", "right"] else "right"]
 					pl.target = court_pos(t, Vector2(3.0, lane.y))
+	# Vor dem Aufschlag: Sprungaufschlaeger steht weiter hinten (Platz zum Anlauf).
+	if phase == Phase.PRE_SERVE:
+		var srv0 := server()
+		var back := 11.4 if serve_kind == 1 else 10.0
+		srv0.target = Vector3(side_of(serving_team) * back, 0.0, srv0.position.z)
 	# Sprungaufschlag: Anlauf unter den Ball und Absprung hinter der Grundlinie.
 	if phase == Phase.TOSS and serve_kind == 1 and not serve_done:
 		var srv := server()
 		var bx := ball.position.x - side_of(serving_team) * 0.2
 		bx = side_of(serving_team) * maxf(absf(bx), HALF_L + 0.1)
-		srv.target = Vector3(bx, 0.0, ball.position.z)
-		srv.run_speed = 4.0
+		var goal := Vector3(bx, 0.0, ball.position.z)
+		# Anlauf aus dem Stand: der Aufschlaeger startet so, dass er genau zum Absprung ankommt.
+		var run_dur := flat_dist(srv.position, goal) / 5.0
+		if clock < serve_ideal - JUMP_RISE - run_dur - 0.1:
+			goal = srv.position
+		srv.target = goal
+		srv.run_speed = 5.0
 		if clock >= serve_ideal - JUMP_RISE and not srv.has_jumped:
 			srv.jump()
 	if opp != null and not opp.done:
@@ -2781,7 +2801,7 @@ func hint() -> String:
 					"set":
 						if opp.player.role == "L" and absf(opp.point.x) < 3.0:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
-						return "Zuspiel: rechter Stick = Richtung (links Außen · rechts Diagonal · vor Mitte · zurück Hinterfeld) · X/Q hoher Ball · B/R schneller Ball · Y/F Schnellangriff · R2/E Dump · A/Leertaste baggern"
+						return "Zuspiel: Steuerkreuz = Richtung (links Außen · rechts Diagonal · vor Mitte · zurück Hinterfeld) · X/Q hoher Ball · B/R schneller Ball · Y/F Schnellangriff · R2/E Dump · A/Leertaste baggern"
 					"attack":
 						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":

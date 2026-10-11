@@ -234,11 +234,16 @@ func _screenshot_later(spec: String) -> void:
 # ---------------------------------------------------------------- Steuerung
 
 func _setup_input() -> void:
-	_action("move_left", [KEY_A, KEY_LEFT], [JOY_BUTTON_DPAD_LEFT], [[JOY_AXIS_LEFT_X, -1.0]])
-	_action("move_right", [KEY_D, KEY_RIGHT], [JOY_BUTTON_DPAD_RIGHT], [[JOY_AXIS_LEFT_X, 1.0]])
-	_action("move_up", [KEY_W, KEY_UP], [JOY_BUTTON_DPAD_UP], [[JOY_AXIS_LEFT_Y, -1.0]])
-	_action("move_down", [KEY_S, KEY_DOWN], [JOY_BUTTON_DPAD_DOWN], [[JOY_AXIS_LEFT_Y, 1.0]])
+	_action("move_left", [KEY_A, KEY_LEFT], [], [[JOY_AXIS_LEFT_X, -1.0]])
+	_action("move_right", [KEY_D, KEY_RIGHT], [], [[JOY_AXIS_LEFT_X, 1.0]])
+	_action("move_up", [KEY_W, KEY_UP], [], [[JOY_AXIS_LEFT_Y, -1.0]])
+	_action("move_down", [KEY_S, KEY_DOWN], [], [[JOY_AXIS_LEFT_Y, 1.0]])
 	# Rechter Stick = Trefferpunkt am Ball (Tastatur: Maus oder I J K L)
+	# Zuspiel-Richtung: Steuerkreuz (der rechte Daumen bleibt auf den Tempo-Tasten)
+	_action("set_dir_left", [], [JOY_BUTTON_DPAD_LEFT])
+	_action("set_dir_right", [], [JOY_BUTTON_DPAD_RIGHT])
+	_action("set_dir_up", [], [JOY_BUTTON_DPAD_UP])
+	_action("set_dir_down", [], [JOY_BUTTON_DPAD_DOWN])
 	_action("aim_left", [KEY_J], [], [[JOY_AXIS_RIGHT_X, -1.0]])
 	_action("aim_right", [KEY_L], [], [[JOY_AXIS_RIGHT_X, 1.0]])
 	_action("aim_up", [KEY_I], [], [[JOY_AXIS_RIGHT_Y, -1.0]])

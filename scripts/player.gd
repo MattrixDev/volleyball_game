@@ -222,9 +222,11 @@ func _animate(delta: float) -> void:
 		_land_t = now
 	_was_air = airborne
 
-	# Blickrichtung: zum Ball, beim Block und Angriff zum Netz.
+	# Blickrichtung: zum Ball, beim Block, Angriff und Aufschlag zum Netz (der Aufschlaeger
+	# laeuft unter dem Ball durch und darf sich dabei nicht zum Ball umdrehen).
 	var face := look_target - position
-	if block_pose or (anim_kind == "attack" and (airborne or anim_t - now < 0.8)) or face.length() < 0.3:
+	var serving := anim_kind == "serve_hold" or (anim_kind == "serve" and now - anim_t < 0.6)
+	if block_pose or serving or (anim_kind == "attack" and (airborne or anim_t - now < 0.8)) or face.length() < 0.3:
 		face = Vector3(-side, 0.0, 0.0)
 	if not alert and celebrate_until < now:
 		face = Vector3(-side, 0.0, 0.0)
@@ -297,7 +299,7 @@ func _contact_ik() -> void:
 		ad.y = 0.0
 		var follow := (ad.normalized() + up) * 0.5 * (0.2 * smoothstep(0.0, 0.2, rel)) if ad.length() > 0.1 else Vector3.ZERO
 		var hb := b + follow
-		tg = {"l": hb - r * 0.085 - up * 0.08 - f * 0.05, "r": hb + r * 0.085 - up * 0.08 - f * 0.05}
+		tg = {"l": hb - r * 0.1 - up * 0.1 - f * 0.04, "r": hb + r * 0.1 - up * 0.1 - f * 0.04}
 	elif anim_kind == "attack" and airborne:
 		# Angriff: Schlaghand (rechts) trifft die Rueckseite des Balls mit gestrecktem Arm.
 		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.05, 0.2, rel))
@@ -315,8 +317,13 @@ func _contact_ik() -> void:
 	# Im Kontaktmoment streckt sich der Schlagende (Schultergürtel, Fussspitzen): ca. 14 cm mehr Reichweite.
 	if airborne and (anim_kind == "attack" or anim_kind == "serve"):
 		fig.root_node.position.y += 0.14 * w
+	# Beim Pritschen bleiben die Ellbogen aussen (staerkere Daempfung haelt die Haltung).
+	var over_set := anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over"
 	for sd in tg:
-		fig.ik_arm(sd, tg[sd], w)
+		if over_set:
+			fig.ik_arm(sd, tg[sd], w, 8, 0.12)
+		else:
+			fig.ik_arm(sd, tg[sd], w)
 	fig._sync()
 
 
@@ -396,15 +403,20 @@ func _p_bump(rel := 0.0) -> Dictionary:
 	return p
 
 
-## Pritschen: Haende ueber der Stirn, Ellbogen aussen, Beine und Arme strecken durch den Ball.
+const SET_TWIST := -0.8
+
+
+## Pritschen wie im echten Spiel: Ellbogen weit aussen und gebeugt, Haende als Dreieck
+## ueber der Stirn, Kopf im Nacken. Im Ballkontakt streckt der ganze Koerper (Beine, Arme).
 func _p_set(rel := 0.0) -> Dictionary:
 	var load := 1.0 - smoothstep(-0.3, -0.1, rel)
-	var ext := smoothstep(-0.14, 0.08, rel)
-	var p := {"hips": Vector3(-0.1 * load, 0, 0), "chest": Vector3(-0.05 + 0.12 * ext, 0, 0), "head": Vector3(0.55 - 0.15 * ext, 0, 0)}
-	var up := lerpf(2.45, 2.85, ext)
-	var elbow := lerpf(1.55, 0.35, ext)
-	_arm(p, "l", up, 0.55 - 0.25 * ext, elbow, -0.45)
-	_arm(p, "r", up, 0.55 - 0.25 * ext, elbow, -0.45)
+	var ext := smoothstep(-0.08, 0.1, rel)
+	var p := {"hips": Vector3(-0.08 * load, 0, 0), "chest": Vector3(-0.1 + 0.1 * ext, 0, 0), "head": Vector3(0.65 - 0.2 * ext, 0, 0)}
+	var up := lerpf(2.0, 2.7, ext)
+	var out := lerpf(1.15, 0.5, ext)
+	var elbow := lerpf(1.75, 0.35, ext)
+	_arm(p, "l", up, out, elbow, -0.5 + 0.3 * ext, SET_TWIST)
+	_arm(p, "r", up, out, elbow, -0.5 + 0.3 * ext, SET_TWIST)
 	var th := lerpf(0.6, 0.05, ext)
 	var kn := lerpf(0.95, 0.1, ext)
 	_leg(p, "l", th, kn, 0.14, 0.5 * ext)
@@ -478,7 +490,7 @@ func _p_serve(rel: float, jump_serve: bool) -> Dictionary:
 	if airborne:
 		return _p_spike(rel)
 	if jump_serve and rel < -0.25:
-		return _p_approach() if rel > -0.7 else _p_run(maxf(_run_amt, 0.4))
+		return _p_approach() if rel > -0.7 else _mix(_p_serve_hold(), _p_run(maxf(_run_amt, 0.4)), clampf(_run_amt * 2.0, 0.0, 1.0))
 	var p := {"chest": Vector3(0.1, 0, 0), "head": Vector3(0.6, 0, 0)}
 	var swing := clampf((rel + 0.06) / 0.16, 0.0, 1.0)
 	_arm(p, "l", lerpf(2.8, 1.0, swing), 0.1, 0.1)
@@ -527,7 +539,7 @@ func _target_pose() -> Dictionary:
 		return _p_celebrate()
 	var rel := now - anim_t
 	if anim_kind == "serve_hold":
-		return _p_serve_hold()
+		return _mix(_p_serve_hold(), _p_run(_run_amt), clampf(_run_amt * 2.0, 0.0, 1.0))
 	if anim_kind == "serve" and rel < 0.5:
 		_stiff = 42.0
 		return _p_serve(rel, anim_tech == "jump")
