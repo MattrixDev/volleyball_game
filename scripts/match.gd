@@ -486,16 +486,36 @@ func flat_dist(a: Vector3, b: Vector3) -> float:
 
 func windows(kind: String) -> Array:
 	if kind == "dig":
-		return [0.06, 0.12, 0.2]
+		return [0.065, 0.13, 0.2]
 	if kind == "serve":
-		return [0.05, 0.1, 0.17]
-	return [0.045, 0.09, 0.15]
+		return [0.06, 0.11, 0.18]
+	return [0.055, 0.1, 0.16]
 
 
 ## Timing-Fehler ausserhalb des Perfekt-Fensters; nur der verschiebt den Ball.
 func excess(e: float, kind: String, scale := 1.0) -> float:
 	var w0: float = windows(kind)[0] * scale
 	return signf(e) * maxf(0.0, absf(e) - w0)
+
+
+## Zeitpunkt eines Tastendrucks des Menschen: Bildschirm und Controller zeigen alles etwas
+## spaeter, als es passiert. Der Timing-Ausgleich (Menue) rechnet diese Verzoegerung heraus.
+func human_clock() -> float:
+	return clock - lag_game()
+
+
+## Eingabe-Verzoegerung in Spielzeit (in der Zeitlupe entsprechend kleiner).
+func lag_game() -> float:
+	if autopress:
+		return 0.0  # Testmodus: simulierte Eingaben haben keine Verzoegerung
+	return cfg.get_v("input_lag") / 1000.0 * Engine.time_scale
+
+
+## Kurzer Hinweis, ob zu frueh oder zu spaet (damit man sein Timing lernt).
+func timing_hint(e: float, q: int) -> String:
+	if q == Q.PERFECT or q == Q.MISS:
+		return ""
+	return " · früh" if e < 0.0 else " · spät"
 
 
 func classify(e: float, kind: String, scale := 1.0) -> int:
@@ -512,10 +532,10 @@ func classify(e: float, kind: String, scale := 1.0) -> int:
 
 ## Mehr Kraft und ein Trefferpunkt weit weg von der Mitte machen das Timing-Fenster enger.
 func hit_window_scale(power: float, contact: Vector2, jump: bool) -> float:
-	var s := lerpf(1.35, 0.85, clampf(power, 0.0, 1.0))
-	s *= 1.0 - 0.2 * minf(contact.length(), 1.0)
+	var s := lerpf(1.35, 0.95, clampf(power, 0.0, 1.0))
+	s *= 1.0 - 0.12 * minf(contact.length(), 1.0)
 	if jump:
-		s *= 0.9
+		s *= 0.95
 	return s
 
 
@@ -1067,8 +1087,8 @@ func _physics_process(delta: float) -> void:
 						_start_charge()
 					elif inp.hit_up and charging:
 						var c := _release_charge()
-						_serve_hit(clock - serve_ideal, minf(c, 1.0), serve_contact, c)
-					elif clock > serve_ideal + windows("serve")[2] * 1.4 + 0.03:
+						_serve_hit(human_clock() - serve_ideal, minf(c, 1.0), serve_contact, c)
+					elif clock > serve_ideal + windows("serve")[2] * 1.4 + 0.03 + lag_game():
 						serve_done = true
 						charging = false
 						popup(server(), "Zu spät", Q_COLOR[Q.MISS])
@@ -1384,7 +1404,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	touches = 1
 	serve_time = clock
 	phase = Phase.RALLY
-	popup(srv, Q_TEXT[q], Q_COLOR[q])
+	popup(srv, Q_TEXT[q] + (timing_hint(e, q) if serving_team == human_team else ""), Q_COLOR[q])
 	_fx("serve", ball.position, power * (1.0 if jump else 0.65))
 	if serving_team == human_team and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
@@ -1750,10 +1770,12 @@ func _rally_input(inp: Dictionary) -> void:
 
 func _attack_input(inp: Dictionary) -> void:
 	opp.rs = rs
-	if inp.hit_down and not charging:
+	# R2 noch vom schnellen Zuspiel gedrueckt: zaehlt direkt als Aufladen, sonst muesste man
+	# erst loslassen und neu druecken, und der Schlag kaeme immer zu spaet.
+	if (inp.hit_down or inp.hit_held) and not charging and not opp.pending:
 		_start_charge()
 	elif inp.hit_up and charging and not opp.pending:
-		var e := clock - opp.t
+		var e := human_clock() - opp.t
 		if e < -0.45:
 			charging = false  # viel zu frueh losgelassen: neu aufladen
 			return
@@ -1767,7 +1789,7 @@ func _attack_input(inp: Dictionary) -> void:
 func _human_touch(tech: String, choice: String, t_press := -1.0) -> void:
 	if opp == null or opp.pending:
 		return
-	var e := (t_press if t_press >= 0.0 else clock) - opp.t
+	var e := (t_press if t_press >= 0.0 else human_clock()) - opp.t
 	if e < -maxf(0.35, windows(opp.kind)[2] * opp.win_scale + 0.05):
 		return  # viel zu frueh gedrueckt: ignorieren
 	opp.tech = tech
@@ -1792,7 +1814,7 @@ func _ai_actions() -> void:
 		elif not opp.human and clock >= opp.t + opp.ai_e:
 			_ai_prepare(opp)
 			_press(opp, opp.ai_e, "auto")
-		elif opp.human and clock > opp.t + windows(opp.kind)[2] * opp.win_scale + 0.01:
+		elif opp.human and clock > opp.t + windows(opp.kind)[2] * maxf(opp.win_scale, 1.35 if opp.kind == "attack" else 1.0) + 0.01 + lag_game():
 			opp.done = true
 			charging = false
 			popup(opp.player, "Zu spät", Q_COLOR[Q.MISS])
@@ -1949,6 +1971,8 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	var label: String = Q_TEXT[q]
 	if o.human and o.kind != "attack":
 		label = ("Pritschen · " if o.tech == "over" else "Baggern · ") + label
+	if o.human:
+		label += timing_hint(e, q)
 	popup(pl, label, Q_COLOR[q])
 	var before := ball.position
 	var was_flutter := flutter > 0.0 and last_action == "serve"

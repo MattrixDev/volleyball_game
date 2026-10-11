@@ -14,6 +14,7 @@ const SLIDERS := [
 	["slow_attack", "Zeitlupe Angriff", 0, 90, 5, "%", "Solange dein Angreifer in der Luft ist"],
 	["slow_block", "Zeitlupe Block", 0, 90, 5, "%", "Solange dein Blocker oder der Angreifer in der Luft ist"],
 	["receive_help", "Annahme-Hilfe", 100, 220, 10, "%", "Wie groß das Timing-Fenster bei Annahme und Abwehr ist"],
+	["input_lag", "Timing-Ausgleich", 0, 200, 10, "ms", "Gleicht die Verzögerung von Bildschirm und Controller aus: so viel später darfst du drücken oder loslassen"],
 	["stick_hold", "Stick nachhalten", 0, 400, 25, "ms", "So lange gilt die Schlagrichtung noch, wenn du den rechten Stick loslässt"],
 	["ai_defense", "Gegner-Abwehr", 0, 100, 5, "", "Wie gut der Gegner deine Angriffe abwehrt"],
 	["ai_block", "Gegner-Block", 0, 100, 5, "", "Wie oft der Gegner dich blockt"],
@@ -26,11 +27,11 @@ const SLIDERS := [
 
 const PRESETS := {
 	"leicht": {"slow_serve": 60, "slow_receive": 45, "slow_set": 30, "slow_attack": 75, "slow_block": 75,
-		"receive_help": 180, "stick_hold": 300, "ai_defense": 25, "ai_block": 25, "faults": 15, "serve_time": 20},
+		"receive_help": 180, "stick_hold": 300, "input_lag": 90, "ai_defense": 25, "ai_block": 25, "faults": 15, "serve_time": 20},
 	"normal": {"slow_serve": 50, "slow_receive": 20, "slow_set": 0, "slow_attack": 60, "slow_block": 50,
-		"receive_help": 120, "stick_hold": 200, "ai_defense": 70, "ai_block": 70, "faults": 35, "serve_time": 12},
+		"receive_help": 120, "stick_hold": 200, "input_lag": 80, "ai_defense": 70, "ai_block": 70, "faults": 35, "serve_time": 12},
 	"profi": {"slow_serve": 30, "slow_receive": 0, "slow_set": 0, "slow_attack": 45, "slow_block": 45,
-		"receive_help": 100, "stick_hold": 150, "ai_defense": 80, "ai_block": 75, "faults": 100, "serve_time": 8},
+		"receive_help": 100, "stick_hold": 150, "input_lag": 70, "ai_defense": 80, "ai_block": 75, "faults": 100, "serve_time": 8},
 }
 const PRESET_TEXT := {"leicht": "Leicht", "normal": "Normal", "profi": "Profi", "eigene": "Eigene"}
 
