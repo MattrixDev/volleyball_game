@@ -83,7 +83,6 @@ class Opp:
 	var no_reach := false  # KI-Abwehr kommt nicht mehr rechtzeitig hin
 	var start_pos := Vector3.ZERO
 	var max_run := 0.0
-	var go := false  # Mensch hat R2 gedrueckt: Angreifer laeuft an
 
 
 var phase := Phase.INTRO
@@ -115,8 +114,6 @@ var toss_time := -1.0
 var serve_done := false
 var serve_time := -1.0
 var serve_ideal := 0.0
-var serve_jump_e := -100.0  # Sprungaufschlag: Absprung-Timing (Mensch), -100 = noch nicht gesprungen
-var serve_jump_c := 0.0
 var serve_kind := 1  # 0 Stand, 1 Sprung
 var serve_contact := Vector2.ZERO
 var ai_serve_e := 0.0
@@ -1066,22 +1063,11 @@ func _physics_process(delta: float) -> void:
 				serve_aim = _nudge_aim(serve_aim, inp.mv, delta)
 				serve_contact = rs
 				if not serve_done:
-					var jump_late: bool = serve_kind == 1 and charging and clock > serve_ideal - JUMP_RISE + windows("serve")[2] * 1.4
-					if serve_jump_e > -90.0:
-						# schon abgesprungen: Treffen im Hoechstpunkt (oder sofort, wenn spaet)
-						if clock >= serve_ideal or serve_jump_e >= 0.0:
-							_serve_hit(serve_jump_e, minf(serve_jump_c, 1.0), serve_contact, serve_jump_c)
-					elif inp.hit_down and not charging:
+					if inp.hit_down and not charging:
 						_start_charge()
-					elif (inp.hit_up or jump_late) and charging:
+					elif inp.hit_up and charging:
 						var c := _release_charge()
-						if serve_kind == 1:
-							# Sprungaufschlag: Loslassen = Absprung
-							server().jump()
-							serve_jump_e = clock - (serve_ideal - JUMP_RISE)
-							serve_jump_c = c
-						else:
-							_serve_hit(clock - serve_ideal, minf(c, 1.0), serve_contact, c)
+						_serve_hit(clock - serve_ideal, minf(c, 1.0), serve_contact, c)
 					elif clock > serve_ideal + windows("serve")[2] * 1.4 + 0.03:
 						serve_done = true
 						charging = false
@@ -1254,16 +1240,16 @@ func _auto_input() -> Dictionary:
 				d.rs = _auto_rs
 				d.hit_down = true
 		Phase.TOSS:
-			if charging and _due(serve_ideal - (JUMP_RISE if serve_kind == 1 else 0.0)):
+			if charging and _due(serve_ideal):
 				d.hit_up = true
 		Phase.RALLY:
 			if opp != null and not opp.done and not opp.pending and opp.team == human_team:
 				if opp.kind == "attack":
-					if not charging and clock >= opp.t - 1.2:
+					if not charging and clock >= opp.t - 0.7:
 						_auto_rs = Vector2(rng.randf_range(-0.8, 0.8), rng.randf_range(-0.5, 0.8))
 						d.rs = _auto_rs
 						d.hit_down = true
-					elif charging and _due(opp.t - JUMP_RISE):
+					elif charging and _due(opp.t):
 						d.hit_up = true
 				elif _due(opp.t):
 					if opp.kind == "set" and opp.speed <= OVER_OK:
@@ -1303,7 +1289,6 @@ func _nudge_aim(aim: Vector2, mv: Vector2, delta: float) -> Vector2:
 
 func _do_toss() -> void:
 	toss_time = clock
-	serve_jump_e = -100.0
 	phase = Phase.TOSS
 	ball_g = G
 	if serve_kind == 1:
@@ -1765,22 +1750,17 @@ func _rally_input(inp: Dictionary) -> void:
 
 func _attack_input(inp: Dictionary) -> void:
 	opp.rs = rs
-	var pl := opp.player
-	var t_jump := opp.t - JUMP_RISE
-	if inp.hit_down and not charging and not pl.has_jumped and not opp.pending:
+	if inp.hit_down and not charging:
 		_start_charge()
-		opp.go = true  # Anlauf beginnt jetzt
-	elif charging and not opp.pending and (inp.hit_up or clock > t_jump + 0.3):
-		var e := clock - t_jump  # Loslassen = Absprung
-		if e < -0.6:
+	elif inp.hit_up and charging and not opp.pending:
+		var e := clock - opp.t
+		if e < -0.45:
 			charging = false  # viel zu frueh losgelassen: neu aufladen
 			return
 		var c := _release_charge()
 		opp.power = clampf(c, 0.15, 1.0)
 		opp.over = c
 		opp.win_scale = hit_window_scale(opp.power, rs, false)
-		pl.jump()
-		pl.block_pose = false
 		_press(opp, e, "spike")
 
 
@@ -2767,8 +2747,7 @@ func _update_players(delta: float) -> void:
 			goal = srv.position
 		srv.target = goal
 		srv.run_speed = 5.0
-		var self_jump := serving_team == human_team and (charging or serve_jump_e > -90.0)
-		if clock >= serve_ideal - JUMP_RISE and not srv.has_jumped and not self_jump:
+		if clock >= serve_ideal - JUMP_RISE and not srv.has_jumped:
 			srv.jump()
 	if opp != null and not opp.done:
 		var pl := opp.player
@@ -2776,15 +2755,8 @@ func _update_players(delta: float) -> void:
 		if opp.kind == "attack":
 			var t_jump := opp.t - JUMP_RISE
 			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.05
-			var self_jump := opp.human and (opp.go or charging)
-			if self_jump:
-				# Anlauf ab dem Druck auf R2, Tempo so, dass er rechtzeitig am Absprungpunkt ist
-				pl.target = p
-				if not pl.airborne:
-					pl.run_speed = clampf(flat_dist(pl.position, p) / maxf(t_jump - clock, 0.25), 2.5, 7.0)
-			else:
-				pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
-			if clock >= t_jump and not pl.has_jumped and not self_jump:
+			pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
+			if clock >= t_jump and not pl.has_jumped:
 				pl.jump()
 				pl.block_pose = false
 				if not opp.human:
@@ -2930,10 +2902,9 @@ func _update_visuals() -> void:
 		var p := Vector3(opp.point.x, 0.03, opp.point.z)
 		_ring_target.position = p
 		_ring_timer.position = p
-		var t_rel := release_time(opp)
-		var remain := clampf((t_rel - clock) / 1.0, 0.0, 1.0)
+		var remain := clampf((opp.t - clock) / 1.0, 0.0, 1.0)
 		_ring_timer.scale = Vector3.ONE * (1.0 + remain * 2.5)
-		var near: bool = absf(t_rel - clock) <= windows(opp.kind)[0] * opp.win_scale
+		var near: bool = absf(opp.t - clock) <= windows(opp.kind)[0] * opp.win_scale
 		_ring_timer_mat.albedo_color = Color(0.3, 1.0, 0.3) if near else Color(1.0, 0.85, 0.1)
 		# Laufhilfe: gruen = Pritschen geht, orange = lieber baggern.
 		var tint := Color(1, 1, 1, 0.9)
@@ -2999,11 +2970,6 @@ func _draw_block_shadow() -> void:
 
 
 ## Kurzer Hinweis, was der Mensch gerade tun kann.
-## Wann der Mensch loslassen soll: beim Angriff im Absprung, sonst im Ballkontakt.
-func release_time(o: Opp) -> float:
-	return o.t - JUMP_RISE if o.kind == "attack" else o.t
-
-
 func hint() -> String:
 	match phase:
 		Phase.INTRO:
@@ -3019,8 +2985,6 @@ func hint() -> String:
 				return "Gleich Anpfiff … Trainerbank (Libero, Wechsel, Auszeit): T / Y"
 		Phase.TOSS:
 			if serving_team == human_team and not serve_done:
-				if serve_kind == 1:
-					return "R2 / E halten: Anwurf und Anlauf · loslassen = Absprung"
 				return "R2 / E halten zum Aufladen, loslassen, wenn der Ball oben ist"
 		Phase.RALLY:
 			if opp != null and not opp.done and opp.team == human_team:
@@ -3034,7 +2998,7 @@ func hint() -> String:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
 						return "Zuspiel: Steuerkreuz halten, loslassen = Zuspiel (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · R2 halten = schneller Ball · R1 = Dump · R1+R2 = Zuspieler schlägt"
 					"attack":
-						return "Angriff: R2/E drücken = Anlauf, loslassen = Absprung · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
+						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":
 						return "Ball rüberspielen: X/Q oder A/Leertaste halten und rechtzeitig loslassen"
 			if human_player() != null:
