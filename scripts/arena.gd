@@ -20,6 +20,7 @@ var bench: Array = [[], []]  # sitzende Figuren je Team
 var line_judges: Array = []  # [Figur, Ecke (Vector3)]
 var ball_pos := Vector3.ZERO  # vom Spiel gesetzt: wo der Ball gerade ist
 var _meshes := {}  # Name -> MeshInstance3D aus arena.glb
+var net: ReactiveNet  # Netzanlage aus Mattis' Meshy-Modell
 const HALL := preload("res://assets/models/arena.glb")
 const FLAG := preload("res://assets/models/flag.glb")
 ## Gedaempfte Bandenfarben (wie die Stilvorlage)
@@ -109,6 +110,13 @@ func _hall() -> void:
 		if not String(m.name) in ["net_mesh", "net_bands", "antennas", "posts", "referee_stand", "scorer_table",
 				"benches", "bench_props", "adboard_frames"]:
 			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Netz, Pfosten und Antennen kommen aus Mattis' Meshy-Modell (reagiert auf den Ball);
+	# die alten Teile aus arena.glb bleiben im Modell, werden aber nicht gezeigt.
+	for n in ["net_mesh", "net_bands", "antennas", "posts"]:
+		if _meshes.has(n):
+			_meshes[n].visible = false
+	net = ReactiveNet.new()
+	add_child(net)
 
 
 ## Bandenwerbung und Anzeigetafeln: die Bildschirme im Modell bekommen Farbe und Schrift.

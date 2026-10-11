@@ -193,6 +193,9 @@ func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
 				fx.flash(pos, strength * 0.8)
 		"block":
 			fx.flash(pos, strength, Color(0.85, 0.92, 1.0))
+		"net":
+			# Ball liegt schon wieder auf seiner Seite: das Netz beult zur anderen Seite aus.
+			arena.net.hit(pos, strength, -signf(match_node.ball.position.x))
 		"floor":
 			fx.dust(pos, strength)
 			if strength > 0.8:

@@ -2359,12 +2359,13 @@ func _step_ball(delta: float) -> void:
 			_end_rally(1 - last_touch_team, "Ball außerhalb der Antenne")
 			return
 		if c.y < NET_H + R and c.y > NET_BOTTOM - R:
+			var net_speed := ball_vel.length()
 			ball.position = Vector3(signf(prev.x) * (R + 0.02), c.y, c.z)
 			ball_vel = Vector3(-ball_vel.x * 0.15, minf(ball_vel.y, 0.0) * 0.3 - 0.5, ball_vel.z * 0.3)
 			ball_g = G
 			flutter = 0.0
 			net_touched = true
-			_fx("net", c, 0.5)
+			_fx("net", c, clampf(net_speed / 22.0, 0.25, 1.0))
 			if possession != last_touch_team:
 				possession = last_touch_team
 			plan_next()
