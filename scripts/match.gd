@@ -43,8 +43,6 @@ const GRID := {
 	"serve": {1: Vector2(10.0, 2.5), 2: Vector2(2.0, 3.0), 3: Vector2(2.0, 0.0), 4: Vector2(2.0, -3.0), 5: Vector2(6.5, -3.0), 6: Vector2(7.0, 0.0)},
 	"receive": {1: Vector2(6.0, 3.0), 2: Vector2(1.8, 3.4), 3: Vector2(1.6, -0.4), 4: Vector2(3.0, -3.4), 5: Vector2(6.0, -3.0), 6: Vector2(6.4, 0.0)},
 }
-## Zuspieler im Hinterfeld versteckt sich bei der Annahme hinter dem Vorderspieler.
-const SETTER_HIDE := {1: Vector2(3.2, 4.1), 6: Vector2(3.4, 1.4), 5: Vector2(3.4, -1.4)}
 const FORM := {
 	"defense": {"front": {"left": Vector2(0.6, -3.0), "mid": Vector2(0.6, 0.0), "right": Vector2(0.6, 3.0)},
 		"back": {5: Vector2(6.5, -3.2), 6: Vector2(7.8, 0.0), 1: Vector2(6.5, 3.2)}},
@@ -170,6 +168,7 @@ var last_attack_speed := 0.0
 var autoplay_rallies := 200
 var trace := false
 var test_score := []  # Test: Startstand des ersten Satzes, z.B. --score=24:10
+var test_rot := -1  # Test: --rot=N dreht das Heimteam N-mal weiter, Gegner schlaegt auf
 var check_rules := false  # Test: prueft bei jedem Aufschlag die Aufstellung
 var autopress := false  # Test: drueckt fuer den Menschen automatisch
 var hud = null
@@ -226,6 +225,8 @@ func _ready() -> void:
 			autopress = true  # wie --autopress, aber mit Kamera, Zeitlupe und Anzeigen
 		elif a == "--trace":
 			trace = true
+		elif a.begins_with("--rot="):
+			test_rot = int(a.get_slice("=", 1))
 		elif a == "--check":
 			check_rules = true
 		elif a.begins_with("--seed="):
@@ -379,7 +380,57 @@ func _torus(inner: float, outer: float, c: Color) -> MeshInstance3D:
 	return mi
 
 
+## Regellinien zwischen den Spielern (nur vor dem Aufschlag, nur fuer das Team des Menschen).
+var _form_lines: Array = []
+
+
+func _make_form_lines() -> void:
+	for i in Formation.PAIRS.size():
+		var mi := MeshInstance3D.new()
+		mi.mesh = BoxMesh.new()
+		var m := _unshaded(Color(1, 1, 1, 0.85))
+		m.no_depth_test = false
+		mi.material_override = m
+		mi.visible = false
+		add_child(mi)
+		_form_lines.append(mi)
+
+
+func _update_form_lines() -> void:
+	var show := human_team >= 0 and (phase == Phase.PRE_SERVE or phase == Phase.TOSS)
+	if show:
+		var t := human_team
+		var serving := t == serving_team
+		var spots: Dictionary = {}
+		if serving:
+			spots = GRID["serve"]
+		else:
+			spots = _receive_spots(t)
+		var ls := Formation.lines(spots, [1] if serving else [])
+		for i in _form_lines.size():
+			var mi: MeshInstance3D = _form_lines[i]
+			if i >= ls.size():
+				mi.visible = false
+				continue
+			var l: Dictionary = ls[i]
+			var a := court_pos(t, l.a)
+			var b := court_pos(t, l.b)
+			var mid := (a + b) * 0.5
+			var len := a.distance_to(b)
+			var dir := (b - a).normalized()
+			mi.position = Vector3(mid.x, 0.025, mid.z)
+			mi.rotation = Vector3(0, atan2(-dir.z, dir.x), 0)
+			mi.scale = Vector3(len, 0.01, 0.15)
+			var col := Color(1.0, 0.82, 0.2, 0.9) if l.kind == "lat" else Color(0.45, 0.92, 1.0, 0.9)
+			(mi.material_override as StandardMaterial3D).albedo_color = col
+			mi.visible = true
+	else:
+		for mi in _form_lines:
+			mi.visible = false
+
+
 func _make_markers() -> void:
+	_make_form_lines()
 	_ring_target = _torus(0.42, 0.5, Color(1, 1, 1, 0.9))
 	_ring_target_mat = _ring_target.material_override
 	_ring_timer = _torus(0.44, 0.52, Color(1.0, 0.85, 0.1))
@@ -573,6 +624,10 @@ func _start_set() -> void:
 	libero_set_front = [false, false]
 	for t in 2:
 		rosters[t].new_set()
+		if t == 0 and test_rot >= 0:
+			for _i in test_rot:
+				rosters[t].rotate()
+			serving_team = 1
 		for j in 6:
 			_apply_identity(players[t][j], rosters[t].lineup[j])
 			players[t][j].set_side(side_of(t))
@@ -584,8 +639,14 @@ func _start_set() -> void:
 	start_rally()
 
 
+var _lines_hint_shown := false
+
+
 func start_rally() -> void:
 	phase = Phase.PRE_SERVE
+	if human_team >= 0 and not _lines_hint_shown and not autoplay:
+		_lines_hint_shown = true
+		_notice("Aufstellung: gelb = links/rechts, blau = vorn/hinten. Beim Aufschlag nicht überschreiten.")
 	opp = null
 	blockers = [[], []]
 	block_dirs = [[], []]
@@ -613,8 +674,6 @@ func start_rally() -> void:
 	_rec_events.clear()
 	for t in 2:
 		_prepare_lineup(t)
-	if check_rules:
-		_check_rules()
 	for t in 2:
 		var form := "serve" if t == serving_team else "receive"
 		for pl in players[t]:
@@ -622,6 +681,8 @@ func start_rally() -> void:
 			pl.position = p
 			pl.target = p
 			pl.reset_state()
+	if check_rules:
+		_check_rules()
 	ball_vel = Vector3.ZERO
 	_hold_ball_at_server()
 	reset_physics_interpolation()
@@ -677,6 +738,12 @@ func _check_rules() -> void:
 			roles[pl.role] = roles.get(pl.role, 0) + 1
 		if roles.get("S", 0) != 1 or roles.get("L", 0) > 1:
 			bad += " Rollen %s;" % str(roles)
+		var spots := {}
+		for pl in players[t]:
+			spots[pl.slot] = team_local(t, pl.target)
+		var viol := Formation.violations(spots, [1] if t == serving_team else [])
+		if not viol.is_empty():
+			bad += " Stellungsfehler %s;" % str(viol)
 		if bad != "":
 			print("REGELFEHLER T%d Satz %d %d:%d:%s lineup=%s" % [t, set_no, score[0], score[1], bad, str(r.lineup)])
 		if trace:
@@ -685,13 +752,42 @@ func _check_rules() -> void:
 			print("AUFSTELLUNG T%d Satz %d %d:%d P1..6=%s libero=%d" % [t, set_no, score[0], score[1], str(r.lineup), r.libero_on])
 
 
+## Annahme-Aufstellung des Teams (Position -> lokaler Punkt), regelgerecht und je Rotation anders.
+## Wird nur neu berechnet, wenn sich die Rollen auf den Positionen aendern.
+var _rcv_cache := [{}, {}]
+
+
+func _receive_spots(t: int) -> Dictionary:
+	var roles := {}
+	var sig := ""
+	for pl in players[t]:
+		roles[pl.slot] = pl.role
+	for s in range(1, 7):
+		sig += str(roles.get(s, "-"))
+	var c: Dictionary = _rcv_cache[t]
+	if c.get("sig", "") != sig:
+		c = {"sig": sig, "spots": Formation.receive_spots(roles), "passers": Formation.passer_slots(roles)}
+		_rcv_cache[t] = c
+	return c["spots"]
+
+
+## Annahme-Verantwortung: Libero zuerst, dann Aussenangreifer, die uebrigen nur im Notfall.
+func _receiver_weight(pl: VPlayer) -> float:
+	_receive_spots(pl.team)
+	if pl.role == "L":
+		return 0.8
+	if _rcv_cache[pl.team]["passers"].has(pl.slot):
+		return 1.0
+	return 1.8
+
+
 ## Position eines Spielers in einer Spielsituation (Welt-Koordinaten).
 func formation_pos(t: int, pl: VPlayer, form: String) -> Vector3:
 	var v: Vector2
 	if form == "serve" or form == "receive":
 		v = GRID[form][pl.slot]
-		if form == "receive" and pl.role == "S" and SETTER_HIDE.has(pl.slot):
-			v = SETTER_HIDE[pl.slot]
+		if form == "receive":
+			v = _receive_spots(t)[pl.slot]
 	else:
 		var f: Dictionary = FORM[form]
 		if pl.role == "S" and f.has("S"):
@@ -1012,6 +1108,7 @@ func _physics_process(delta: float) -> void:
 		_record()
 	_update_time_and_camera(real_delta)
 	_update_visuals()
+	_update_form_lines()
 	if phase == Phase.REPLAY:
 		for t in 2:
 			for pl in players[t]:
@@ -1363,6 +1460,8 @@ func _try_team(team: int) -> bool:
 		var s := player_by_role(team, "S")
 		if s != null and s != excluded and flat_dist(s.position, p) <= s.run_speed * tc + 0.8:
 			pl = s
+	if pl == null and kind == "pass" and last_action == "serve":
+		pl = _receiver(team, p, excluded)
 	if pl == null:
 		pl = _nearest(team, p, excluded, kind == "attack")
 	if pl == null:
@@ -1427,6 +1526,21 @@ var _hitter := [null, null]
 
 func _chosen_hitter(team: int) -> VPlayer:
 	return _hitter[team]
+
+
+## Annahme nach dem Aufschlag: Naehe zaehlt, aber der Libero nimmt bevorzugt an,
+## die Annahmespieler vor den uebrigen.
+func _receiver(team: int, p: Vector3, excluded: VPlayer) -> VPlayer:
+	var best: VPlayer = null
+	var bs := 1e9
+	for pl in players[team]:
+		if pl == excluded:
+			continue
+		var sc := flat_dist(pl.position, p) * _receiver_weight(pl)
+		if sc < bs:
+			bs = sc
+			best = pl
+	return best
 
 
 func _nearest(team: int, p: Vector3, excluded: VPlayer, no_libero: bool) -> VPlayer:
@@ -2577,6 +2691,8 @@ func _formation(t: int) -> String:
 			if opp == null:
 				return ""
 			if opp.team == t:
+				if opp.kind == "pass" and last_action == "serve":
+					return "receive"  # Annahmeformation bleibt stehen, bis der Ball gespielt ist
 				return "cover" if opp.kind == "attack" else "build"
 			return "defense"
 	return ""
