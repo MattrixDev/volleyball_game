@@ -948,7 +948,7 @@ func _hold_ball_at_server() -> void:
 
 
 func _empty_input() -> Dictionary:
-	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "tempo_rs": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_down": false, "dump_held": false,
+	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "dpad_down": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_held": false,
 		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false}
 
 
@@ -957,18 +957,15 @@ func _read_input() -> Dictionary:
 	d.mv = Input.get_vector("move_left", "move_right", "move_down", "move_up")
 	var stick := _held_stick(Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up"))
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
-	d.tempo_rs = stick  # rechter Stick (ohne Maus): Tempo des Zuspiels
 	d.mouse_rs = mouse_rs
-	d.dump_down = Input.is_action_just_pressed("set_dump")
 	d.dump_held = Input.is_action_pressed("set_dump")
 	d.bump = Input.is_action_just_pressed("bump")
 	d.over = Input.is_action_just_pressed("overhand")
-	var dp := Input.get_vector("set_dir_left", "set_dir_right", "set_dir_down", "set_dir_up")
-	if dp.length() > 0.5:
-		_set_dir = dp
-		_set_dir_ms = Time.get_ticks_msec()
-	if Time.get_ticks_msec() - _set_dir_ms < 2500:
-		d.dpad = _set_dir
+	d.dpad = Input.get_vector("set_dir_left", "set_dir_right", "set_dir_down", "set_dir_up")
+	# Steuerkreuz neu gedrueckt: das ist das Zuspiel selbst (Richtung = Taste)
+	d.dpad_down = Vector2(
+		float(Input.is_action_just_pressed("set_dir_right")) - float(Input.is_action_just_pressed("set_dir_left")),
+		float(Input.is_action_just_pressed("set_dir_up")) - float(Input.is_action_just_pressed("set_dir_down")))
 	d.fast = Input.is_action_just_pressed("set_fast")
 	d.quick = Input.is_action_just_pressed("set_quick")
 	d.hit_down = Input.is_action_just_pressed("hit")
@@ -988,11 +985,6 @@ func _read_input() -> Dictionary:
 ## Der rechte Stick federt beim Loslassen zur Mitte zurueck. Damit die gewaehlte
 ## Schlagrichtung dabei nicht verloren geht, gilt der letzte deutliche Ausschlag
 ## noch eine einstellbare Zeit lang weiter ("Stick nachhalten").
-var _combo_t := -1.0  # R1/R2 gedrueckt: Auswertung nach kurzer Wartezeit
-var _combo_r1 := false
-var _combo_r2 := false
-var _set_dir := Vector2.ZERO  # zuletzt am Steuerkreuz gewaehlte Zuspiel-Richtung (bleibt kurz gemerkt)
-var _set_dir_ms := -10000
 var _rs_hold := Vector2.ZERO
 var _rs_hold_ms := 0
 
@@ -1249,17 +1241,11 @@ func _auto_input() -> Dictionary:
 						d.hit_up = true
 				elif _due(opp.t):
 					if opp.kind == "set" and opp.speed <= OVER_OK:
-						d.rs = Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+						var dirs := [Vector2(-1, 0), Vector2(1, 0), Vector2(0, 1), Vector2(0, -1)]
+						d.dpad_down = dirs[rng.randi() % 4]
 						var r := rng.randf()
-						d.mouse_rs = d.rs
-						d.tempo_rs = Vector2(rng.randf_range(0.0, 1.0), 0.0)
-						d.over = r < 0.45
-						d.fast = r >= 0.45 and r < 0.6
-						d.quick = r >= 0.6 and r < 0.7
-						d.dump_down = r >= 0.7 and r < 0.85
-						d.dump_held = d.dump_down
-						d.hit_down = r >= 0.8 and r < 0.9  # R2 allein (schneller) oder mit R1 (Schlag)
-						d.hit_held = d.hit_down
+						d.dump_held = r >= 0.75 and r < 0.9  # R1 (mit R2 zusammen: Zuspieler schlaegt)
+						d.hit_held = (r >= 0.5 and r < 0.75) or r >= 0.85  # R2
 					elif opp.speed <= OVER_OK:
 						d.over = true
 					else:
@@ -1675,42 +1661,40 @@ func _rally_input(inp: Dictionary) -> void:
 			"attack":
 				_attack_input(inp)
 			"set":
-				# Linker Stick = laufen, Steuerkreuz = Richtung, rechter Stick = Tempo (Mitte hoch,
-				# halb schnell, voll Schnellangriff). R2 = ein Tempo schneller, R1 = Dump,
-				# R1 + R2 zusammen = der Zuspieler schlaegt selbst.
+				# Linker Stick = laufen. Steuerkreuz druecken = Zuspiel in diese Richtung (links Aussen,
+				# rechts Diagonal, oben Mitte, unten Hinterfeld). Pritschen oder Baggern waehlt das Spiel.
+				# R2 gehalten = schneller Ball (Mitte: Schnellangriff), R1 = Dump,
+				# R1 + R2 = der Zuspieler schlaegt selbst. X/A und B/Y gehen weiter (Tastatur).
 				if not assist:
 					hp.manual_dir = _stick_dir(mv)
 				var lane := _set_choice(inp.dpad if inp.dpad.length() > 0.5 else inp.mouse_rs)
-				var tl: float = inp.tempo_rs.length()
-				var stick_tempo := "high" if tl < 0.35 else ("fast" if tl < 0.8 else "quick")
-				# R1/R2 koennen etwas versetzt gedrueckt werden: kurz sammeln, dann auswerten.
-				if inp.dump_down or inp.hit_down:
-					if _combo_t < 0.0:
-						_combo_r1 = false
-						_combo_r2 = false
-						_combo_t = clock
-				if _combo_t >= 0.0:
-					_combo_r1 = _combo_r1 or inp.dump_down or inp.dump_held
-					_combo_r2 = _combo_r2 or inp.hit_down or inp.hit_held
-					if clock - _combo_t >= 0.05:
-						var t0 := _combo_t  # Timing zaehlt ab dem ersten Tastendruck
-						_combo_t = -1.0
-						if _combo_r1 and _combo_r2:
-							_human_touch("over", lane + "|attack", t0)
-						elif _combo_r1:
-							_human_touch("over", lane + "|dump", t0)
-						else:
-							_human_touch("over", lane + "|" + _faster(stick_tempo), t0)
+				var trig := ""
+				if inp.dpad_down.length() > 0.5:
+					lane = _set_choice(inp.dpad_down)
+					trig = "auto"
 				elif inp.bump:
-					_human_touch("bump", lane + "|high")
+					trig = "bump"
 				elif inp.over:
-					_human_touch("over", lane + "|" + stick_tempo)
-				elif inp.fast:
-					_human_touch("over", lane + "|fast")
-				elif inp.quick:
-					_human_touch("over", lane + "|quick")
-				if opp == null or opp.pending or opp.done:
-					_set_dir = Vector2.ZERO  # Richtung gilt nur fuer dieses Zuspiel
+					trig = "over"
+				elif inp.fast or inp.quick:
+					trig = "over"
+				if trig != "":
+					var tempo := "high"
+					if inp.dump_held and inp.hit_held:
+						tempo = "attack"
+					elif inp.dump_held:
+						tempo = "dump"
+					elif inp.hit_held:
+						tempo = "quick" if lane == "mid" else "fast"
+					if inp.fast:
+						tempo = "fast"
+					elif inp.quick:
+						tempo = "quick"
+					var tech := trig
+					if trig == "auto":
+						var lib_front: bool = opp.player.role == "L" and absf(opp.point.x) < 3.0
+						tech = "over" if (opp.speed <= OVER_OK and not lib_front) else "bump"
+					_human_touch(tech, lane + "|" + tempo)
 			_:
 				hp.manual_dir = _stick_dir(mv)
 				if inp.bump:
@@ -2079,10 +2063,6 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	ball_vel = Ballistics.launch_with_time(ball.position, target, T)
 	_hitter[o.team] = hitter
 	last_action = "set"
-
-
-func _faster(tempo: String) -> String:
-	return "fast" if tempo == "high" else "quick"
 
 
 ## Dump nur vom Zuspieler selbst: vorn am Netz, kein Libero, Ball nicht schlecht.
@@ -2993,7 +2973,7 @@ func hint() -> String:
 					"set":
 						if opp.player.role == "L" and absf(opp.point.x) < 3.0:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
-						return "Zuspiel: Steuerkreuz = Richtung (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · rechter Stick = Tempo (halb schnell, voll Schnellangriff) · X/Q spielen · R2 schneller · R1 Dump · R1+R2 Zuspieler schlägt · A baggern"
+						return "Zuspiel: Steuerkreuz drücken = Zuspiel (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · R2 halten = schneller Ball · R1 = Dump · R1+R2 = Zuspieler schlägt"
 					"attack":
 						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":
