@@ -42,6 +42,7 @@ var alert := false  # Ballwechsel laeuft: Bereitschaftshaltung
 var anim_kind := ""  # pass, dig, set, attack, free, serve, serve_hold
 var anim_tech := "bump"
 var anim_t := -10.0  # Zeitpunkt der Ballberuehrung
+var prep := ""  # gehaltene Taste: bump oder over (Vorbereitungshaltung)
 var celebrate_until := -10.0
 ## Ballkontakt (vom Match gesetzt): Ballmitte beim Kontakt und der Punkt, wohin gespielt wird.
 ## Beim Kontakt zielen Haende und Unterarme genau auf contact_pt (siehe _contact_ik).
@@ -496,7 +497,8 @@ func _p_serve(rel: float, jump_serve: bool) -> Dictionary:
 	if airborne:
 		return _p_spike(rel)
 	if jump_serve and rel < -0.25:
-		return _p_approach() if rel > -0.7 else _mix(_p_serve_hold(), _p_run(maxf(_run_amt, 0.4)), clampf(_run_amt * 2.0, 0.0, 1.0))
+		var hold := _mix(_p_serve_hold(), _p_run(maxf(_run_amt, 0.4)), clampf(_run_amt * 2.0, 0.0, 1.0))
+		return _mix(hold, _p_approach(), smoothstep(-0.85, -0.45, rel))
 	var p := {"chest": Vector3(0.1, 0, 0), "head": Vector3(0.6, 0, 0)}
 	var swing := clampf((rel + 0.06) / 0.16, 0.0, 1.0)
 	_arm(p, "l", lerpf(2.8, 1.0, swing), 0.1, 0.1)
@@ -556,9 +558,12 @@ func _target_pose() -> Dictionary:
 		if airborne:
 			_stiff = 45.0
 			return _p_spike(rel)
-		if rel > -0.9:
-			_stiff = 28.0
-			return _p_approach()
+		if rel > -1.0:
+			# Anlauf weich einblenden statt hart umschalten.
+			var wa := smoothstep(-1.0, -0.55, rel)
+			var run := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
+			_stiff = lerpf(22.0, 26.0, wa)
+			return _mix(run, _p_approach(), wa)
 	_stiff = 22.0 + _run_amt * 10.0
 	var base := _p_ready() if alert else _p_idle()
 	if _run_amt > 0.05:
@@ -570,11 +575,14 @@ func _target_pose() -> Dictionary:
 	if land > 0.0:
 		base = _mix(base, _p_land(), sin(land * PI * 0.5) * 0.8)
 		_stiff = 30.0
-	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.7 and rel < 0.5:
+	# Taste gehalten: schon vorher in die Grundhaltung fuer Baggern oder Pritschen.
+	if prep != "" and not airborne:
+		base = _mix(base, _p_set(-0.45) if prep == "over" else _p_bump(-0.45), 0.8)
+	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.9 and rel < 0.6:
 		var tech := _p_set(rel) if anim_tech == "over" else _p_bump(rel)
-		var w := smoothstep(-0.7, -0.3, rel) * (1.0 - smoothstep(0.2, 0.5, rel))
+		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
 		base = _mix(base, tech, w)
-		_stiff = 26.0
+		_stiff = 20.0
 	return base
 
 

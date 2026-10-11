@@ -163,9 +163,11 @@ func _build_controls() -> void:
 	var rows := [
 		["", "Gamepad", "Tastatur"],
 		["Laufen, Zuspiel-Richtung, Aufschlagziel, Block", "linker Stick", "WASD / Pfeiltasten"],
-		["Baggern", "A", "Leertaste"],
-		["Pritschen, Commit-Block", "X", "Q"],
-		["Schlagen (halten, loslassen), Blocksprung", "R2", "E"],
+		["Baggern (halten, im richtigen Moment loslassen)", "A", "Leertaste"],
+		["Pritschen (halten, loslassen), Commit-Block", "X", "Q"],
+		["Zuspiel: Richtung halten, zum Zuspielen loslassen", "Steuerkreuz", "–"],
+		["Angriff und Sprungaufschlag: drücken = Anlauf, loslassen = Absprung", "R2", "E"],
+		["Blocksprung", "R2", "E"],
 		["Trefferpunkt am Ball, zweiter Blocker", "rechter Stick", "Maus oder I J K L"],
 		["Aufschlag Stand / Sprung", "LB / RB", "1 / 2"],
 		["Trainerbank (vor dem Aufschlag)", "Y", "T"],
@@ -178,7 +180,7 @@ func _build_controls() -> void:
 			var col := UiTheme.ACCENT if i == 0 else (UiTheme.TEXT if j == 0 else UiTheme.MUTED)
 			grid.add_child(UiTheme.label(rows[i][j], 19 if i > 0 else 17, col))
 	box.add_child(grid)
-	box.add_child(UiTheme.label("Annahme und Zuspiel: drücken, wenn sich der schrumpfende Ring mit dem weißen Ring deckt.\nMit Laufhilfe wird der weiße Ring grün, wenn Pritschen sicher geht, und orange, wenn du besser baggerst.", 17, UiTheme.MUTED))
+	box.add_child(UiTheme.label("Taste früh halten und loslassen, wenn sich der schrumpfende Ring mit dem weißen Ring deckt.\nMit Laufhilfe wird der weiße Ring grün, wenn Pritschen sicher geht, und orange, wenn du besser baggerst.", 17, UiTheme.MUTED))
 	_back = Button.new()
 	_back.text = "Zurück"
 	_back.custom_minimum_size = Vector2(200, 48)

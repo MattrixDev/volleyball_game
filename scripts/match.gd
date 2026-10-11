@@ -83,6 +83,7 @@ class Opp:
 	var no_reach := false  # KI-Abwehr kommt nicht mehr rechtzeitig hin
 	var start_pos := Vector3.ZERO
 	var max_run := 0.0
+	var go := false  # Mensch hat R2 gedrueckt: Angreifer laeuft an
 
 
 var phase := Phase.INTRO
@@ -114,6 +115,8 @@ var toss_time := -1.0
 var serve_done := false
 var serve_time := -1.0
 var serve_ideal := 0.0
+var serve_jump_e := -100.0  # Sprungaufschlag: Absprung-Timing (Mensch), -100 = noch nicht gesprungen
+var serve_jump_c := 0.0
 var serve_kind := 1  # 0 Stand, 1 Sprung
 var serve_contact := Vector2.ZERO
 var ai_serve_e := 0.0
@@ -949,6 +952,7 @@ func _hold_ball_at_server() -> void:
 
 func _empty_input() -> Dictionary:
 	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "dpad_down": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_held": false,
+		"bump_held": false, "over_held": false, "bump_up": false, "over_up": false, "dpad_up": Vector2.ZERO,
 		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false}
 
 
@@ -961,7 +965,17 @@ func _read_input() -> Dictionary:
 	d.dump_held = Input.is_action_pressed("set_dump")
 	d.bump = Input.is_action_just_pressed("bump")
 	d.over = Input.is_action_just_pressed("overhand")
+	# Halten = vorbereiten (Haltung), Loslassen = Ballkontakt
+	d.bump_held = Input.is_action_pressed("bump")
+	d.over_held = Input.is_action_pressed("overhand")
+	d.bump_up = Input.is_action_just_released("bump")
+	d.over_up = Input.is_action_just_released("overhand")
 	d.dpad = Input.get_vector("set_dir_left", "set_dir_right", "set_dir_down", "set_dir_up")
+	if d.dpad.length() > 0.5:
+		_dpad_last = d.dpad
+	elif _dpad_last != Vector2.ZERO:
+		d.dpad_up = _dpad_last  # Steuerkreuz losgelassen: Zuspiel in die zuletzt gehaltene Richtung
+		_dpad_last = Vector2.ZERO
 	# Steuerkreuz neu gedrueckt: das ist das Zuspiel selbst (Richtung = Taste)
 	d.dpad_down = Vector2(
 		float(Input.is_action_just_pressed("set_dir_right")) - float(Input.is_action_just_pressed("set_dir_left")),
@@ -987,6 +1001,7 @@ func _read_input() -> Dictionary:
 ## noch eine einstellbare Zeit lang weiter ("Stick nachhalten").
 var _rs_hold := Vector2.ZERO
 var _rs_hold_ms := 0
+var _dpad_last := Vector2.ZERO  # zuletzt gehaltene Steuerkreuz-Richtung
 
 
 func _held_stick(stick: Vector2) -> Vector2:
@@ -1051,11 +1066,22 @@ func _physics_process(delta: float) -> void:
 				serve_aim = _nudge_aim(serve_aim, inp.mv, delta)
 				serve_contact = rs
 				if not serve_done:
-					if inp.hit_down and not charging:
+					var jump_late: bool = serve_kind == 1 and charging and clock > serve_ideal - JUMP_RISE + windows("serve")[2] * 1.4
+					if serve_jump_e > -90.0:
+						# schon abgesprungen: Treffen im Hoechstpunkt (oder sofort, wenn spaet)
+						if clock >= serve_ideal or serve_jump_e >= 0.0:
+							_serve_hit(serve_jump_e, minf(serve_jump_c, 1.0), serve_contact, serve_jump_c)
+					elif inp.hit_down and not charging:
 						_start_charge()
-					elif inp.hit_up and charging:
+					elif (inp.hit_up or jump_late) and charging:
 						var c := _release_charge()
-						_serve_hit(clock - serve_ideal, minf(c, 1.0), serve_contact, c)
+						if serve_kind == 1:
+							# Sprungaufschlag: Loslassen = Absprung
+							server().jump()
+							serve_jump_e = clock - (serve_ideal - JUMP_RISE)
+							serve_jump_c = c
+						else:
+							_serve_hit(clock - serve_ideal, minf(c, 1.0), serve_contact, c)
 					elif clock > serve_ideal + windows("serve")[2] * 1.4 + 0.03:
 						serve_done = true
 						charging = false
@@ -1228,28 +1254,28 @@ func _auto_input() -> Dictionary:
 				d.rs = _auto_rs
 				d.hit_down = true
 		Phase.TOSS:
-			if charging and _due(serve_ideal):
+			if charging and _due(serve_ideal - (JUMP_RISE if serve_kind == 1 else 0.0)):
 				d.hit_up = true
 		Phase.RALLY:
 			if opp != null and not opp.done and not opp.pending and opp.team == human_team:
 				if opp.kind == "attack":
-					if not charging and clock >= opp.t - 0.7:
+					if not charging and clock >= opp.t - 1.2:
 						_auto_rs = Vector2(rng.randf_range(-0.8, 0.8), rng.randf_range(-0.5, 0.8))
 						d.rs = _auto_rs
 						d.hit_down = true
-					elif charging and _due(opp.t):
+					elif charging and _due(opp.t - JUMP_RISE):
 						d.hit_up = true
 				elif _due(opp.t):
 					if opp.kind == "set" and opp.speed <= OVER_OK:
 						var dirs := [Vector2(-1, 0), Vector2(1, 0), Vector2(0, 1), Vector2(0, -1)]
-						d.dpad_down = dirs[rng.randi() % 4]
+						d.dpad_up = dirs[rng.randi() % 4]
 						var r := rng.randf()
 						d.dump_held = r >= 0.75 and r < 0.9  # R1 (mit R2 zusammen: Zuspieler schlaegt)
 						d.hit_held = (r >= 0.5 and r < 0.75) or r >= 0.85  # R2
 					elif opp.speed <= OVER_OK:
-						d.over = true
+						d.over_up = true
 					else:
-						d.bump = true
+						d.bump_up = true
 			elif human_player() != null and opp != null and opp.kind == "attack":
 				d.rs = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # zweiter Blocker per rechtem Stick
 				if _due(opp.t - JUMP_RISE):
@@ -1277,6 +1303,7 @@ func _nudge_aim(aim: Vector2, mv: Vector2, delta: float) -> Vector2:
 
 func _do_toss() -> void:
 	toss_time = clock
+	serve_jump_e = -100.0
 	phase = Phase.TOSS
 	ball_g = G
 	if serve_kind == 1:
@@ -1645,6 +1672,7 @@ func _rally_input(inp: Dictionary) -> void:
 		return
 	for pl in players[human_team]:
 		pl.manual_dir = Vector3.ZERO
+		pl.prep = ""
 	var mv: Vector2 = inp.mv
 	var hp := human_player()
 	# Block lesen: Solange der gegnerische Zuspieler den Ball noch bekommt, stellst du den
@@ -1668,13 +1696,22 @@ func _rally_input(inp: Dictionary) -> void:
 				if not assist:
 					hp.manual_dir = _stick_dir(mv)
 				var lane := _set_choice(inp.dpad if inp.dpad.length() > 0.5 else inp.mouse_rs)
+				var lib_front: bool = opp.player.role == "L" and absf(opp.point.x) < 3.0
+				var auto_tech := "over" if (opp.speed <= OVER_OK and not lib_front) else "bump"
+				# Halten = Zuspieler stellt sich hin und geht in die Haltung, Loslassen = Zuspiel
+				if inp.dpad.length() > 0.5:
+					hp.prep = auto_tech
+				elif inp.bump_held:
+					hp.prep = "bump"
+				elif inp.over_held:
+					hp.prep = "over"
 				var trig := ""
-				if inp.dpad_down.length() > 0.5:
-					lane = _set_choice(inp.dpad_down)
+				if inp.dpad_up.length() > 0.5:
+					lane = _set_choice(inp.dpad_up)
 					trig = "auto"
-				elif inp.bump:
+				elif inp.bump_up:
 					trig = "bump"
-				elif inp.over:
+				elif inp.over_up:
 					trig = "over"
 				elif inp.fast or inp.quick:
 					trig = "over"
@@ -1692,14 +1729,14 @@ func _rally_input(inp: Dictionary) -> void:
 						tempo = "quick"
 					var tech := trig
 					if trig == "auto":
-						var lib_front: bool = opp.player.role == "L" and absf(opp.point.x) < 3.0
-						tech = "over" if (opp.speed <= OVER_OK and not lib_front) else "bump"
+						tech = auto_tech
 					_human_touch(tech, lane + "|" + tempo)
 			_:
 				hp.manual_dir = _stick_dir(mv)
-				if inp.bump:
+				hp.prep = "bump" if inp.bump_held else ("over" if inp.over_held else "")
+				if inp.bump_up:
 					_human_touch("bump", "")
-				elif inp.over:
+				elif inp.over_up:
 					_human_touch("over", "")
 	elif hp != null and not blockers[human_team].is_empty() and hp == blockers[human_team][0]:
 		var d := _stick_dir(mv)
@@ -1728,17 +1765,22 @@ func _rally_input(inp: Dictionary) -> void:
 
 func _attack_input(inp: Dictionary) -> void:
 	opp.rs = rs
-	if inp.hit_down and not charging:
+	var pl := opp.player
+	var t_jump := opp.t - JUMP_RISE
+	if inp.hit_down and not charging and not pl.has_jumped and not opp.pending:
 		_start_charge()
-	elif inp.hit_up and charging and not opp.pending:
-		var e := clock - opp.t
-		if e < -0.45:
+		opp.go = true  # Anlauf beginnt jetzt
+	elif charging and not opp.pending and (inp.hit_up or clock > t_jump + 0.3):
+		var e := clock - t_jump  # Loslassen = Absprung
+		if e < -0.6:
 			charging = false  # viel zu frueh losgelassen: neu aufladen
 			return
 		var c := _release_charge()
 		opp.power = clampf(c, 0.15, 1.0)
 		opp.over = c
 		opp.win_scale = hit_window_scale(opp.power, rs, false)
+		pl.jump()
+		pl.block_pose = false
 		_press(opp, e, "spike")
 
 
@@ -2725,7 +2767,8 @@ func _update_players(delta: float) -> void:
 			goal = srv.position
 		srv.target = goal
 		srv.run_speed = 5.0
-		if clock >= serve_ideal - JUMP_RISE and not srv.has_jumped:
+		var self_jump := serving_team == human_team and (charging or serve_jump_e > -90.0)
+		if clock >= serve_ideal - JUMP_RISE and not srv.has_jumped and not self_jump:
 			srv.jump()
 	if opp != null and not opp.done:
 		var pl := opp.player
@@ -2733,8 +2776,15 @@ func _update_players(delta: float) -> void:
 		if opp.kind == "attack":
 			var t_jump := opp.t - JUMP_RISE
 			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.05
-			pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
-			if clock >= t_jump and not pl.has_jumped:
+			var self_jump := opp.human and (opp.go or charging)
+			if self_jump:
+				# Anlauf ab dem Druck auf R2, Tempo so, dass er rechtzeitig am Absprungpunkt ist
+				pl.target = p
+				if not pl.airborne:
+					pl.run_speed = clampf(flat_dist(pl.position, p) / maxf(t_jump - clock, 0.25), 2.5, 7.0)
+			else:
+				pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
+			if clock >= t_jump and not pl.has_jumped and not self_jump:
 				pl.jump()
 				pl.block_pose = false
 				if not opp.human:
@@ -2880,9 +2930,10 @@ func _update_visuals() -> void:
 		var p := Vector3(opp.point.x, 0.03, opp.point.z)
 		_ring_target.position = p
 		_ring_timer.position = p
-		var remain := clampf((opp.t - clock) / 1.0, 0.0, 1.0)
+		var t_rel := release_time(opp)
+		var remain := clampf((t_rel - clock) / 1.0, 0.0, 1.0)
 		_ring_timer.scale = Vector3.ONE * (1.0 + remain * 2.5)
-		var near: bool = absf(opp.t - clock) <= windows(opp.kind)[0] * opp.win_scale
+		var near: bool = absf(t_rel - clock) <= windows(opp.kind)[0] * opp.win_scale
 		_ring_timer_mat.albedo_color = Color(0.3, 1.0, 0.3) if near else Color(1.0, 0.85, 0.1)
 		# Laufhilfe: gruen = Pritschen geht, orange = lieber baggern.
 		var tint := Color(1, 1, 1, 0.9)
@@ -2948,6 +2999,11 @@ func _draw_block_shadow() -> void:
 
 
 ## Kurzer Hinweis, was der Mensch gerade tun kann.
+## Wann der Mensch loslassen soll: beim Angriff im Absprung, sonst im Ballkontakt.
+func release_time(o: Opp) -> float:
+	return o.t - JUMP_RISE if o.kind == "attack" else o.t
+
+
 func hint() -> String:
 	match phase:
 		Phase.INTRO:
@@ -2963,22 +3019,24 @@ func hint() -> String:
 				return "Gleich Anpfiff … Trainerbank (Libero, Wechsel, Auszeit): T / Y"
 		Phase.TOSS:
 			if serving_team == human_team and not serve_done:
+				if serve_kind == 1:
+					return "R2 / E halten: Anwurf und Anlauf · loslassen = Absprung"
 				return "R2 / E halten zum Aufladen, loslassen, wenn der Ball oben ist"
 		Phase.RALLY:
 			if opp != null and not opp.done and opp.team == human_team:
 				match opp.kind:
 					"pass":
-						return "Annahme: A/Leertaste baggern · X/Q pritschen (Ring grün = Pritschen geht)"
+						return "Annahme: A/Leertaste (baggern) oder X/Q (pritschen) halten, loslassen wenn der Ring sich schließt"
 					"dig":
-						return "Abwehr! A/Leertaste baggern, wenn sich der Ring schließt"
+						return "Abwehr! A/Leertaste halten, loslassen wenn sich der Ring schließt"
 					"set":
 						if opp.player.role == "L" and absf(opp.point.x) < 3.0:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
-						return "Zuspiel: Steuerkreuz drücken = Zuspiel (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · R2 halten = schneller Ball · R1 = Dump · R1+R2 = Zuspieler schlägt"
+						return "Zuspiel: Steuerkreuz halten, loslassen = Zuspiel (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · R2 halten = schneller Ball · R1 = Dump · R1+R2 = Zuspieler schlägt"
 					"attack":
-						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
+						return "Angriff: R2/E drücken = Anlauf, loslassen = Absprung · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":
-						return "Ball rüberspielen: X/Q pritschen oder A/Leertaste baggern"
+						return "Ball rüberspielen: X/Q oder A/Leertaste halten und rechtzeitig loslassen"
 			if human_player() != null:
 				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände"
 			if opp != null and opp.team != human_team and opp.kind == "set":
