@@ -141,6 +141,8 @@ var commit_miss := [false, false]  # Block falsch gelesen: kommt zu spaet
 var commit_block := [false, false]  # Mensch hat vor dem Zuspiel den Block gestellt (Lesen)
 var read_hit := [false, false]  # Block richtig gelesen: mehr Kill-Chance
 var read_z := 0.0  # Netzposition (z), auf die der Mensch seinen Mittelblocker gestellt hat
+var _stick_lock_until := -1.0  # nach dem Wechsel vom Blocker zum Abwehrspieler: Stick kurz gesperrt
+var _need_neutral := false  # ... bis der linke Stick einmal losgelassen wurde
 var set_tempo := ["", ""]  # Tempo des letzten Zuspiels je Team (high, fast, quick)
 var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
 var trainer_wanted := false
@@ -1506,6 +1508,14 @@ func _try_team(team: int) -> bool:
 		o.win_scale *= 1.0 - 0.22 * hard_ball(o.speed)
 	if o.human and (kind == "pass" or kind == "dig" or kind == "free"):
 		o.win_scale *= cfg.get_v("receive_help") / 100.0
+	if o.human and idx == 0 and last_action == "block_touch":
+		# Nach eigenem Block mit Soft-Touch: die Steuerung springt auf den Abwehrspieler. Der
+		# noch gehaltene Block-Stick soll ihn nicht vom Ball weglaufen lassen, und das Fenster
+		# ist etwas groesser, weil der Wechsel ueberraschend kommt.
+		o.win_scale *= 1.35
+		_stick_lock_until = clock + 0.45
+		_need_neutral = true
+		popup(pl, "Dein Ball", Color(1.0, 0.9, 0.4))
 	if not o.human:
 		o.ai_e = ai_e(kind)
 		if kind == "dig":
@@ -1745,7 +1755,12 @@ func _rally_input(inp: Dictionary) -> void:
 						tech = auto_tech
 					_human_touch(tech, lane + "|" + tempo)
 			_:
-				hp.manual_dir = _stick_dir(mv)
+				if mv.length() < 0.3:
+					_need_neutral = false
+				if _need_neutral and clock < _stick_lock_until + 0.5:
+					hp.manual_dir = Vector3.ZERO  # laeuft von selbst zum Ball, bis du den Stick neu ansetzt
+				else:
+					hp.manual_dir = _stick_dir(mv)
 				hp.prep = "bump" if inp.bump_held else ("over" if inp.over_held else "")
 				if inp.bump_up:
 					_human_touch("bump", "")
@@ -2811,7 +2826,7 @@ func _update_players(delta: float) -> void:
 				var info := attack_shot(opp.team, opp.point, opp.rs, opp.power)
 				var tz: float = (info.target as Vector3).z
 				pl.lean = clampf((tz - pl.position.z) / 4.0, -1.0, 1.0)
-		elif opp.human and not assist:
+		elif opp.human and not assist and not (_need_neutral and clock < _stick_lock_until + 0.5):
 			pl.target = pl.position
 		elif opp.no_reach:
 			pl.target = opp.start_pos + (p - opp.start_pos).limit_length(opp.max_run)
