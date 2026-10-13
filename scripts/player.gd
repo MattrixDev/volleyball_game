@@ -760,10 +760,11 @@ func _target_pose() -> Dictionary:
 			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
 			_stiff = 45.0 if airborne else 28.0
 			if airborne:
-				# Beine in der Luft nur halb so weit nach hinten anwinkeln wie im Clip.
+				# Beine in der Luft kommen aus der eigenen, symmetrischen Haltung: der Clip
+				# schleudert oft ein Bein einzeln durch die Luft.
 				var own := _p_spike(rel)
 				for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
-					clip[k] = (clip[k] as Vector3).lerp(own.get(k, Vector3.ZERO), 0.5)
+					clip[k] = (clip[k] as Vector3).lerp(own.get(k, Vector3.ZERO), 0.95)
 			var wi := smoothstep(-1.1, -0.85, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
 			return _mix(run0, clip, wi)
 		if airborne:
@@ -800,7 +801,15 @@ func _target_pose() -> Dictionary:
 ## Pritschen: Meshy-Animation, falls vorhanden, sonst die eigene Haltung.
 func _p_over(rel: float) -> Dictionary:
 	var clip := _clip_at("kern_pritschen", rel, SET_KEYS)
-	return _p_set(rel) if clip.is_empty() else clip
+	if clip.is_empty():
+		return _p_set(rel)
+	# Eigene Pritschhaltung (Ellbogen aussen, tiefe Knie, Streckung aus den Beinen) dazumischen,
+	# damit man das Pritschen deutlich sieht.
+	var own := _p_set(rel)
+	for k in ["hips", "chest", "head", "hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+		if own.has(k):
+			clip[k] = (clip.get(k, Vector3.ZERO) as Vector3).lerp(own[k], 0.6)
+	return clip
 
 
 ## Baggern: Meshy-Kernanimation (gestreckte Arme, Schwung aus den Beinen), sonst eigene Haltung.
