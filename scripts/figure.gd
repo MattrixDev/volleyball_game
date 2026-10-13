@@ -355,9 +355,10 @@ func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> 
 	var wr: Node3D = j["wr_" + sd]
 	var s := -1.0 if sd == "l" else 1.0
 	var y0 := sh.rotation.y
-	# Ellbogen-Drehung um die anderen Achsen (Meshy-Animationen) bleibt erhalten.
-	var ey := el.rotation.y
-	var ez := el.rotation.z
+	# Ellbogen-Drehung um die anderen Achsen (Meshy-Animationen) wird mit w ausgeblendet:
+	# die IK beugt den Ellbogen nur als Scharnier (x) und kann den Arm so ganz strecken.
+	var ey := el.rotation.y * (1.0 - clampf(w, 0.0, 1.0))
+	var ez := el.rotation.z * (1.0 - clampf(w, 0.0, 1.0))
 	var v := Vector3(sh.rotation.x, sh.rotation.z * s, el.rotation.x)  # vor, seitlich, Ellbogen
 	var v_start := v
 	var lo := Vector3(minf(-0.6, v.x), minf(-0.5, v.y), minf(0.0, v.z))
@@ -385,6 +386,25 @@ func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> 
 	sh.rotation = Vector3(fin.x, y0, fin.y * s)
 	el.rotation = Vector3(fin.z, ey, ez)
 	return ((pos.call(fin) as Vector3) - target).length()
+
+
+## Hand ausrichten: fingers = Richtung der Finger, palm = wohin die Handflaeche zeigt (Welt).
+## In Ruhe zeigen die Finger nach unten und die Handflaeche zum Oberschenkel. w blendet ein.
+func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
+	if w <= 0.001 or fingers.length() < 0.01 or palm.length() < 0.01:
+		return
+	var s := -1.0 if sd == "l" else 1.0
+	var ly := -fingers.normalized()
+	var lx := (-s * palm).normalized()
+	lx = (lx - ly * lx.dot(ly)).normalized()  # rechtwinklig zu den Fingern machen
+	var lz := lx.cross(ly).normalized()
+	var want := Basis(lx, ly, lz)
+	var wr: Node3D = j["wr_" + sd]
+	var parent_b := (wr.get_parent() as Node3D).global_basis.orthonormalized()
+	var local := (parent_b.inverse() * want).orthonormalized()
+	var q0 := Quaternion.from_euler(wr.rotation)
+	var q1 := local.get_rotation_quaternion()
+	wr.rotation = q0.slerp(q1, clampf(w, 0.0, 1.0)).get_euler()
 
 
 func _ik_wrist(v: Vector3, sh: Node3D, el: Node3D, wr: Node3D, y0: float, s: float, ey := 0.0, ez := 0.0) -> Vector3:
