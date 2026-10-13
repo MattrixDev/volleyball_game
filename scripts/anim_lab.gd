@@ -23,6 +23,9 @@ var _open := {}  # "spieler|art" -> laufendes Ereignis
 var _prev := {}  # Spieler -> Werte aus dem letzten Takt
 var _contacts := []
 var _tick0 := -1
+var _trace_id := ""  # --lab-trace=A3:4440:4470 druckt Gelenke eines Spielers
+var _trace_f0 := 0
+var _trace_f1 := 0
 
 # --- Filmen
 var shots := []
@@ -57,6 +60,11 @@ func _ready() -> void:
 			out_dir = a.get_slice("=", 1)
 		elif a.begins_with("--lab-step="):
 			frame_step = maxi(1, int(a.get_slice("=", 1)))
+		elif a.begins_with("--lab-trace="):
+			var tr := a.get_slice("=", 1).split(":")
+			_trace_id = tr[0]
+			_trace_f0 = int(tr[1])
+			_trace_f1 = int(tr[2])
 		elif a.begins_with("--lab-end="):
 			_end_tick = int(a.get_slice("=", 1))
 	if match_node.has_signal("contact"):
@@ -122,7 +130,8 @@ func _check_player(p, tick: int, rally: bool) -> void:
 		cur["sole_" + sd] = sole[sd]
 		cur["soley_" + sd] = minf(h.y, t.y)
 	_flag(id, "floor_clip", tick, -low, low < T_CLIP, p)
-	_flag(id, "float", tick, low, ground and low > T_FLOAT and p.jump_h <= 0.0, p)
+	# Schweben: am Boden beide Fuesse in der Luft. Beim schnellen Laufen gibt es echte Flugphasen.
+	_flag(id, "float", tick, low, ground and low > T_FLOAT and p.jump_h <= 0.0 and p._run_amt < 0.5, p)
 	# Rutschende Fuesse: Fuss war und ist am Boden und bewegt sich waagerecht
 	for sd in ["l", "r"]:
 		var key: String = "sole_" + sd
@@ -187,6 +196,9 @@ func _check_player(p, tick: int, rally: bool) -> void:
 			worst_net = maxf(worst_net, -over)
 	_flag(id, "net_clip", tick, worst_net, worst_net > 0.04 and rally, p)
 	_prev[p] = cur
+	if _trace_id == id and tick >= _trace_f0 and tick <= _trace_f1:
+		var ft: Dictionary = p._feet
+		print("T%d %s sh_r=%s anim=%s phys=%s ikw=%s feet=%s" % [tick, id, f.j["sh_r"].quaternion, f._q.get("sh_r"), f._pq.get("sh_r"), f._ik_last.get("arm_r"), {"l": [ft.get("l", {}).get("on"), snappedf(ft.get("l", {}).get("w", 0), 0.01)], "r": [ft.get("r", {}).get("on"), snappedf(ft.get("r", {}).get("w", 0), 0.01)]}])
 
 
 func _on_contact(kind: String, pos: Vector3, _strength: float) -> void:

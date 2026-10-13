@@ -324,68 +324,208 @@ func pose(p: Dictionary, k := 1.0) -> void:
 		var target: Vector3 = p.get(name, Vector3.ZERO)
 		var n: Node3D = j[name]
 		n.rotation = n.rotation.lerp(target, k) if k < 1.0 else target
+	_reset_spring()
 	_sync()
+
+
+var _q := {}  # Gelenk -> Drehung der Animationsfeder (eigener Zustand, siehe pose_spring)
 
 
 ## Weich zur Pose federn (kritisch gedaempfte Feder je Gelenk): Bewegungen beschleunigen und
 ## bremsen natuerlich statt ruckartig. w = Steifigkeit (hoeher = schneller, ~18 ruhig, ~45 Schlag).
+## Gefedert wird als Drehung (Quaternion, immer der kurze Weg), nicht in Euler-Winkeln: so
+## springt kein Gelenk, wenn ein Winkel ueber 180 Grad umklappt. Die Feder hat einen eigenen
+## Zustand; was danach auf die Knoten kommt (Ball-IK, Fuesse, Physik), wirkt nicht zurueck.
 func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 	var steps := maxi(1, ceili(w * delta / 0.3))
 	var dt := delta / steps
 	for name in JOINTS:
-		var target: Vector3 = p.get(name, Vector3.ZERO)
+		var target := Quaternion.from_euler(p.get(name, Vector3.ZERO))
 		var n: Node3D = j[name]
-		var r := n.rotation
+		var q: Quaternion = _q.get(name, n.quaternion)
 		var v: Vector3 = _vel.get(name, Vector3.ZERO)
 		for i in steps:
-			v += (target - r) * (w * w * dt) - v * (2.0 * w * dt)
-			r += v * dt
-		n.rotation = r
+			var e := target * q.inverse()
+			if e.w < 0.0:
+				e = -e
+			var ang := e.get_angle()
+			var err := e.get_axis() * ang if ang > 1e-6 else Vector3.ZERO
+			v += err * (w * w * dt) - v * (2.0 * w * dt)
+			var vl := v.length()
+			if vl > 1e-7:
+				q = (Quaternion(v / vl, vl * dt) * q).normalized()
+		_q[name] = q
 		_vel[name] = v
+		n.quaternion = q
 	_sync()
 
 
+## Federzustand an die aktuelle Haltung der Knoten angleichen (nach pose(), Wiederholung).
+func _reset_spring() -> void:
+	for name in JOINTS:
+		_q[name] = (j[name] as Node3D).quaternion
+		_vel[name] = Vector3.ZERO
+		_pq[name] = _q[name]
+		_pv[name] = Vector3.ZERO
+
+
+# ---------------------------------------------------------------- Semi-Ragdoll
+# Die fertige Haltung (Animation + Ball-IK + feste Fuesse) ist nur das Ziel. Jedes Gelenk ist ein
+# Motor mit Masse, der diesem Ziel mit einer bestimmten Kraft folgt (gedaempfte Feder). Stoesse
+# (Ball, Landung, Zusammenprall) geben den Gelenken Schwung, weich gestellte Gelenke (soften)
+# geben nach und schwingen nach. Wo es genau sein muss (Hand am Ball, Fuss am Boden), haelt
+# pin das Gelenk auf dem Ziel. Alles im Physiktakt und ohne Zufall: Wiederholungen bleiben gleich.
+
+var _pq := {}  # Gelenk -> Drehung (Physik)
+var _pv := {}  # Gelenk -> Winkelgeschwindigkeit (rad/s, im Raum des Elterngelenks)
+var pin := {}  # Gelenk -> 0..1, nur fuer diesen Takt (vom Spieler gesetzt)
+var _soft := {}  # Gelenk -> [Faktor fuer die Kraft, verbleibende Zeit]
+var phys_k := 42.0  # Grundkraft: hoeher = folgt schneller (1/s)
+var phys_zeta := 0.75  # Daempfung: unter 1 schwingt ein wenig nach
+## Kraft je Gelenk (Anteil von phys_k): Rumpf und Kopf weicher, sie schwingen sichtbar nach.
+## Beine straff: ein nachhaengendes Schwungbein wuerde in den Boden treten.
+const PHYS_K := {"hips": 1.4, "chest": 0.75, "head": 0.55, "sh_l": 0.95, "sh_r": 0.95, "el_l": 0.9, "el_r": 0.9,
+	"wr_l": 0.8, "wr_r": 0.8, "hip_l": 3.0, "hip_r": 3.0, "kn_l": 3.0, "kn_r": 3.0, "an_l": 2.5, "an_r": 2.5}
+
+
+func physics_step(delta: float) -> void:
+	if delta <= 0.0:
+		return
+	for name in JOINTS:
+		var n: Node3D = j[name]
+		var t: Quaternion = n.quaternion
+		var q: Quaternion = _pq.get(name, t)
+		var v: Vector3 = _pv.get(name, Vector3.ZERO)
+		var k: float = phys_k * PHYS_K.get(name, 1.0)
+		var sf: Array = _soft.get(name, [])
+		if not sf.is_empty():
+			k *= lerpf(1.0, float(sf[0]), clampf(float(sf[1]) / 0.08, 0.0, 1.0))  # Ende weich ausblenden
+			sf[1] = float(sf[1]) - delta
+			if float(sf[1]) <= 0.0:
+				_soft.erase(name)
+		var steps := maxi(1, ceili(k * delta / 0.25))
+		var dt := delta / steps
+		for i in steps:
+			var e := t * q.inverse()
+			if e.w < 0.0:
+				e = -e
+			var ang := e.get_angle()
+			var err := e.get_axis() * ang if ang > 1e-6 else Vector3.ZERO
+			v += err * (k * k * dt) - v * (2.0 * phys_zeta * k * dt)
+			var vl := v.length()
+			if vl > 1e-7:
+				q = (Quaternion(v / vl, vl * dt) * q).normalized()
+		var pw: float = clampf(pin.get(name, 0.0), 0.0, 1.0)
+		if pw > 0.0:
+			q = q.slerp(t, pw)
+			v *= 1.0 - pw
+		_pq[name] = q
+		_pv[name] = v
+		n.quaternion = q
+	pin.clear()
+	_sync()
+
+
+## Schwung auf ein Gelenk geben (rad/s im Raum des Elterngelenks, z. B. Vector3(-3, 0, 0)).
+func impulse(name: String, w: Vector3) -> void:
+	_pv[name] = (_pv.get(name, Vector3.ZERO) as Vector3) + w
+
+
+## Ein Gelenk fuer eine Weile weicher stellen (factor < 1: gibt nach, schwingt laenger).
+func soften(name: String, factor: float, seconds: float) -> void:
+	_soft[name] = [factor, seconds]
+
+
+## Weltrichtung als Winkelgeschwindigkeit im Raum des Elterngelenks (fuer impulse()).
+func world_to_parent(name: String, w_world: Vector3) -> Vector3:
+	var par := (j[name] as Node3D).get_parent() as Node3D
+	return par.global_basis.orthonormalized().inverse() * w_world
+
+
 ## Arm so stellen, dass das Handgelenk an der Weltposition target sitzt (Ballkontakt).
-## Loest Schulter vor/seitlich und Ellbogen numerisch (gedaempfte Gauss-Newton-Schritte),
-## ausgehend von der aktuellen Haltung. w blendet zwischen Pose (0) und Ziel (1). Rueckgabe:
-## verbleibender Abstand in m (zum Pruefen, ob die Figur den Ball erreicht).
-func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> float:
-	var sh: Node3D = j["sh_" + sd]
-	var el: Node3D = j["el_" + sd]
-	var wr: Node3D = j["wr_" + sd]
-	var s := -1.0 if sd == "l" else 1.0
-	var y0 := sh.rotation.y
-	# Ellbogen-Drehung um die anderen Achsen (Meshy-Animationen) wird mit w ausgeblendet:
-	# die IK beugt den Ellbogen nur als Scharnier (x) und kann den Arm so ganz strecken.
-	var ey := el.rotation.y * (1.0 - clampf(w, 0.0, 1.0))
-	var ez := el.rotation.z * (1.0 - clampf(w, 0.0, 1.0))
-	var v := Vector3(sh.rotation.x, sh.rotation.z * s, el.rotation.x)  # vor, seitlich, Ellbogen
-	var v_start := v
-	var lo := Vector3(minf(-0.6, v.x), minf(-0.5, v.y), minf(0.0, v.z))
-	var hi := Vector3(maxf(3.1, v.x), maxf(2.0, v.y), maxf(2.6, v.z))
-	var pos := Callable(self, "_ik_wrist").bind(sh, el, wr, y0, s, ey, ez)
-	var err := 0.0
-	for it in iters:
-		var p0: Vector3 = pos.call(v)
-		var e := target - p0
-		err = e.length()
-		if err < 0.004:
-			break
-		var d := 0.02
-		var c0: Vector3 = ((pos.call(v + Vector3(d, 0, 0)) as Vector3) - p0) / d
-		var c1: Vector3 = ((pos.call(v + Vector3(0, d, 0)) as Vector3) - p0) / d
-		var c2: Vector3 = ((pos.call(v + Vector3(0, 0, d)) as Vector3) - p0) / d
-		var a := Basis(
-			Vector3(c0.dot(c0) + damp, c0.dot(c1), c0.dot(c2)),
-			Vector3(c1.dot(c0), c1.dot(c1) + damp, c1.dot(c2)),
-			Vector3(c2.dot(c0), c2.dot(c1), c2.dot(c2) + damp))
-		var step := a.inverse() * Vector3(c0.dot(e), c1.dot(e), c2.dot(e))
-		v += step.limit_length(0.6)
-		v = v.clamp(lo, hi)
-	var fin: Vector3 = v_start.lerp(v, clampf(w, 0.0, 1.0))
-	sh.rotation = Vector3(fin.x, y0, fin.y * s)
-	el.rotation = Vector3(fin.z, ey, ez)
-	return ((pos.call(fin) as Vector3) - target).length()
+## w blendet zwischen Pose (0) und Ziel (1). Rueckgabe: verbleibender Abstand in m.
+func ik_arm(sd: String, target: Vector3, w: float, iters := 10, damp := 0.02) -> float:
+	return _ik_limb("arm_" + sd, j["sh_" + sd], j["el_" + sd], j["wr_" + sd], target, w, iters, damp, 1.0, 0.0, 2.6)
+
+
+## Bein so stellen, dass das Sprunggelenk an der Weltposition target sitzt (Fuss steht fest).
+func ik_leg(sd: String, target: Vector3, w: float, iters := 10, damp := 0.005) -> float:
+	return _ik_limb("leg_" + sd, j["hip_" + sd], j["kn_" + sd], j["an_" + sd], target, w, iters, damp, -1.0, 0.03, 2.6)
+
+
+## Zwei-Glieder-IK, geometrisch statt geschaetzt: erst beugt das mittlere Gelenk (Ellbogen, Knie)
+## als Scharnier so weit, dass der Abstand Schulter/Huefte -> Ziel stimmt (Kosinussatz), dann
+## dreht das obere Gelenk das ganze Glied auf dem kuerzesten Weg zum Ziel. So bleibt die Ebene
+## des Glieds aus der Animation erhalten und nichts klappt um, auch nicht bei hoch erhobenem Arm
+## oder weit gebeugtem Knie. Alles als Drehungen (Quaternionen), keine Euler-Winkel.
+## flex: Beugerichtung (+1 Ellbogen nach vorn, -1 Knie nach hinten), lo/hi: erlaubte Beugung.
+func _ik_limb(_key: String, up: Node3D, mid: Node3D, end: Node3D, target: Vector3, w: float, _iters: int, _damp: float, flex: float, lo: float, hi: float) -> float:
+	var qu0 := up.quaternion
+	var qm0 := mid.quaternion
+	var u := up.global_position
+	var l1 := u.distance_to(mid.global_position)
+	var l2 := mid.global_position.distance_to(end.global_position)
+	var dist := clampf(u.distance_to(target), absf(l1 - l2) + 0.001, l1 + l2 - 0.0005)
+	# 1. Scharnier: zweimal messen und nachbeugen (die Achse liegt nicht ganz quer zum Glied)
+	for it in 2:
+		var cur := u.distance_to(end.global_position)
+		var cos_cur := clampf((l1 * l1 + l2 * l2 - cur * cur) / (2.0 * l1 * l2), -1.0, 1.0)
+		var cos_want := clampf((l1 * l1 + l2 * l2 - dist * dist) / (2.0 * l1 * l2), -1.0, 1.0)
+		var more_bend := acos(cos_cur) - acos(cos_want)  # > 0: weiter beugen
+		var d := mid.quaternion * Vector3.DOWN
+		var bend := atan2(-flex * d.z, -d.y)
+		more_bend = clampf(more_bend, lo - bend, hi - bend)
+		mid.quaternion = mid.quaternion * Quaternion(Vector3.RIGHT, flex * more_bend)
+	# 2. Oberes Gelenk dreht das Glied zum Ziel (Weltdrehung, ins Elterngelenk umgerechnet)
+	var from := end.global_position - u
+	var to := target - u
+	if from.length() > 0.001 and to.length() > 0.001:
+		var dq := _arc(from.normalized(), to.normalized())
+		var pr := ((up.get_parent() as Node3D).global_basis.orthonormalized()).get_rotation_quaternion()
+		up.quaternion = (pr.inverse() * dq * pr * up.quaternion).normalized()
+	# 3. Mit w zwischen Animation und Loesung mischen
+	var wk := clampf(w, 0.0, 1.0)
+	if wk < 1.0:
+		up.quaternion = qu0.slerp(up.quaternion, wk)
+		mid.quaternion = qm0.slerp(mid.quaternion, wk)
+	return end.global_position.distance_to(target)
+
+
+## Kuerzeste Drehung, die Richtung a auf Richtung b dreht.
+static func _arc(a: Vector3, b: Vector3) -> Quaternion:
+	var c := a.cross(b)
+	var d := a.dot(b)
+	if d < -0.9999:
+		var ax := a.cross(Vector3.UP if absf(a.y) < 0.9 else Vector3.RIGHT).normalized()
+		return Quaternion(ax, PI)
+	return Quaternion(c.x, c.y, c.z, 1.0 + d).normalized()
+
+
+## IK beginnt bei der Loesung aus dem letzten Takt (falls es einen gab): sonst landet die
+## Rechnung jedes Mal etwas anders und Arm oder Bein zittern.
+var _ik_last := {}  # Glied -> [Takt, Loesung]
+
+
+func _ik_warm(key: String, v: Vector3) -> Vector3:
+	var e: Array = _ik_last.get(key, [])
+	var f := Engine.get_physics_frames()
+	if not e.is_empty() and f - int(e[0]) <= 1:
+		return e[1]
+	return v
+
+
+func _ik_keep(key: String, v: Vector3) -> void:
+	_ik_last[key] = [Engine.get_physics_frames(), v]
+
+
+## Gelenk so drehen, dass seine Weltausrichtung want ist (w blendet ein). Fuer feste Fuesse.
+func orient_world(name: String, want: Basis, w: float) -> void:
+	if w <= 0.001:
+		return
+	var n: Node3D = j[name]
+	var parent_b := (n.get_parent() as Node3D).global_basis.orthonormalized()
+	var local := (parent_b.inverse() * want.orthonormalized()).get_rotation_quaternion()
+	n.quaternion = n.quaternion.slerp(local, clampf(w, 0.0, 1.0))
 
 
 ## Hand ausrichten: fingers = Richtung der Finger, palm = wohin die Handflaeche zeigt (Welt).
@@ -406,11 +546,6 @@ func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
 	var q1 := local.get_rotation_quaternion()
 	wr.rotation = q0.slerp(q1, clampf(w, 0.0, 1.0)).get_euler()
 
-
-func _ik_wrist(v: Vector3, sh: Node3D, el: Node3D, wr: Node3D, y0: float, s: float, ey := 0.0, ez := 0.0) -> Vector3:
-	sh.rotation = Vector3(v.x, y0, v.y * s)
-	el.rotation = Vector3(v.z, ey, ez)
-	return wr.global_position
 
 
 ## Tiefster Punkt des Koerpers (Hoehe ueber dem Boden der Figur). Nur Fuesse oder alles
@@ -446,4 +581,5 @@ func apply(c: Array) -> void:
 		j[JOINTS[i]].rotation = c[i]
 	root_node.position = c[JOINTS.size()]
 	root_node.rotation = c[JOINTS.size() + 1]
+	_reset_spring()
 	_sync()

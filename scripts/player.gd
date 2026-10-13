@@ -281,7 +281,6 @@ func _animate(delta: float) -> void:
 
 	_stiff = 20.0
 	var p := _target_pose()
-	_apply_sec(-_sec_applied)
 	fig.pose_spring(p, delta, _stiff)
 	_update_sec(delta)
 	# Hechten: ganzer Koerper kippt nach vorn.
@@ -312,7 +311,103 @@ func _animate(delta: float) -> void:
 		y = maxf(jump_h, -fig.lowest_point(false))
 	_root_y = maxf(lerpf(_root_y, y, clampf(delta * 25.0, 0.0, 1.0)), -low)
 	fig.root_node.position.y = _root_y
+	_plant_feet(delta)
 	_contact_ik()
+	fig.physics_step(delta)
+
+
+## Feste Fuesse: ein Fuss, der am Boden steht und sich (fast) nicht bewegt, wird an dieser
+## Stelle festgehalten, bis die Animation ihn anhebt oder er zu weit weg muss. Dann loest er sich
+## weich und macht dabei einen kleinen Schritt zur neuen Stelle. So gleitet kein Fuss ueber den
+## Boden, auch nicht beim Drehen auf der Stelle oder wenn Laufen und Schrittlaenge nicht genau passen.
+var _feet_miss := {}  # Seite -> wie weit das Bein den festen Punkt im letzten Takt verfehlt hat
+var _sole_t := {}  # Seite -> Sohlenhoehe der Animation in diesem Takt (vor den Korrekturen)
+var _feet := {}  # Seite -> {on, anchor (Sprunggelenk Welt), basis (Fuss Welt), w, from, from_b, last}
+const PLANT_H := 0.035  # Sohle so nah am Boden: Fuss steht
+const LIFT_H := 0.07  # Animation hebt den Fuss so weit an: loslassen
+const PLANT_V := 2.0  # m/s: schneller bewegte Fuesse werden nicht festgehalten
+const STRETCH := 0.2  # m: so weit darf der Fuss vom Ziel der Animation weg, dann Schritt
+const TWIST := 0.6  # rad: Koerper hat sich so weit gedreht, dann Schritt
+const STEP_T := 0.13  # s: Dauer des Loesens / kleinen Schritts
+
+
+func _plant_feet(delta: float) -> void:
+	var floor_y := global_position.y
+	var free := airborne or dive_timer > 0.0 or delta <= 0.0
+	if not free:
+		for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+			fig.pin[k] = 0.5  # am Boden folgen die Beine eng der Animation
+	for sd in ["l", "r"]:
+		var at: Transform3D = (fig.j["an_" + sd] as Node3D).global_transform
+		_sole_t[sd] = minf((at * Vector3(0, -0.097, 0.085)).y, (at * Vector3(0, -0.097, -0.225)).y) - floor_y
+	for sd in ["l", "r"]:
+		var an: Node3D = fig.j["an_" + sd]
+		var tgt: Vector3 = an.global_position  # wo die Animation das Sprunggelenk haben will
+		var tb: Basis = an.global_basis.orthonormalized()
+		var sole_y := minf((an.global_transform * Vector3(0, -0.097, 0.085)).y, (an.global_transform * Vector3(0, -0.097, -0.225)).y) - floor_y
+		var f: Dictionary = _feet.get(sd, {})
+		var vel := 0.0
+		if f.has("last"):
+			var dv: Vector3 = tgt - (f["last"] as Vector3)
+			vel = Vector2(dv.x, dv.z).length() / delta
+		if vel > 15.0 or f.is_empty():
+			f = {"on": false, "w": 0.0}  # Teleport (neue Aufstellung) oder erster Takt
+		f["last"] = tgt
+		var shown: Vector3 = tgt
+		if f.on:
+			var a: Vector3 = f.anchor
+			var dxz := Vector2(tgt.x - a.x, tgt.z - a.z).length()
+			var twist: float = absf(((f.basis as Basis).get_rotation_quaternion() * tb.get_rotation_quaternion().inverse()).get_angle())
+			# Bein reicht nicht mehr hin (Koerper ist weiter): Schritt statt Strecken oder Einsinken
+			var short: float = _feet_miss.get(sd, 0.0)
+			# Nachstellschritt nur, wenn der andere Fuss steht (nie beide zugleich in der Luft),
+			# ausser der Fuss ist schon sehr weit weg
+			var other: Dictionary = _feet.get("r" if sd == "l" else "l", {})
+			var forced := dxz > STRETCH or twist > TWIST or short > 0.02
+			if forced and not other.get("on", false) and dxz < STRETCH * 2.0 and short <= 0.02:
+				forced = false
+			if free or sole_y > LIFT_H or forced:
+				f.on = false  # anheben (Animation) oder Nachstellschritt
+			f.from = a
+			f.from_b = f.basis
+		# aufsetzen: Fuss steht fast still, oder er beruehrt den Boden (Fersenaufsatz beim Laufen,
+		# da bewegt sich der Fuss der Animation noch nach vorn und wuerde sonst rutschen)
+		if not f.on and not free and sole_y < PLANT_H and (vel < PLANT_V or sole_y < 0.012) and float(f.w) <= 0.0:
+			f.on = true
+			f.anchor = tgt
+			f.basis = tb
+		if f.on:
+			f.w = 1.0
+			shown = f.anchor
+			_pin_foot(sd, f.anchor, f.basis, 1.0)
+		elif float(f.w) > 0.0:
+			# loesen: vom alten Standpunkt weich zur Animation, beim Schritt mit kleinem Bogen
+			f.w = maxf(float(f.w) - delta / STEP_T, 0.0)
+			var k := smoothstep(0.0, 1.0, float(f.w))
+			var from: Vector3 = f.from
+			var pos: Vector3 = tgt.lerp(from, k)
+			# immer im kleinen Bogen (nie ueber den Boden schleifen), hoeher bei weitem Schritt
+			var dist := Vector2(tgt.x - from.x, tgt.z - from.z).length()
+			pos.y = maxf(pos.y, from.y) + clampf(dist * 0.45, 0.04, 0.09) * sqrt(sin(k * PI))
+			_pin_foot(sd, pos, (f.from_b as Basis).slerp(tb, 1.0 - k), 1.0)
+			# erst wieder aufsetzen, wenn das Loesen fertig ist
+			if f.w <= 0.0:
+				f.erase("from")
+		elif not free and vel > PLANT_V and sole_y < 0.03:
+			# Schwungbein streift in der Animation fast den Boden: etwas hoeher fuehren statt schleifen
+			_pin_foot(sd, tgt + Vector3.UP * (0.03 - sole_y), tb, 1.0)
+		_feet[sd] = f
+
+
+func _pin_foot(sd: String, pos: Vector3, b: Basis, w: float) -> float:
+	var miss := fig.ik_leg(sd, pos, w)
+	_feet_miss[sd] = miss
+	fig.orient_world("an_" + sd, b, w)
+	for k in ["hip_", "kn_", "an_"]:
+		fig.pin[k + sd] = w
+	fig.pin["hips"] = maxf(fig.pin.get("hips", 0.0), w)  # sonst verschiebt die Huefte den Fuss
+	fig._sync()
+	return miss
 
 
 ## Weiche Federung: eine nachschwingende Feder, angestossen von Landung, Absprung und
@@ -452,11 +547,14 @@ func _contact_ik() -> void:
 		var ws := wl if (sd == "l" and wl >= 0.0) else w
 		if ws <= 0.001:
 			continue
+		# Hand am Ball: ganze Kette von der Huefte bis zur Hand haelt das Ziel
+		for k in ["sh_" + sd, "el_" + sd, "wr_" + sd, "chest", "hips"]:
+			fig.pin[k] = maxf(fig.pin.get(k, 0.0), smoothstep(0.3, 0.9, ws))
 		var res: float
 		if over_set:
-			res = fig.ik_arm(sd, tg[sd], ws, 8, 0.12)
+			res = fig.ik_arm(sd, tg[sd], ws, 14, 0.12)
 		else:
-			res = fig.ik_arm(sd, tg[sd], ws)
+			res = fig.ik_arm(sd, tg[sd], ws, 10)
 		if sd == "r" or over_set:
 			miss = maxf(miss, res * ws)
 	# In der Luft: fehlt dem gestreckten Arm noch etwas bis zum Ball, streckt sich der ganze
