@@ -1106,6 +1106,7 @@ func _physics_process(delta: float) -> void:
 			_ai_actions()
 			_step_ball(delta)
 		Phase.POINT_PAUSE:
+			_step_dead_ball(delta)
 			# A / Leertaste: gleich weiter (nach einem kurzen Moment fuer den Jubel)
 			var skip: bool = start and clock >= _rally_end + 0.5
 			if skip:
@@ -1229,6 +1230,7 @@ func _end_replay() -> void:
 	ball.position = _replay_live[k]
 	reset_physics_interpolation()
 	_replay = []
+	ball_vel = Vector3.ZERO
 	phase = Phase.POINT_PAUSE
 	pause_until = clock + 0.6
 	if hud:
@@ -2449,6 +2451,46 @@ func _step_ball(delta: float) -> void:
 		_on_ball_landed()
 
 
+## Nach dem Punkt rollt und springt der Ball weiter, statt auf dem Boden festzukleben.
+func _step_dead_ball(delta: float) -> void:
+	var grounded := ball.position.y <= R + 0.001
+	if grounded and ball_vel.length() < 0.05:
+		ball_vel = Vector3.ZERO
+		return
+	var res := Ballistics.advance(ball.position, ball_vel, delta, G)
+	var pos: Vector3 = res[0]
+	var vel: Vector3 = res[1]
+	if prev_cross_net(ball.position.x, pos.x) and pos.y < NET_H + R:
+		vel.x = -vel.x * 0.2
+		pos.x = signf(ball.position.x) * (R + 0.02)
+	if absf(pos.x) > 14.0:
+		pos.x = signf(pos.x) * 14.0
+		vel.x = -vel.x * 0.4
+	if absf(pos.z) > 8.5:
+		pos.z = signf(pos.z) * 8.5
+		vel.z = -vel.z * 0.4
+	if pos.y <= R:
+		pos.y = R
+		if vel.y < -1.5:
+			_fx("floor", pos, clampf(-vel.y / 14.0, 0.15, 0.6))
+		vel.y = minf(-vel.y * 0.62, 7.0)
+		if vel.y < 1.3:
+			vel.y = 0.0
+		vel.x *= 0.82
+		vel.z *= 0.82
+		if vel.y == 0.0:
+			var k := maxf(0.0, 1.0 - 2.2 * delta)
+			vel.x *= k
+			vel.z *= k
+	ball.position = pos
+	ball_vel = vel
+	ball_mesh.rotate(Vector3.UP.cross(vel).normalized() if Vector3.UP.cross(vel).length() > 0.05 else Vector3.RIGHT, vel.length() * delta / 0.14 * 0.4)
+
+
+func prev_cross_net(x0: float, x1: float) -> bool:
+	return x0 != 0.0 and signf(x0) != signf(x1)
+
+
 func _try_block(c: Vector3, prev: Vector3) -> bool:
 	if last_action == "serve" or last_action == "toss":
 		return false  # Aufschlag blocken ist verboten
@@ -2771,7 +2813,7 @@ func _update_players(delta: float) -> void:
 			if phase == Phase.RALLY:
 				shade = clampf((ball.position.z) * 0.15, -0.6, 0.6)
 			for pl in players[t]:
-				if not (phase == Phase.PRE_SERVE and pl == server()):
+				if not ((phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done)) and pl == server()):
 					pl.target = formation_pos(t, pl, form) + Vector3(0.0, 0.0, shade)
 			# Gelesener Block: der Mittelblocker bleibt dort stehen, wo der Mensch ihn hingestellt hat.
 			if t == human_team and commit_block[t]:
@@ -2802,6 +2844,10 @@ func _update_players(delta: float) -> void:
 		var srv0 := server()
 		var back := 11.4 if serve_kind == 1 else 10.0
 		srv0.target = Vector3(side_of(serving_team) * back, 0.0, srv0.position.z)
+	# Standaufschlag: der Aufschlaeger bleibt waehrend des Wurfs stehen (sonst lief er zur Formationsposition).
+	if phase == Phase.TOSS and serve_kind == 0 and not serve_done:
+		var srv_stand := server()
+		srv_stand.target = srv_stand.position
 	# Sprungaufschlag: Anlauf unter den Ball und Absprung hinter der Grundlinie.
 	if phase == Phase.TOSS and serve_kind == 1 and not serve_done:
 		var srv := server()
