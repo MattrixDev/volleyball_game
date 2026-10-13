@@ -10,7 +10,7 @@ signal to_title
 const GROUPS := [
 	["Zeitlupe", ["slow_serve", "slow_receive", "slow_set", "slow_attack", "slow_block"]],
 	["Ton", ["whistle", "sfx", "crowd"]],
-	["Hilfen und Gegner", ["receive_help", "stick_hold", "ai_defense", "ai_block", "faults"]],
+	["Hilfen und Gegner", ["receive_help", "input_lag", "stick_hold", "ai_defense", "ai_block", "faults"]],
 	["Regeln", ["serve_time"]],
 ]
 

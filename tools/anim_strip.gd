@@ -4,6 +4,10 @@ var frames := 0
 var figs := []
 
 func _init() -> void:
+	pass
+
+
+func _setup() -> void:
 	var args := OS.get_cmdline_user_args()
 	var kind: String = args[1] if args.size() > 1 else "spike"
 	var root3 := Node3D.new()
@@ -105,6 +109,9 @@ func _init() -> void:
 
 func _process(_delta: float) -> bool:
 	frames += 1
+	if frames == 1:
+		_setup()
+		return false
 	for f in figs:
 		f._sync()
 	if frames == 10:

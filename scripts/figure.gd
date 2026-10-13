@@ -1,7 +1,7 @@
 class_name HumanFigure
 extends Node3D
-## Spielerfigur: das in Blender gebaute Modell (assets/models/player.glb, erzeugt von
-## tools/blender/build_player.py) mit Skelett. Die Posen werden wie bisher als Gelenkwinkel
+## Spielerfigur: Mattis' Meshy-Modell (assets/models/player.glb, Schiedsrichter referee.glb,
+## erzeugt von tools/blender/build_figure_rigged.py) mit Skelett. Die Posen werden wie bisher als Gelenkwinkel
 ## gesetzt (siehe pose()); unsichtbare Gelenk-Knoten tragen die Winkel und jedes Bild werden
 ## die Knochen des Modells danach ausgerichtet. Blickrichtung ist lokal -Z.
 
@@ -101,6 +101,7 @@ func _joint(name: String, parent: Node3D, pos: Vector3) -> Node3D:
 
 
 const MODEL := preload("res://assets/models/player.glb")
+const REF_MODEL := preload("res://assets/models/referee.glb")
 const MAT_NAMES := ["skin", "jersey", "panel", "collar", "logo", "shorts", "socks", "pads", "shoes", "accent", "sole", "trousers", "hair"]
 const DEFAULTS := {
 	"skin": Color(0.86, 0.66, 0.52), "hair": Color(0.3, 0.2, 0.13), "jersey": Color(0.15, 0.19, 0.32),
@@ -111,6 +112,8 @@ const DEFAULTS := {
 }
 const HAIR_STYLES := 4
 static var _markers := {}
+static var _clips := {}  # Animationen aus Meshy (player_clips.json): Name -> {fps, frames}
+static var _clip_off := {}  # Name -> Phasenversatz, damit das linke Bein bei u = 0,25 vorn ist
 
 var _skel: Skeleton3D
 var _bone := {}  # Gelenkname -> Knochenindex
@@ -143,7 +146,7 @@ func build(colors: Dictionary, with_pads := true, hair_style := 0, official := f
 	root_node = Node3D.new()
 	add_child(root_node)
 	root_node.scale = Vector3.ONE * height
-	var model: Node3D = MODEL.instantiate()
+	var model: Node3D = (REF_MODEL if official else MODEL).instantiate()
 	root_node.add_child(model)
 	_skel = model.find_child("Skeleton3D", true, false)
 	for mi in model.find_children("*", "MeshInstance3D", true, false):
@@ -231,6 +234,61 @@ static func markers() -> Dictionary:
 	return _markers
 
 
+## Pose aus einer Meshy-Animation (Gehen, Laufen), u = 0..1 durch einen Doppelschritt.
+## Bei u = 0,25 ist das linke Bein vorn (wie sin(Phase) in VPlayer._p_run). Leer, wenn es die
+## Animation nicht gibt.
+## u: Anteil 0..1 der Animation. loop = true: Schleife (Laufen), Phase so verschoben, dass das
+## linke Bein bei u = 0,25 vorn ist. loop = false: einmal von vorn bis hinten (Schlag, Jubel).
+static func clip_pose(clip: String, u: float, loop := true) -> Dictionary:
+	if _clips.is_empty():
+		var f := FileAccess.open("res://assets/models/player_clips.json", FileAccess.READ)
+		_clips = JSON.parse_string(f.get_as_text()) if f else {"_": {}}
+		for name in _clips:
+			var fr: Array = _clips[name].get("frames", [])
+			if fr.size() < 2:
+				continue
+			var best := 0
+			var best_x := -INF
+			for i in fr.size() - 1:
+				var x := _clip_euler(fr[i], "hip_l").x
+				if x > best_x:
+					best_x = x
+					best = i
+			_clip_off[name] = float(best) / float(fr.size() - 1) - 0.25
+	if not _clips.has(clip):
+		return {}
+	var frames: Array = _clips[clip].frames
+	var n := frames.size() - 1  # Schleife: letztes Bild = erstes
+	var i0: int
+	var i1: int
+	var w: float
+	if loop:
+		var t := fposmod(u + _clip_off.get(clip, 0.0), 1.0) * n
+		i0 = int(t) % n
+		i1 = (i0 + 1) % n
+		w = t - floorf(t)
+	else:
+		var t := clampf(u, 0.0, 1.0) * n
+		i0 = mini(int(t), n)
+		i1 = mini(i0 + 1, n)
+		w = t - floorf(t)
+	var out := {}
+	for name in JOINTS:
+		var q0 := _clip_quat(frames[i0], name)
+		var q1 := _clip_quat(frames[i1], name)
+		out[name] = Basis(q0.slerp(q1, w)).get_euler()
+	return out
+
+
+static func _clip_quat(fr: Dictionary, name: String) -> Quaternion:
+	var a: Array = fr[name]
+	return Quaternion(a[0], a[1], a[2], a[3]).normalized()
+
+
+static func _clip_euler(fr: Dictionary, name: String) -> Vector3:
+	return Basis(_clip_quat(fr, name)).get_euler()
+
+
 func _num_label(key: String, px: float) -> Label3D:
 	var mk: Dictionary = markers().get(key, {})
 	if mk.is_empty() or not j.has(mk.bone):
@@ -297,9 +355,15 @@ func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> 
 	var wr: Node3D = j["wr_" + sd]
 	var s := -1.0 if sd == "l" else 1.0
 	var y0 := sh.rotation.y
+	# Ellbogen-Drehung um die anderen Achsen (Meshy-Animationen) wird mit w ausgeblendet:
+	# die IK beugt den Ellbogen nur als Scharnier (x) und kann den Arm so ganz strecken.
+	var ey := el.rotation.y * (1.0 - clampf(w, 0.0, 1.0))
+	var ez := el.rotation.z * (1.0 - clampf(w, 0.0, 1.0))
 	var v := Vector3(sh.rotation.x, sh.rotation.z * s, el.rotation.x)  # vor, seitlich, Ellbogen
 	var v_start := v
-	var pos := Callable(self, "_ik_wrist").bind(sh, el, wr, y0, s)
+	var lo := Vector3(minf(-0.6, v.x), minf(-0.5, v.y), minf(0.0, v.z))
+	var hi := Vector3(maxf(3.1, v.x), maxf(2.0, v.y), maxf(2.6, v.z))
+	var pos := Callable(self, "_ik_wrist").bind(sh, el, wr, y0, s, ey, ez)
 	var err := 0.0
 	for it in iters:
 		var p0: Vector3 = pos.call(v)
@@ -317,16 +381,35 @@ func ik_arm(sd: String, target: Vector3, w: float, iters := 4, damp := 0.02) -> 
 			Vector3(c2.dot(c0), c2.dot(c1), c2.dot(c2) + damp))
 		var step := a.inverse() * Vector3(c0.dot(e), c1.dot(e), c2.dot(e))
 		v += step.limit_length(0.6)
-		v = Vector3(clampf(v.x, -0.6, 3.1), clampf(v.y, -0.5, 2.0), clampf(v.z, 0.0, 2.6))
+		v = v.clamp(lo, hi)
 	var fin: Vector3 = v_start.lerp(v, clampf(w, 0.0, 1.0))
 	sh.rotation = Vector3(fin.x, y0, fin.y * s)
-	el.rotation = Vector3(fin.z, 0.0, 0.0)
+	el.rotation = Vector3(fin.z, ey, ez)
 	return ((pos.call(fin) as Vector3) - target).length()
 
 
-func _ik_wrist(v: Vector3, sh: Node3D, el: Node3D, wr: Node3D, y0: float, s: float) -> Vector3:
+## Hand ausrichten: fingers = Richtung der Finger, palm = wohin die Handflaeche zeigt (Welt).
+## In Ruhe zeigen die Finger nach unten und die Handflaeche zum Oberschenkel. w blendet ein.
+func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
+	if w <= 0.001 or fingers.length() < 0.01 or palm.length() < 0.01:
+		return
+	var s := -1.0 if sd == "l" else 1.0
+	var ly := -fingers.normalized()
+	var lx := (-s * palm).normalized()
+	lx = (lx - ly * lx.dot(ly)).normalized()  # rechtwinklig zu den Fingern machen
+	var lz := lx.cross(ly).normalized()
+	var want := Basis(lx, ly, lz)
+	var wr: Node3D = j["wr_" + sd]
+	var parent_b := (wr.get_parent() as Node3D).global_basis.orthonormalized()
+	var local := (parent_b.inverse() * want).orthonormalized()
+	var q0 := Quaternion.from_euler(wr.rotation)
+	var q1 := local.get_rotation_quaternion()
+	wr.rotation = q0.slerp(q1, clampf(w, 0.0, 1.0)).get_euler()
+
+
+func _ik_wrist(v: Vector3, sh: Node3D, el: Node3D, wr: Node3D, y0: float, s: float, ey := 0.0, ez := 0.0) -> Vector3:
 	sh.rotation = Vector3(v.x, y0, v.y * s)
-	el.rotation = Vector3(v.z, 0.0, 0.0)
+	el.rotation = Vector3(v.z, ey, ez)
 	return wr.global_position
 
 

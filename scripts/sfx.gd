@@ -62,7 +62,7 @@ func _db(vol: float, gain: float) -> float:
 
 
 ## Kurzer Ballkontakt; strength 0..1 macht ihn lauter und etwas tiefer.
-func play(name: String, strength := 0.6) -> void:
+func play(name: String, strength := 0.6, pitch := 0.0) -> void:
 	var st := _pick(name)
 	if st == null or sfx_volume <= 0.0:
 		return
@@ -70,7 +70,7 @@ func play(name: String, strength := 0.6) -> void:
 	_next = (_next + 1) % _pool.size()
 	p.stream = st
 	p.volume_db = _db(sfx_volume, lerpf(0.45, 1.0, clampf(strength, 0.0, 1.0)))
-	p.pitch_scale = _rng.randf_range(0.96, 1.04)
+	p.pitch_scale = pitch if pitch > 0.0 else _rng.randf_range(0.96, 1.04)
 	p.play()
 
 

@@ -141,6 +141,8 @@ var commit_miss := [false, false]  # Block falsch gelesen: kommt zu spaet
 var commit_block := [false, false]  # Mensch hat vor dem Zuspiel den Block gestellt (Lesen)
 var read_hit := [false, false]  # Block richtig gelesen: mehr Kill-Chance
 var read_z := 0.0  # Netzposition (z), auf die der Mensch seinen Mittelblocker gestellt hat
+var _stick_lock_until := -1.0  # nach dem Wechsel vom Blocker zum Abwehrspieler: Stick kurz gesperrt
+var _need_neutral := false  # ... bis der linke Stick einmal losgelassen wurde
 var set_tempo := ["", ""]  # Tempo des letzten Zuspiels je Team (high, fast, quick)
 var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
 var trainer_wanted := false
@@ -188,6 +190,8 @@ var cam_mode := ""
 var cam_subject: VPlayer = null
 var _slow_tail_until := 0.0
 var _hitstop_left := 0.0
+var _hitstop_scale := SLOW  # wie langsam der Treffer-Stopp ist
+var _time_scale := 1.0  # gleitet weich zur gewuenschten Zeitlupe
 
 var _ring_target: MeshInstance3D
 var _ring_target_mat: StandardMaterial3D
@@ -486,16 +490,36 @@ func flat_dist(a: Vector3, b: Vector3) -> float:
 
 func windows(kind: String) -> Array:
 	if kind == "dig":
-		return [0.06, 0.12, 0.2]
+		return [0.065, 0.13, 0.2]
 	if kind == "serve":
-		return [0.05, 0.1, 0.17]
-	return [0.045, 0.09, 0.15]
+		return [0.06, 0.11, 0.18]
+	return [0.055, 0.1, 0.16]
 
 
 ## Timing-Fehler ausserhalb des Perfekt-Fensters; nur der verschiebt den Ball.
 func excess(e: float, kind: String, scale := 1.0) -> float:
 	var w0: float = windows(kind)[0] * scale
 	return signf(e) * maxf(0.0, absf(e) - w0)
+
+
+## Zeitpunkt eines Tastendrucks des Menschen: Bildschirm und Controller zeigen alles etwas
+## spaeter, als es passiert. Der Timing-Ausgleich (Menue) rechnet diese Verzoegerung heraus.
+func human_clock() -> float:
+	return clock - lag_game()
+
+
+## Eingabe-Verzoegerung in Spielzeit (in der Zeitlupe entsprechend kleiner).
+func lag_game() -> float:
+	if autopress:
+		return 0.0  # Testmodus: simulierte Eingaben haben keine Verzoegerung
+	return cfg.get_v("input_lag") / 1000.0 * Engine.time_scale
+
+
+## Kurzer Hinweis, ob zu frueh oder zu spaet (damit man sein Timing lernt).
+func timing_hint(e: float, q: int) -> String:
+	if q == Q.PERFECT or q == Q.MISS:
+		return ""
+	return " · früh" if e < 0.0 else " · spät"
 
 
 func classify(e: float, kind: String, scale := 1.0) -> int:
@@ -512,10 +536,10 @@ func classify(e: float, kind: String, scale := 1.0) -> int:
 
 ## Mehr Kraft und ein Trefferpunkt weit weg von der Mitte machen das Timing-Fenster enger.
 func hit_window_scale(power: float, contact: Vector2, jump: bool) -> float:
-	var s := lerpf(1.35, 0.85, clampf(power, 0.0, 1.0))
-	s *= 1.0 - 0.2 * minf(contact.length(), 1.0)
+	var s := lerpf(1.35, 0.95, clampf(power, 0.0, 1.0))
+	s *= 1.0 - 0.12 * minf(contact.length(), 1.0)
 	if jump:
-		s *= 0.9
+		s *= 0.95
 	return s
 
 
@@ -676,7 +700,9 @@ func start_rally() -> void:
 		var form := "serve" if t == serving_team else "receive"
 		for pl in players[t]:
 			var p := formation_pos(t, pl, form)
-			pl.position = p
+			# Wer nah genug steht, laeuft in die Aufstellung, statt hinzuspringen.
+			if flat_dist(pl.position, p) > 4.5 or autoplay:
+				pl.position = p
 			pl.target = p
 			pl.reset_state()
 	if check_rules:
@@ -684,7 +710,7 @@ func start_rally() -> void:
 	ball_vel = Vector3.ZERO
 	_hold_ball_at_server()
 	reset_physics_interpolation()
-	pause_until = clock + (0.15 if autoplay else 1.2)
+	pause_until = clock + (0.15 if autoplay else 0.9)
 	if serving_team == human_team:
 		serve_aim = Vector2(5.5, 0.0)
 	else:
@@ -948,7 +974,8 @@ func _hold_ball_at_server() -> void:
 
 
 func _empty_input() -> Dictionary:
-	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "tempo_rs": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_down": false, "dump_held": false,
+	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "dpad_down": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_held": false,
+		"bump_held": false, "over_held": false, "bump_up": false, "over_up": false, "dpad_up": Vector2.ZERO,
 		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false}
 
 
@@ -957,18 +984,25 @@ func _read_input() -> Dictionary:
 	d.mv = Input.get_vector("move_left", "move_right", "move_down", "move_up")
 	var stick := _held_stick(Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up"))
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
-	d.tempo_rs = stick  # rechter Stick (ohne Maus): Tempo des Zuspiels
 	d.mouse_rs = mouse_rs
-	d.dump_down = Input.is_action_just_pressed("set_dump")
 	d.dump_held = Input.is_action_pressed("set_dump")
 	d.bump = Input.is_action_just_pressed("bump")
 	d.over = Input.is_action_just_pressed("overhand")
-	var dp := Input.get_vector("set_dir_left", "set_dir_right", "set_dir_down", "set_dir_up")
-	if dp.length() > 0.5:
-		_set_dir = dp
-		_set_dir_ms = Time.get_ticks_msec()
-	if Time.get_ticks_msec() - _set_dir_ms < 2500:
-		d.dpad = _set_dir
+	# Halten = vorbereiten (Haltung), Loslassen = Ballkontakt
+	d.bump_held = Input.is_action_pressed("bump")
+	d.over_held = Input.is_action_pressed("overhand")
+	d.bump_up = Input.is_action_just_released("bump")
+	d.over_up = Input.is_action_just_released("overhand")
+	d.dpad = Input.get_vector("set_dir_left", "set_dir_right", "set_dir_down", "set_dir_up")
+	if d.dpad.length() > 0.5:
+		_dpad_last = d.dpad
+	elif _dpad_last != Vector2.ZERO:
+		d.dpad_up = _dpad_last  # Steuerkreuz losgelassen: Zuspiel in die zuletzt gehaltene Richtung
+		_dpad_last = Vector2.ZERO
+	# Steuerkreuz neu gedrueckt: das ist das Zuspiel selbst (Richtung = Taste)
+	d.dpad_down = Vector2(
+		float(Input.is_action_just_pressed("set_dir_right")) - float(Input.is_action_just_pressed("set_dir_left")),
+		float(Input.is_action_just_pressed("set_dir_up")) - float(Input.is_action_just_pressed("set_dir_down")))
 	d.fast = Input.is_action_just_pressed("set_fast")
 	d.quick = Input.is_action_just_pressed("set_quick")
 	d.hit_down = Input.is_action_just_pressed("hit")
@@ -988,13 +1022,9 @@ func _read_input() -> Dictionary:
 ## Der rechte Stick federt beim Loslassen zur Mitte zurueck. Damit die gewaehlte
 ## Schlagrichtung dabei nicht verloren geht, gilt der letzte deutliche Ausschlag
 ## noch eine einstellbare Zeit lang weiter ("Stick nachhalten").
-var _combo_t := -1.0  # R1/R2 gedrueckt: Auswertung nach kurzer Wartezeit
-var _combo_r1 := false
-var _combo_r2 := false
-var _set_dir := Vector2.ZERO  # zuletzt am Steuerkreuz gewaehlte Zuspiel-Richtung (bleibt kurz gemerkt)
-var _set_dir_ms := -10000
 var _rs_hold := Vector2.ZERO
 var _rs_hold_ms := 0
+var _dpad_last := Vector2.ZERO  # zuletzt gehaltene Steuerkreuz-Richtung
 
 
 func _held_stick(stick: Vector2) -> Vector2:
@@ -1063,8 +1093,8 @@ func _physics_process(delta: float) -> void:
 						_start_charge()
 					elif inp.hit_up and charging:
 						var c := _release_charge()
-						_serve_hit(clock - serve_ideal, minf(c, 1.0), serve_contact, c)
-					elif clock > serve_ideal + windows("serve")[2] * 1.4 + 0.03:
+						_serve_hit(human_clock() - serve_ideal, minf(c, 1.0), serve_contact, c)
+					elif clock > serve_ideal + windows("serve")[2] * 1.4 + 0.03 + lag_game():
 						serve_done = true
 						charging = false
 						popup(server(), "Zu spät", Q_COLOR[Q.MISS])
@@ -1076,9 +1106,14 @@ func _physics_process(delta: float) -> void:
 			_ai_actions()
 			_step_ball(delta)
 		Phase.POINT_PAUSE:
+			_step_dead_ball(delta)
+			# A / Leertaste: gleich weiter (nach einem kurzen Moment fuer den Jubel)
+			var skip: bool = start and clock >= _rally_end + 0.5
+			if skip:
+				replay_pending = false
 			if replay_pending and clock >= _rally_end + 1.1:
 				_start_replay()
-			elif clock >= pause_until:
+			elif clock >= pause_until or skip:
 				if side_change_pending:
 					_do_side_change()
 				else:
@@ -1195,6 +1230,7 @@ func _end_replay() -> void:
 	ball.position = _replay_live[k]
 	reset_physics_interpolation()
 	_replay = []
+	ball_vel = Vector3.ZERO
 	phase = Phase.POINT_PAUSE
 	pause_until = clock + 0.6
 	if hud:
@@ -1249,21 +1285,15 @@ func _auto_input() -> Dictionary:
 						d.hit_up = true
 				elif _due(opp.t):
 					if opp.kind == "set" and opp.speed <= OVER_OK:
-						d.rs = Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+						var dirs := [Vector2(-1, 0), Vector2(1, 0), Vector2(0, 1), Vector2(0, -1)]
+						d.dpad_up = dirs[rng.randi() % 4]
 						var r := rng.randf()
-						d.mouse_rs = d.rs
-						d.tempo_rs = Vector2(rng.randf_range(0.0, 1.0), 0.0)
-						d.over = r < 0.45
-						d.fast = r >= 0.45 and r < 0.6
-						d.quick = r >= 0.6 and r < 0.7
-						d.dump_down = r >= 0.7 and r < 0.85
-						d.dump_held = d.dump_down
-						d.hit_down = r >= 0.8 and r < 0.9  # R2 allein (schneller) oder mit R1 (Schlag)
-						d.hit_held = d.hit_down
+						d.dump_held = r >= 0.75 and r < 0.9  # R1 (mit R2 zusammen: Zuspieler schlaegt)
+						d.hit_held = (r >= 0.5 and r < 0.75) or r >= 0.85  # R2
 					elif opp.speed <= OVER_OK:
-						d.over = true
+						d.over_up = true
 					else:
-						d.bump = true
+						d.bump_up = true
 			elif human_player() != null and opp != null and opp.kind == "attack":
 				d.rs = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # zweiter Blocker per rechtem Stick
 				if _due(opp.t - JUMP_RISE):
@@ -1386,7 +1416,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	touches = 1
 	serve_time = clock
 	phase = Phase.RALLY
-	popup(srv, Q_TEXT[q], Q_COLOR[q])
+	popup(srv, Q_TEXT[q] + (timing_hint(e, q) if serving_team == human_team else ""), Q_COLOR[q])
 	_fx("serve", ball.position, power * (1.0 if jump else 0.65))
 	if serving_team == human_team and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
@@ -1480,6 +1510,14 @@ func _try_team(team: int) -> bool:
 		o.win_scale *= 1.0 - 0.22 * hard_ball(o.speed)
 	if o.human and (kind == "pass" or kind == "dig" or kind == "free"):
 		o.win_scale *= cfg.get_v("receive_help") / 100.0
+	if o.human and idx == 0 and last_action == "block_touch":
+		# Nach eigenem Block mit Soft-Touch: die Steuerung springt auf den Abwehrspieler. Der
+		# noch gehaltene Block-Stick soll ihn nicht vom Ball weglaufen lassen, und das Fenster
+		# ist etwas groesser, weil der Wechsel ueberraschend kommt.
+		o.win_scale *= 1.35
+		_stick_lock_until = clock + 0.45
+		_need_neutral = true
+		popup(pl, "Dein Ball", Color(1.0, 0.9, 0.4))
 	if not o.human:
 		o.ai_e = ai_e(kind)
 		if kind == "dig":
@@ -1659,6 +1697,7 @@ func _rally_input(inp: Dictionary) -> void:
 		return
 	for pl in players[human_team]:
 		pl.manual_dir = Vector3.ZERO
+		pl.prep = ""
 	var mv: Vector2 = inp.mv
 	var hp := human_player()
 	# Block lesen: Solange der gegnerische Zuspieler den Ball noch bekommt, stellst du den
@@ -1675,47 +1714,59 @@ func _rally_input(inp: Dictionary) -> void:
 			"attack":
 				_attack_input(inp)
 			"set":
-				# Linker Stick = laufen, Steuerkreuz = Richtung, rechter Stick = Tempo (Mitte hoch,
-				# halb schnell, voll Schnellangriff). R2 = ein Tempo schneller, R1 = Dump,
-				# R1 + R2 zusammen = der Zuspieler schlaegt selbst.
+				# Linker Stick = laufen. Steuerkreuz druecken = Zuspiel in diese Richtung (links Aussen,
+				# rechts Diagonal, oben Mitte, unten Hinterfeld). Pritschen oder Baggern waehlt das Spiel.
+				# R2 gehalten = schneller Ball (Mitte: Schnellangriff), R1 = Dump,
+				# R1 + R2 = der Zuspieler schlaegt selbst. X/A und B/Y gehen weiter (Tastatur).
 				if not assist:
 					hp.manual_dir = _stick_dir(mv)
 				var lane := _set_choice(inp.dpad if inp.dpad.length() > 0.5 else inp.mouse_rs)
-				var tl: float = inp.tempo_rs.length()
-				var stick_tempo := "high" if tl < 0.35 else ("fast" if tl < 0.8 else "quick")
-				# R1/R2 koennen etwas versetzt gedrueckt werden: kurz sammeln, dann auswerten.
-				if inp.dump_down or inp.hit_down:
-					if _combo_t < 0.0:
-						_combo_r1 = false
-						_combo_r2 = false
-						_combo_t = clock
-				if _combo_t >= 0.0:
-					_combo_r1 = _combo_r1 or inp.dump_down or inp.dump_held
-					_combo_r2 = _combo_r2 or inp.hit_down or inp.hit_held
-					if clock - _combo_t >= 0.05:
-						var t0 := _combo_t  # Timing zaehlt ab dem ersten Tastendruck
-						_combo_t = -1.0
-						if _combo_r1 and _combo_r2:
-							_human_touch("over", lane + "|attack", t0)
-						elif _combo_r1:
-							_human_touch("over", lane + "|dump", t0)
-						else:
-							_human_touch("over", lane + "|" + _faster(stick_tempo), t0)
-				elif inp.bump:
-					_human_touch("bump", lane + "|high")
-				elif inp.over:
-					_human_touch("over", lane + "|" + stick_tempo)
-				elif inp.fast:
-					_human_touch("over", lane + "|fast")
-				elif inp.quick:
-					_human_touch("over", lane + "|quick")
-				if opp == null or opp.pending or opp.done:
-					_set_dir = Vector2.ZERO  # Richtung gilt nur fuer dieses Zuspiel
+				var lib_front: bool = opp.player.role == "L" and absf(opp.point.x) < 3.0
+				var auto_tech := "over" if (opp.speed <= OVER_OK and not lib_front) else "bump"
+				# Halten = Zuspieler stellt sich hin und geht in die Haltung, Loslassen = Zuspiel
+				if inp.dpad.length() > 0.5:
+					hp.prep = auto_tech
+				elif inp.bump_held:
+					hp.prep = "bump"
+				elif inp.over_held:
+					hp.prep = "over"
+				var trig := ""
+				if inp.dpad_up.length() > 0.5:
+					lane = _set_choice(inp.dpad_up)
+					trig = "auto"
+				elif inp.bump_up:
+					trig = "bump"
+				elif inp.over_up:
+					trig = "over"
+				elif inp.fast or inp.quick:
+					trig = "over"
+				if trig != "":
+					var tempo := "high"
+					if inp.dump_held and inp.hit_held:
+						tempo = "attack"
+					elif inp.dump_held:
+						tempo = "dump"
+					elif inp.hit_held:
+						tempo = "quick" if lane == "mid" else "fast"
+					if inp.fast:
+						tempo = "fast"
+					elif inp.quick:
+						tempo = "quick"
+					var tech := trig
+					if trig == "auto":
+						tech = auto_tech
+					_human_touch(tech, lane + "|" + tempo)
 			_:
-				hp.manual_dir = _stick_dir(mv)
-				if inp.bump:
+				if mv.length() < 0.3:
+					_need_neutral = false
+				if _need_neutral and clock < _stick_lock_until + 0.5:
+					hp.manual_dir = Vector3.ZERO  # laeuft von selbst zum Ball, bis du den Stick neu ansetzt
+				else:
+					hp.manual_dir = _stick_dir(mv)
+				hp.prep = "bump" if inp.bump_held else ("over" if inp.over_held else "")
+				if inp.bump_up:
 					_human_touch("bump", "")
-				elif inp.over:
+				elif inp.over_up:
 					_human_touch("over", "")
 	elif hp != null and not blockers[human_team].is_empty() and hp == blockers[human_team][0]:
 		var d := _stick_dir(mv)
@@ -1744,10 +1795,12 @@ func _rally_input(inp: Dictionary) -> void:
 
 func _attack_input(inp: Dictionary) -> void:
 	opp.rs = rs
-	if inp.hit_down and not charging:
+	# R2 noch vom schnellen Zuspiel gedrueckt: zaehlt direkt als Aufladen, sonst muesste man
+	# erst loslassen und neu druecken, und der Schlag kaeme immer zu spaet.
+	if (inp.hit_down or inp.hit_held) and not charging and not opp.pending:
 		_start_charge()
 	elif inp.hit_up and charging and not opp.pending:
-		var e := clock - opp.t
+		var e := human_clock() - opp.t
 		if e < -0.45:
 			charging = false  # viel zu frueh losgelassen: neu aufladen
 			return
@@ -1761,7 +1814,7 @@ func _attack_input(inp: Dictionary) -> void:
 func _human_touch(tech: String, choice: String, t_press := -1.0) -> void:
 	if opp == null or opp.pending:
 		return
-	var e := (t_press if t_press >= 0.0 else clock) - opp.t
+	var e := (t_press if t_press >= 0.0 else human_clock()) - opp.t
 	if e < -maxf(0.35, windows(opp.kind)[2] * opp.win_scale + 0.05):
 		return  # viel zu frueh gedrueckt: ignorieren
 	opp.tech = tech
@@ -1786,7 +1839,7 @@ func _ai_actions() -> void:
 		elif not opp.human and clock >= opp.t + opp.ai_e:
 			_ai_prepare(opp)
 			_press(opp, opp.ai_e, "auto")
-		elif opp.human and clock > opp.t + windows(opp.kind)[2] * opp.win_scale + 0.01:
+		elif opp.human and clock > opp.t + windows(opp.kind)[2] * maxf(opp.win_scale, 1.35 if opp.kind == "attack" else 1.0) + 0.01 + lag_game():
 			opp.done = true
 			charging = false
 			popup(opp.player, "Zu spät", Q_COLOR[Q.MISS])
@@ -1943,6 +1996,8 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	var label: String = Q_TEXT[q]
 	if o.human and o.kind != "attack":
 		label = ("Pritschen · " if o.tech == "over" else "Baggern · ") + label
+	if o.human:
+		label += timing_hint(e, q)
 	popup(pl, label, Q_COLOR[q])
 	var before := ball.position
 	var was_flutter := flutter > 0.0 and last_action == "serve"
@@ -1959,7 +2014,10 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 			_do_free(o, q)
 	rally_touches += 1
 	if o.kind == "attack":
-		_fx("tip" if last_action == "tip" else "spike", before, clampf(ball_vel.length() / 30.0, 0.3, 1.0))
+		var kind_fx := "tip" if last_action == "tip" else "spike"
+		if kind_fx == "spike" and o.human and q == Q.PERFECT and o.power > 0.75:
+			kind_fx = "spike_perfect"  # lauter, tiefer Knall
+		_fx(kind_fx, before, clampf(ball_vel.length() / 30.0, 0.3, 1.0))
 	else:
 		_fx("set" if o.tech == "over" else "bump", before, clampf(o.speed / 20.0, 0.25, 1.0))
 	stats["Technik " + ("Pritschen" if o.tech == "over" else "Baggern")] = stats.get("Technik " + ("Pritschen" if o.tech == "over" else "Baggern"), 0) + (1 if o.kind != "attack" else 0)
@@ -2081,14 +2139,10 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	last_action = "set"
 
 
-func _faster(tempo: String) -> String:
-	return "fast" if tempo == "high" else "quick"
-
-
 ## Dump nur vom Zuspieler selbst: vorn am Netz, kein Libero, Ball nicht schlecht.
 func _can_dump(o: Opp) -> bool:
 	var pl := o.player
-	return pl.role != "L" and is_front_row(pl) and absf(ball.position.x) < 2.0 and ball.position.y > NET_H - 0.4
+	return pl.role != "L" and is_front_row(pl) and absf(ball.position.x) < 2.6 and ball.position.y > NET_H - 0.7
 
 
 ## Setter-Dump: der Zuspieler spielt den zweiten Ball mit einer Hand ueber das Netz,
@@ -2140,6 +2194,13 @@ func _do_setter_attack(o: Opp, q: int, e: float, lane_choice: String) -> void:
 	o.over = 0.78
 	set_tempo[o.team] = "attack"
 	setter.jump()
+	# Schlaganimation statt Zuspiel-Haltung: Kontakt ist jetzt, der Arm schlaegt zum Ziel im Gegnerfeld.
+	setter.anim_kind = "attack"
+	setter.anim_tech = ""
+	setter.anim_t = clock
+	setter.contact_pt = ball.position
+	setter.contact_aim = attack_shot(o.team, ball.position, o.rs, o.power).target
+	setter.contact_on = true
 	popup(setter, "Zuspieler schlägt!", Color(1.0, 0.85, 0.3))
 	stats["Zuspieler-Schlag"] = stats.get("Zuspieler-Schlag", 0) + 1
 	var rb := _lane_player(1 - o.team, "mid")
@@ -2315,7 +2376,12 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	_slow_tail_until = clock + 0.12
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
 	if o.human:
-		big_hit.emit(1.0 if q == Q.PERFECT and o.power > 0.75 else 0.4)
+		var perfect := q == Q.PERFECT and o.power > 0.75
+		big_hit.emit(1.0 if perfect else 0.4)
+		if perfect:
+			# Kurzer Mini-Stopp beim perfekten Schlag, danach gleitet das Spiel weich weiter.
+			_hitstop_left = 0.07
+			_hitstop_scale = 0.06
 	elif last_attack_speed > 24.0:
 		big_hit.emit(0.35)
 
@@ -2359,12 +2425,13 @@ func _step_ball(delta: float) -> void:
 			_end_rally(1 - last_touch_team, "Ball außerhalb der Antenne")
 			return
 		if c.y < NET_H + R and c.y > NET_BOTTOM - R:
+			var net_speed := ball_vel.length()
 			ball.position = Vector3(signf(prev.x) * (R + 0.02), c.y, c.z)
 			ball_vel = Vector3(-ball_vel.x * 0.15, minf(ball_vel.y, 0.0) * 0.3 - 0.5, ball_vel.z * 0.3)
 			ball_g = G
 			flutter = 0.0
 			net_touched = true
-			_fx("net", c, 0.5)
+			_fx("net", c, clampf(net_speed / 22.0, 0.25, 1.0))
 			if possession != last_touch_team:
 				possession = last_touch_team
 			plan_next()
@@ -2382,6 +2449,46 @@ func _step_ball(delta: float) -> void:
 	if nxt.y <= R:
 		ball.position.y = R
 		_on_ball_landed()
+
+
+## Nach dem Punkt rollt und springt der Ball weiter, statt auf dem Boden festzukleben.
+func _step_dead_ball(delta: float) -> void:
+	var grounded := ball.position.y <= R + 0.001
+	if grounded and ball_vel.length() < 0.05:
+		ball_vel = Vector3.ZERO
+		return
+	var res := Ballistics.advance(ball.position, ball_vel, delta, G)
+	var pos: Vector3 = res[0]
+	var vel: Vector3 = res[1]
+	if prev_cross_net(ball.position.x, pos.x) and pos.y < NET_H + R:
+		vel.x = -vel.x * 0.2
+		pos.x = signf(ball.position.x) * (R + 0.02)
+	if absf(pos.x) > 14.0:
+		pos.x = signf(pos.x) * 14.0
+		vel.x = -vel.x * 0.4
+	if absf(pos.z) > 8.5:
+		pos.z = signf(pos.z) * 8.5
+		vel.z = -vel.z * 0.4
+	if pos.y <= R:
+		pos.y = R
+		if vel.y < -1.5:
+			_fx("floor", pos, clampf(-vel.y / 14.0, 0.15, 0.6))
+		vel.y = minf(-vel.y * 0.62, 7.0)
+		if vel.y < 1.3:
+			vel.y = 0.0
+		vel.x *= 0.82
+		vel.z *= 0.82
+		if vel.y == 0.0:
+			var k := maxf(0.0, 1.0 - 2.2 * delta)
+			vel.x *= k
+			vel.z *= k
+	ball.position = pos
+	ball_vel = vel
+	ball_mesh.rotate(Vector3.UP.cross(vel).normalized() if Vector3.UP.cross(vel).length() > 0.05 else Vector3.RIGHT, vel.length() * delta / 0.14 * 0.4)
+
+
+func prev_cross_net(x0: float, x1: float) -> bool:
+	return x0 != 0.0 and signf(x0) != signf(x1)
 
 
 func _try_block(c: Vector3, prev: Vector3) -> bool:
@@ -2453,7 +2560,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		if def == human_team:
 			big_hit.emit(1.0 if in_block >= 2 else 0.7)
 			if in_block >= 2:
-				_hitstop_left = 0.45
+				_hitstop_left = 0.3
+				_hitstop_scale = SLOW
 	elif last_action == "attack" and ball_vel.length() > 19.0 and rng.randf() < 0.35:
 		# Harter Schlag: Ball geht durch den Block, wird etwas gebremst, bleibt aber schnell.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
@@ -2583,7 +2691,7 @@ func _end_rally(winner: int, reason: String) -> void:
 		_finish_set(winner)
 	else:
 		phase = Phase.POINT_PAUSE
-		pause_until = clock + (0.2 if autoplay else 2.4)
+		pause_until = clock + (0.2 if autoplay else 1.6)
 		if deciding and not side_changed_deciding and maxi(score[0], score[1]) >= 8:
 			side_change_pending = true  # im Entscheidungssatz wird bei 8 Punkten gewechselt
 			side_changed_deciding = true
@@ -2700,9 +2808,13 @@ func _update_players(delta: float) -> void:
 	for t in 2:
 		var form := _formation(t)
 		if form != "":
+			# Im Ballwechsel verschieben sich alle ein Stueck zur Ballseite (wie echte Abwehr).
+			var shade := 0.0
+			if phase == Phase.RALLY:
+				shade = clampf((ball.position.z) * 0.15, -0.6, 0.6)
 			for pl in players[t]:
-				if not (phase == Phase.PRE_SERVE and pl == server()):
-					pl.target = formation_pos(t, pl, form)
+				if not ((phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done)) and pl == server()):
+					pl.target = formation_pos(t, pl, form) + Vector3(0.0, 0.0, shade)
 			# Gelesener Block: der Mittelblocker bleibt dort stehen, wo der Mensch ihn hingestellt hat.
 			if t == human_team and commit_block[t]:
 				var rp := _lane_player(t, "mid")
@@ -2732,6 +2844,10 @@ func _update_players(delta: float) -> void:
 		var srv0 := server()
 		var back := 11.4 if serve_kind == 1 else 10.0
 		srv0.target = Vector3(side_of(serving_team) * back, 0.0, srv0.position.z)
+	# Standaufschlag: der Aufschlaeger bleibt waehrend des Wurfs stehen (sonst lief er zur Formationsposition).
+	if phase == Phase.TOSS and serve_kind == 0 and not serve_done:
+		var srv_stand := server()
+		srv_stand.target = srv_stand.position
 	# Sprungaufschlag: Anlauf unter den Ball und Absprung hinter der Grundlinie.
 	if phase == Phase.TOSS and serve_kind == 1 and not serve_done:
 		var srv := server()
@@ -2751,7 +2867,7 @@ func _update_players(delta: float) -> void:
 		var p := _stand_pos(opp, Vector3(opp.point.x, 0.0, opp.point.z))
 		if opp.kind == "attack":
 			var t_jump := opp.t - JUMP_RISE
-			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.05
+			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.25  # Zeit zum Beschleunigen
 			pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
 			if clock >= t_jump and not pl.has_jumped:
 				pl.jump()
@@ -2763,7 +2879,7 @@ func _update_players(delta: float) -> void:
 				var info := attack_shot(opp.team, opp.point, opp.rs, opp.power)
 				var tz: float = (info.target as Vector3).z
 				pl.lean = clampf((tz - pl.position.z) / 4.0, -1.0, 1.0)
-		elif opp.human and not assist:
+		elif opp.human and not assist and not (_need_neutral and clock < _stick_lock_until + 0.5):
 			pl.target = pl.position
 		elif opp.no_reach:
 			pl.target = opp.start_pos + (p - opp.start_pos).limit_length(opp.max_run)
@@ -2793,6 +2909,9 @@ func _update_players(delta: float) -> void:
 		sv.contact_on = phase == Phase.TOSS
 	for t in 2:
 		for pl in players[t]:
+			pl.urgent = opp != null and not opp.done and pl == opp.player
+			if not blockers[t].is_empty() and pl in blockers[t]:
+				pl.urgent = true
 			pl.tick(delta)
 
 
@@ -2864,14 +2983,23 @@ func _update_time_and_camera(real_delta: float) -> void:
 		want = 1.0
 	if _hitstop_left > 0.0:
 		_hitstop_left -= real_delta
-		want = minf(want, SLOW)
+		want = minf(want, _hitstop_scale)
 	if not zoom_on:
 		cam_mode = ""
 	if phase == Phase.REPLAY:
 		cam_mode = "replay"
 	if phase != Phase.RALLY and phase != Phase.TOSS:
 		want = 1.0
-	Engine.time_scale = clampf(want, 0.1, 1.0)
+	# Weich in die Zeitlupe hinein (schnell, damit das Timing nicht leidet) und langsamer
+	# wieder heraus, statt hart zu springen. Der Treffer-Stopp greift sofort.
+	want = clampf(want, 0.05, 1.0)
+	if _hitstop_left > 0.0 and want <= _hitstop_scale + 0.001:
+		_time_scale = want
+	elif want < _time_scale:
+		_time_scale = maxf(want, _time_scale - real_delta * 6.0)
+	else:
+		_time_scale = minf(want, _time_scale + real_delta * 1.8)
+	Engine.time_scale = _time_scale
 
 
 func _update_visuals() -> void:
@@ -2987,17 +3115,17 @@ func hint() -> String:
 			if opp != null and not opp.done and opp.team == human_team:
 				match opp.kind:
 					"pass":
-						return "Annahme: A/Leertaste baggern · X/Q pritschen (Ring grün = Pritschen geht)"
+						return "Annahme: A/Leertaste (baggern) oder X/Q (pritschen) halten, loslassen wenn der Ring sich schließt"
 					"dig":
-						return "Abwehr! A/Leertaste baggern, wenn sich der Ring schließt"
+						return "Abwehr! A/Leertaste halten, loslassen wenn sich der Ring schließt"
 					"set":
 						if opp.player.role == "L" and absf(opp.point.x) < 3.0:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
-						return "Zuspiel: Steuerkreuz = Richtung (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · rechter Stick = Tempo (halb schnell, voll Schnellangriff) · X/Q spielen · R2 schneller · R1 Dump · R1+R2 Zuspieler schlägt · A baggern"
+						return "Zuspiel: Steuerkreuz halten, loslassen = Zuspiel (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · R2 halten = schneller Ball · R1 = Dump · R1+R2 = Zuspieler schlägt"
 					"attack":
 						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
 					"free":
-						return "Ball rüberspielen: X/Q pritschen oder A/Leertaste baggern"
+						return "Ball rüberspielen: X/Q oder A/Leertaste halten und rechtzeitig loslassen"
 			if human_player() != null:
 				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände"
 			if opp != null and opp.team != human_team and opp.kind == "set":

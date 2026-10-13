@@ -10,6 +10,12 @@ var _shake := 0.0
 var _cam_base := Vector3(-18.5, 9.5, 0.0)
 var _cam_pos := Vector3(-18.5, 9.5, 0.0)
 var _cam_look := Vector3(1.5, 1.0, 0.0)
+var _cam_vel := Vector3.ZERO  # Federung: Kamera beschleunigt und bremst weich
+var _look_vel := Vector3.ZERO
+var _fov_vel := 0.0
+var _hold_mode := ""  # letzte Nahansicht (Angriff, Block), bleibt kurz stehen
+var _hold_subj = null
+var _hold_left := 0.0
 var arena: Arena
 var fx: HitFx
 var _air := {}  # Spieler -> war in der Luft (fuer Schuhquietschen)
@@ -108,6 +114,19 @@ func _process(delta: float) -> void:
 	var want_look := Vector3(-cs * 1.5, 1.0, bz * 0.2)
 	var want_fov := 52.0
 	var subj = match_node.cam_subject if match_node else null
+	# Nahansicht kurz halten, damit die Kamera nicht zwischen Angriff, Block und Uebersicht
+	# hin- und herspringt.
+	var mode: String = match_node.cam_mode if match_node else ""
+	if mode == "attack" or mode == "block":
+		_hold_mode = mode
+		_hold_subj = subj
+		_hold_left = 0.7
+	elif mode == "" and _hold_left > 0.0 and is_instance_valid(_hold_subj) and match_node.phase == match_node.Phase.RALLY:
+		_hold_left -= rd
+		mode = _hold_mode
+		subj = _hold_subj
+	else:
+		_hold_left = 0.0
 	if match_node and match_node.cam_mode == "replay":
 		# Fernsehkamera von der Seitenlinie, folgt dem Ball.
 		var b: Vector3 = match_node.ball.position
@@ -117,24 +136,42 @@ func _process(delta: float) -> void:
 	elif subj != null:
 		var s: float = subj.side
 		var p: Vector3 = subj.position
-		match match_node.cam_mode:
+		match mode:
 			"serve":
 				# Hinter der Schulter des Aufschlaegers.
 				want_pos = p + Vector3(s * 4.4, 3.3, 2.4)
 				want_look = Vector3(-s * 4.0, 2.6, p.z * 0.4)
 				want_fov = 55.0
 			"attack":
-				want_pos = Vector3(s * 5.2, 3.3, p.z * 0.75 + 0.6)
-				want_look = Vector3(-s * 2.0, 2.4, p.z * 0.6)
-				want_fov = 56.0
+				# Erhoeht hinter dem Angreifer: der Blick geht ueber die Netzkante auf den Schlag
+				# und ins gegnerische Feld, nicht durch das Netz.
+				# Hinterfeldangreifer stehen weit hinter der 3-m-Linie: Kamera rueckt hinter ihn und
+				# blickt weiter, damit man Anlauf und Ball sieht.
+				var back := clampf((absf(p.x) - 2.5) / 3.0, 0.0, 1.0)
+				want_pos = Vector3(s * maxf(5.0, absf(p.x) + 3.6), 5.8 + 1.0 * back, p.z * 0.8 + 1.2)
+				want_look = Vector3(-s * lerpf(1.2, 0.2, back), 2.0, p.z * 0.65)
+				want_fov = 56.0 + 6.0 * back
 			"block":
 				want_pos = Vector3(s * 5.6, 3.6, p.z * 0.7)
 				want_look = Vector3(-s * 3.0, 2.2, p.z * 0.6)
 				want_fov = 56.0
-	var k := clampf(rd * 4.0, 0.0, 1.0)
-	_cam_pos = _cam_pos.lerp(want_pos, k)
-	_cam_look = _cam_look.lerp(want_look, k)
-	camera.fov = lerpf(camera.fov, want_fov, k)
+	# Kritisch gedaempfte Feder statt hartem Nachziehen: kein Ruck beim Wechsel der Ansicht.
+	var w := 3.2
+	if mode == "replay":
+		w = 4.0
+	elif mode == "attack":
+		w = 5.0  # schneller in die Angriffsansicht, damit sie zum Schlag steht
+	var cdt := minf(rd, 0.1)
+	var steps := maxi(1, ceili(cdt / 0.008))
+	var h := cdt / steps
+	for i in steps:
+		_cam_vel += ((want_pos - _cam_pos) * w * w - _cam_vel * 2.0 * w) * h
+		_cam_pos += _cam_vel * h
+		_look_vel += ((want_look - _cam_look) * w * w - _look_vel * 2.0 * w) * h
+		_cam_look += _look_vel * h
+		_fov_vel += ((want_fov - camera.fov) * w * w - _fov_vel * 2.0 * w) * h
+		camera.fov += _fov_vel * h
+	_shot_attack_check()
 	var off := Vector3.ZERO
 	if _shake > 0.0:
 		_shake = maxf(0.0, _shake - rd * 2.5)
@@ -181,6 +218,13 @@ func _on_menu_closed() -> void:
 
 ## Ballkontakte: Geraeusch, Lichtblitz bei harten Schlaegen, Staub am Boden.
 func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
+	if kind == "spike_perfect":
+		# Perfekter Angriff: zweiter, tieferer Knall unter dem normalen Schlag, heller Blitz.
+		sfx.play("spike", 1.0)
+		sfx.play("spike", 1.0, 0.78)
+		fx.flash(pos, 1.0)
+		_shake = maxf(_shake, 0.45)
+		return
 	sfx.play(kind, strength)
 	sfx.excitement = minf(1.0, match_node.rally_touches / 10.0)
 	match kind:
@@ -193,6 +237,9 @@ func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
 				fx.flash(pos, strength * 0.8)
 		"block":
 			fx.flash(pos, strength, Color(0.85, 0.92, 1.0))
+		"net":
+			# Ball liegt schon wieder auf seiner Seite: das Netz beult zur anderen Seite aus.
+			arena.net.hit(pos, strength, -signf(match_node.ball.position.x))
 		"floor":
 			fx.dust(pos, strength)
 			if strength > 0.8:
@@ -302,3 +349,22 @@ func _update_hall() -> void:
 			if now_air != was and m.phase == m.Phase.RALLY and randf() < 0.55:
 				sfx.play("squeak", randf_range(0.3, 0.8))
 			_air[pl] = now_air
+
+
+## Testhilfe: --shot-attack=bild.png speichert ein Bild im Moment des eigenen Schlags
+## (zusammen mit --botplay).
+var _shot_attack_n := 0
+func _shot_attack_check() -> void:
+	if match_node == null or _shot_attack_n >= 3:
+		return
+	for a in OS.get_cmdline_user_args():
+		if not a.begins_with("--shot-attack="):
+			continue
+		var o = match_node.opp
+		if match_node.cam_mode == "attack" and o != null and not o.done and absf(o.t - match_node.clock) < 0.03:
+			_shot_attack_n += 1
+			var path: String = a.get_slice("=", 1).get_basename() + "_%d.png" % _shot_attack_n
+			get_viewport().get_texture().get_image().save_png(path)
+			print("Screenshot gespeichert: ", path)
+			if _shot_attack_n >= 3:
+				get_tree().quit()
