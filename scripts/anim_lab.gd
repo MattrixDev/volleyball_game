@@ -96,7 +96,9 @@ func _physics_process(_delta: float) -> void:
 	var replay: bool = match_node.phase == match_node.Phase.REPLAY
 	if replay:
 		_prev.clear()
+		_check_replay(tick)
 		return
+	_rep_prev.clear()
 	var all := []
 	for t in 2:
 		all.append_array(match_node.players[t])
@@ -110,6 +112,29 @@ func _physics_process(_delta: float) -> void:
 				var b: Vector3 = all[k].fig.j["hips"].global_position
 				var d := Vector2(a.x - b.x, a.z - b.z).length()
 				_flag("%s+%s" % [_pid(all[i]), _pid(all[k])], "overlap", tick, 0.45 - d, d < 0.45, all[i])
+
+
+## Replay: springt ein Gelenk von einem Bild zum naechsten, zuckt es sichtbar (Zeitlupe ist langsamer
+## als das Spiel, da reichen schon kleine Spruenge).
+var _rep_prev := {}
+func _check_replay(tick: int) -> void:
+	for t in 2:
+		for p in match_node.players[t]:
+			var id := _pid(p)
+			var f: HumanFigure = p.fig
+			var cur := {}
+			var worst := 0.0
+			var wj := ""
+			for n in HumanFigure.JOINTS:
+				var q: Quaternion = (f.j[n] as Node3D).quaternion
+				cur[n] = q
+				if _rep_prev.has(id):
+					var a: float = q.angle_to(_rep_prev[id][n])
+					if a > worst:
+						worst = a
+						wj = n
+			_rep_prev[id] = cur
+			_flag(id, "replay_pop", tick, worst, worst > 0.25, p, 1, wj)
 
 
 func _check_player(p, tick: int, rally: bool) -> void:
@@ -133,6 +158,9 @@ func _check_player(p, tick: int, rally: bool) -> void:
 		cur["sole_" + sd] = sole[sd]
 		cur["soley_" + sd] = minf(h.y, t.y)
 	_flag(id, "floor_clip", tick, -low, low < T_CLIP, p)
+	# Stelzen: beim Gehen (nicht Sprinten, nicht Springen) hebt ein Fuss hoeher als ein normaler Schritt
+	var high := maxf(cur["soley_l"], cur["soley_r"])
+	_flag(id, "high_step", tick, high, ground and p.jump_h <= 0.0 and p._run_amt < 0.6 and high > 0.11 and p.anim_kind in ["", "serve_hold"], p, 3)
 	# Schweben: am Boden beide Fuesse in der Luft. Beim schnellen Laufen gibt es echte Flugphasen.
 	_flag(id, "float", tick, low, ground and low > T_FLOAT and p.jump_h <= 0.0 and p._run_amt < 0.5, p)
 	# Rutschende Fuesse: Fuss war und ist am Boden und bewegt sich waagerecht
@@ -209,7 +237,10 @@ func _check_player(p, tick: int, rally: bool) -> void:
 	if _trace_id == id and tick >= _trace_f0 and tick <= _trace_f1:
 		var ft: Dictionary = p._feet
 		var tj := _trace_joint
-		print("T%d %s %s=%s anim=%s phys=%s ikw=%s miss=%s feet=%s" % [tick, id, tj, f.j[tj].quaternion, f._q.get(tj), f._pq.get(tj), f._ik_last.get("arm_r"), p._feet_miss, {"l": [ft.get("l", {}).get("on"), snappedf(ft.get("l", {}).get("w", 0), 0.01)], "r": [ft.get("r", {}).get("on"), snappedf(ft.get("r", {}).get("w", 0), 0.01)]}])
+		var bb: Basis = f.global_basis.orthonormalized()
+		var shp: Vector3 = f.j["sh_r"].global_position
+		print("   el-sh(local)=%s wr-sh=%s rel=%.3f" % [(bb.inverse() * (f.j["el_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), (bb.inverse() * (f.j["wr_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), p.now - p.anim_t])
+		print("T%d %s %s=%s anim=%s phys=%s ikw=%s miss=%s sole=%s run=%.2f v=%.2f feet=%s" % [tick, id, tj, f.j[tj].quaternion, f._q.get(tj), f._pq.get(tj), f._ik_last.get("arm_r"), p._feet_miss, [snappedf(cur["soley_l"], 0.001), snappedf(cur["soley_r"], 0.001), snappedf(p._sole_t.get("l", 0.0), 0.001), snappedf(p._sole_t.get("r", 0.0), 0.001)], p._run_amt, p._vel.length(), {"l": [ft.get("l", {}).get("on"), snappedf(ft.get("l", {}).get("w", 0), 0.01)], "r": [ft.get("r", {}).get("on"), snappedf(ft.get("r", {}).get("w", 0), 0.01)]}])
 
 
 func _on_contact(kind: String, pos: Vector3, _strength: float) -> void:

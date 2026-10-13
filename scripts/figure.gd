@@ -444,8 +444,10 @@ func world_to_parent(name: String, w_world: Vector3) -> Vector3:
 
 ## Arm so stellen, dass das Handgelenk an der Weltposition target sitzt (Ballkontakt).
 ## w blendet zwischen Pose (0) und Ziel (1). Rueckgabe: verbleibender Abstand in m.
-func ik_arm(sd: String, target: Vector3, w: float, iters := 10, damp := 0.02) -> float:
-	return _ik_limb("arm_" + sd, j["sh_" + sd], j["el_" + sd], j["wr_" + sd], target, w, iters, damp, 1.0, 0.0, 2.6)
+## pole (Welt): wohin der Ellbogen zeigen soll, z. B. hoch und nach hinten beim Ausholen zum Schlag.
+## Vector3.INF = Ellbogen bleibt in der Ebene der Animation.
+func ik_arm(sd: String, target: Vector3, w: float, iters := 10, damp := 0.02, pole := Vector3.INF, pole_w := 1.0) -> float:
+	return _ik_limb("arm_" + sd, j["sh_" + sd], j["el_" + sd], j["wr_" + sd], target, w, iters, damp, 1.0, 0.0, 2.6, pole, pole_w)
 
 
 ## Bein so stellen, dass das Sprunggelenk an der Weltposition target sitzt (Fuss steht fest).
@@ -459,7 +461,7 @@ func ik_leg(sd: String, target: Vector3, w: float, iters := 10, damp := 0.005) -
 ## des Glieds aus der Animation erhalten und nichts klappt um, auch nicht bei hoch erhobenem Arm
 ## oder weit gebeugtem Knie. Alles als Drehungen (Quaternionen), keine Euler-Winkel.
 ## flex: Beugerichtung (+1 Ellbogen nach vorn, -1 Knie nach hinten), lo/hi: erlaubte Beugung.
-func _ik_limb(_key: String, up: Node3D, mid: Node3D, end: Node3D, target: Vector3, w: float, _iters: int, _damp: float, flex: float, lo: float, hi: float) -> float:
+func _ik_limb(_key: String, up: Node3D, mid: Node3D, end: Node3D, target: Vector3, w: float, _iters: int, _damp: float, flex: float, lo: float, hi: float, pole := Vector3.INF, pole_w := 1.0) -> float:
 	var qu0 := up.quaternion
 	var qm0 := mid.quaternion
 	var u := up.global_position
@@ -490,6 +492,20 @@ func _ik_limb(_key: String, up: Node3D, mid: Node3D, end: Node3D, target: Vector
 		var dq := _arc(from.normalized(), to.normalized())
 		var pr := ((up.get_parent() as Node3D).global_basis.orthonormalized()).get_rotation_quaternion()
 		up.quaternion = (pr.inverse() * dq * pr * up.quaternion).normalized()
+	# 2b. Ellbogen/Knie um die Achse Schulter -> Ziel zum Pol drehen (Hand bleibt am Ziel)
+	if pole != Vector3.INF and pole_w > 0.001:
+		var ax := (end.global_position - u)
+		if ax.length() > 0.01:
+			ax = ax.normalized()
+			var m := mid.global_position - u
+			var pv := pole - u
+			m -= ax * m.dot(ax)
+			pv -= ax * pv.dot(ax)
+			if m.length() > 0.005 and pv.length() > 0.005:
+				# fast gestreckt: kaum ein sichtbarer Ellbogen, die Drehung wuerde nur den Arm verdrillen
+				var ang := m.signed_angle_to(pv, ax) * clampf(pole_w, 0.0, 1.0) * smoothstep(0.02, 0.16, m.length()) * smoothstep(0.04, 0.14, pv.length())
+				var pr2 := ((up.get_parent() as Node3D).global_basis.orthonormalized()).get_rotation_quaternion()
+				up.quaternion = (pr2.inverse() * Quaternion(ax, ang) * pr2 * up.quaternion).normalized()
 	# 3. Mit w zwischen Animation und Loesung mischen
 	var wk := clampf(w, 0.0, 1.0)
 	if wk < 1.0:
@@ -575,18 +591,31 @@ func lowest_point(all: bool) -> float:
 
 
 func capture() -> Array:
+	# Gelenke als Quaternion: so laesst sich im Replay weich zwischen zwei Bildern mischen, ohne dass
+	# Euler-Winkel ueber +-180 Grad springen und Arme oder Beine einmal herumzucken.
 	var out := []
 	for name in JOINTS:
-		out.append(j[name].rotation)
+		out.append((j[name] as Node3D).quaternion)
 	out.append(root_node.position)
-	out.append(root_node.rotation)
+	out.append(root_node.quaternion)
+	return out
+
+
+## Zwischen zwei Aufnahmen von capture() mischen (w = 0..1).
+static func mix_capture(a: Array, b: Array, w: float) -> Array:
+	var out := []
+	for i in a.size():
+		if a[i] is Quaternion:
+			out.append((a[i] as Quaternion).slerp(b[i], w))
+		else:
+			out.append((a[i] as Vector3).lerp(b[i], w))
 	return out
 
 
 func apply(c: Array) -> void:
 	for i in JOINTS.size():
-		j[JOINTS[i]].rotation = c[i]
+		(j[JOINTS[i]] as Node3D).quaternion = c[i]
 	root_node.position = c[JOINTS.size()]
-	root_node.rotation = c[JOINTS.size() + 1]
+	root_node.quaternion = c[JOINTS.size() + 1]
 	_reset_spring()
 	_sync()

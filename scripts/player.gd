@@ -246,7 +246,10 @@ func _animate(delta: float) -> void:
 	# wird der Schritt bis 30 % weiter (Beine schwingen weiter aus), damit die Fuesse nicht rutschen
 	# und die Beine nicht hektisch trippeln.
 	_stride_amp = lerpf(_stride_amp, clampf(1.0 + (speed - 3.5) * 0.1, 1.0, 1.3), k)
-	_run_phase += speed * delta * TAU / (1.7 * _stride_amp)
+	# Beim Anhalten laeuft der Schritt noch zu Ende (Fuss setzt auf), statt mit gehobenem Bein
+	# stehen zu bleiben und langsam auszublenden.
+	var step_v := maxf(speed, 1.4 * clampf(_run_amt * 4.0, 0.0, 1.0))
+	_run_phase += step_v * delta * TAU / (1.7 * _stride_amp)
 	# Beschleunigung fuer Vorlage beim Antreten, Ruecklage beim Bremsen und Kurvenneigung.
 	var v := moved / maxf(delta, 0.0001)
 	if delta > 0.0:
@@ -457,6 +460,7 @@ var _was_bumped := false
 ## Stelle festgehalten, bis die Animation ihn anhebt oder er zu weit weg muss. Dann loest er sich
 ## weich und macht dabei einen kleinen Schritt zur neuen Stelle. So gleitet kein Fuss ueber den
 ## Boden, auch nicht beim Drehen auf der Stelle oder wenn Laufen und Schrittlaenge nicht genau passen.
+const ARM_HIT_LEN := 0.46  # m: Schulter bis Handgelenk, Arm ganz gestreckt (Treffpunkt Angriff)
 var _toe := 0.0  # m: Zehenstand (Standaufschlag), so weit heben sich Koerper und Fersen
 const TOE_RISE := 0.07
 var _feet_miss := {}  # Seite -> wie weit das Bein den festen Punkt im letzten Takt verfehlt hat
@@ -580,7 +584,8 @@ func _plant_feet(delta: float) -> void:
 			var pos: Vector3 = tgt.lerp(from, k)
 			# immer im kleinen Bogen (nie ueber den Boden schleifen), hoeher bei weitem Schritt
 			var dist := Vector2(tgt.x - from.x, tgt.z - from.z).length()
-			pos.y = maxf(pos.y, from.y) + clampf(dist * 0.45, 0.04, 0.09) * sqrt(sin(k * PI))
+			# nur so viel anheben, wie die Animation selbst nicht schon hebt (sonst doppelt so hoch)
+			pos.y = maxf(pos.y, from.y) + clampf(dist * 0.35, 0.03, 0.06) * sqrt(sin(k * PI))
 			_pin_foot(sd, pos, (f.from_b as Basis).slerp(tb, 1.0 - k), 1.0)
 			# erst wieder aufsetzen, wenn das Loesen fertig ist
 			if f.w <= 0.0:
@@ -651,6 +656,8 @@ func _contact_ik() -> void:
 	var wl := -1.0  # eigenes Gewicht fuer die linke Hand (Angriff), sonst wie w
 	var b := contact_pt
 	var hands := {}  # Seite -> [Finger, Handflaeche] (Weltrichtungen)
+	var poles := {}  # Seite -> wohin der Ellbogen zeigen soll (Welt)
+	var pole_w := 0.0
 	var ad := contact_aim - b
 	ad.y = 0.0
 	var aim_h := ad.normalized() if ad.length() > 0.1 else f
@@ -693,31 +700,71 @@ func _contact_ik() -> void:
 		var palm := (up * 0.8 + f * 0.6).normalized().lerp(push, smoothstep(0.0, 0.15, rel)).normalized()
 		var fing := (up - palm * up.dot(palm)).normalized()
 		hands = {"l": [fing - r * 0.3, palm + r * 0.25], "r": [fing + r * 0.3, palm - r * 0.25]}
-	elif anim_kind == "attack" and (airborne or rel > -0.5):
-		# Angriff: Schlagarm folgt einer Bahn, die sich nach dem Ball richtet:
-		# ausholen hinter dem Kopf (Bogenspannung), gestreckt zum Treffpunkt, Nachschwung in
-		# Schlagrichtung und quer ueber den Koerper zur linken Huefte.
+	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne):
+		# Angriff wie im Volleyball (Bogenspannung): der Ellbogen holt hoch und weit nach hinten aus,
+		# die Hand liegt hinter dem Kopf auf Ohrhoehe, die Schlagschulter dreht zurueck und der
+		# Oberkoerper spannt sich. Dann fuehrt der Ellbogen nach vorn oben, der Unterarm peitscht
+		# hinterher, und getroffen wird mit ganz gestrecktem Arm hoch vor der Schlagschulter.
+		# Nachschwung nach vorn unten und quer ueber den Koerper zur linken Huefte.
+		var wt := smoothstep(-0.55, -0.35, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
+		var twist := lerpf(-0.5, 0.35, smoothstep(-0.18, 0.1, rel))
+		var arch := 0.2 * (1.0 - smoothstep(-0.12, 0.0, rel)) - 0.3 * smoothstep(0.0, 0.15, rel)
+		var ch: Node3D = fig.j["chest"]
+		ch.quaternion = ch.quaternion * Quaternion(Vector3.UP, twist * wt) * Quaternion(Vector3.RIGHT, arch * wt)
+		fig._sync()
+		var hit := b - up * 0.07 - f * 0.17
+		# Treffen mit ganz gestrecktem Arm: liegt der Treffpunkt naeher an der Schulter als eine
+		# Armlaenge, sinkt der Koerper im Kontaktmoment etwas ab, liegt er weiter weg, streckt er sich.
+		if airborne:
+			var ext := smoothstep(-0.14, -0.02, rel) * (1.0 - smoothstep(0.06, 0.2, rel))
+			var need := (hit - (fig.j["sh_r"] as Node3D).global_position).length() - ARM_HIT_LEN
+			fig.root_node.position.y += clampf(need, -0.2, 0.14) * ext
+			fig._sync()
 		var sh_r: Vector3 = fig.j["sh_r"].global_position
 		var sh_l: Vector3 = fig.j["sh_l"].global_position
 		var chest: Vector3 = fig.j["chest"].global_position
-		var cock := sh_r + up * 0.14 - f * 0.24 + r * 0.1
-		var hit := b - up * 0.07 - f * 0.17
-		var thru := hit + aim_h * 0.35 - up * 0.5
-		var cross := chest - up * 0.55 - r * 0.2 + f * 0.25
+		# Ausholen: Oberarm seitlich und zurueck, Ellbogen etwa auf Schulterhoehe, Hand hinter dem Kopf.
+		var cock := sh_r + up * 0.3 - f * 0.1 + r * 0.08
+		var cock_el := sh_r + up * 0.12 + r * 0.45 - f * 0.25
+		var lead_el := sh_r + up * 0.45 + r * 0.15 + f * 0.2
+		var over := sh_r + up * 0.32 + r * 0.06 + f * 0.04
+		# Nachschwung mit fast gestrecktem Arm: schraeg nach vorn unten in Schlagrichtung, dann tief
+		# quer vor den Koerper zur linken Huefte (Ziele auf Armlaenge, damit der Ellbogen nicht hochklappt).
+		var thru := sh_r + (aim_h * 0.6 + f * 0.2 - r * 0.1 - up * 0.8).normalized() * 0.45
+		var cross := sh_r + (f * 0.5 - r * 0.45 - up * 0.9).normalized() * 0.45
 		var hand := cock
-		if rel < 0.0:
-			hand = cock.lerp(hit, smoothstep(-0.16, -0.01, rel))
-		elif rel < 0.12:
-			hand = hit.lerp(thru, smoothstep(0.0, 0.12, rel))
-		else:
-			hand = thru.lerp(cross, smoothstep(0.12, 0.3, rel))
+		pole_w = 1.0
+		poles["r"] = cock_el
+		if rel >= -0.2 and rel < 0.0:
+			var sw := smoothstep(-0.2, -0.01, rel)
+			# Hand bleibt zurueck (peitscht spaet), der Ellbogen fuehrt
+			var t := pow(sw, 1.5)
+			hand = cock * (1.0 - t) * (1.0 - t) + over * 2.0 * (1.0 - t) * t + hit * t * t
+			poles["r"] = cock_el.lerp(lead_el, smoothstep(0.0, 0.55, sw))
+		elif rel >= 0.0:
+			# Ellbogen zeigt beim Nachschwung nach aussen unten (Pol bleibt, damit nichts umklappt)
+			poles["r"] = lead_el.lerp(sh_r + r * 0.4 - up * 0.25 + f * 0.1, smoothstep(0.0, 0.12, rel))
+			# Richtung um die Schulter drehen (Bogen auf Armlaenge), nicht quer durch den Raum mischen
+			var hd := (hit - sh_r).normalized()
+			if rel < 0.07:
+				hd = hd.slerp((thru - sh_r).normalized(), smoothstep(0.0, 0.07, rel))
+			else:
+				hd = (thru - sh_r).normalized().slerp((cross - sh_r).normalized(), smoothstep(0.07, 0.18, rel))
+			hand = sh_r + hd * 0.45
 		tg = {"r": hand}
 		w = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.3, 0.45, rel))
 		if not airborne:
 			w *= 0.6
-		# Linker Arm zeigt zum Ball, bis der Schlagarm durchzieht, dann faellt er zur Seite.
-		tg["l"] = sh_l + (b - sh_l).normalized() * 0.62
-		wl = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(-0.1, 0.06, rel))
+		# Linker Arm zeigt zum Ball, bis der Schlagarm durchzieht, dann zieht er seitlich am Koerper
+		# nach unten (gibt dem Schlag Schwung).
+		# Richtung drehen statt Punkte mischen: so schwingt der Arm aussen herum und nicht durch die Brust.
+		var ld := (b - sh_l).normalized()
+		if rel > -0.1:
+			var lt := smoothstep(-0.1, 0.06, rel)
+			ld = ld.slerp((f * 0.3 - up * 0.85 - r * 0.05).normalized(), lt)
+			ld = (ld - r * 0.15 * sin(PI * lt)).normalized()
+		tg["l"] = sh_l + ld * 0.6
+		wl = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.12, 0.3, rel))
 		# Hand: beim Ausholen Handflaeche nach vorn, im Treffpunkt flach hinter dem Ball,
 		# danach klappt das Handgelenk ab (Finger ueber den Ball nach vorn unten).
 		var snap := smoothstep(0.0, 0.1, rel)
@@ -726,20 +773,11 @@ func _contact_ik() -> void:
 		hands = {"r": [fingers, palm], "l": [b - sh_l, -r]}
 	elif anim_kind == "serve":
 		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.03, 0.16, rel))
-		var snap := smoothstep(0.0, 0.1, rel)
-		if airborne:
-			tg = {"r": b - up * 0.07 - f * 0.17}
-			hands = {"r": [up.lerp(aim_h - up * 0.9, snap), (aim_h - up * 0.25).lerp(-up - aim_h * 0.9, snap)]}
-		else:
-			tg = {"r": b - up * 0.02 - f * 0.14}
-			hands = {"r": [up, aim_h]}
+		# Standaufschlag (der Sprungaufschlag laeuft wie der Angriff, siehe oben)
+		tg = {"r": b - up * 0.02 - f * 0.14}
+		hands = {"r": [up, aim_h]}
 	if w <= 0.001 or tg.is_empty():
 		return
-	# Im Kontaktmoment streckt sich der Schlagende (Schultergürtel, Fussspitzen): ca. 14 cm mehr Reichweite.
-	if airborne and (anim_kind == "attack" or anim_kind == "serve"):
-		var ext := smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.05, 0.2, rel))
-		fig.root_node.position.y += 0.14 * ext
-		fig._sync()
 	# Beim Pritschen bleiben die Ellbogen aussen (staerkere Daempfung haelt die Haltung).
 	var over_set := anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over"
 	var miss := 0.0
@@ -750,6 +788,9 @@ func _contact_ik() -> void:
 		# Hand am Ball: ganze Kette von der Huefte bis zur Hand haelt das Ziel, aber nur rund um
 		# den Kontakt (und beim Block). Davor und danach glaettet die Physik die Bewegung.
 		var near := 1.0 if block_pose else 1.0 - smoothstep(0.04, 0.14, absf(rel))
+		if (anim_kind == "attack" or anim_kind == "serve") and airborne and sd == "r":
+			# Der Schlag ist schnell (Peitsche): der Arm folgt der Bahn eng, statt nachzuschleifen.
+			near = maxf(near, smoothstep(-0.3, -0.18, rel) * (1.0 - smoothstep(0.25, 0.4, rel)))
 		var pw := smoothstep(0.3, 0.9, ws) * near
 		for k in ["sh_" + sd, "el_" + sd, "wr_" + sd, "chest", "hips"]:
 			fig.pin[k] = maxf(fig.pin.get(k, 0.0), pw)
@@ -757,7 +798,7 @@ func _contact_ik() -> void:
 		if over_set:
 			res = fig.ik_arm(sd, tg[sd], ws, 14, 0.12)
 		else:
-			res = fig.ik_arm(sd, tg[sd], ws, 10)
+			res = fig.ik_arm(sd, tg[sd], ws, 10, 0.02, poles.get(sd, Vector3.INF), pole_w)
 		if sd == "r" or over_set:
 			miss = maxf(miss, res * ws)
 	# In der Luft: fehlt dem gestreckten Arm noch etwas bis zum Ball, streckt sich der ganze
@@ -772,7 +813,7 @@ func _contact_ik() -> void:
 		# Verschiebung in Weltrichtung -> Figur-Raum (die Figur ist gedreht)
 		fig.root_node.position += fig.global_basis.orthonormalized().inverse() * lift
 		fig._sync()
-		fig.ik_arm("r", tg["r"], w)
+		fig.ik_arm("r", tg["r"], w, 10, 0.02, poles.get("r", Vector3.INF), pole_w)
 	fig._sync()
 	for sd in hands:
 		var ws := wl if (sd == "l" and wl >= 0.0) else w
@@ -838,7 +879,14 @@ func _p_run(a: float) -> Dictionary:
 	var run := HumanFigure.clip_pose("Running", u)
 	if not run.is_empty():
 		var walk := HumanFigure.clip_pose("Walking", u)
-		p = run if walk.is_empty() else _mix(walk, run, smoothstep(0.3, 0.75, a))
+		# Laufclip (hohe Fersen) erst bei schnellem Laufen, sonst Gehen: kurze Wege zur Position
+		# sehen sonst wie Stelzen aus.
+		p = run if walk.is_empty() else _mix(walk, run, smoothstep(0.55, 0.95, a))
+		# langsam: Knie weniger gebeugt (Fuss schwingt flacher durch, Schrittlaenge bleibt)
+		var flat := lerpf(0.7, 1.0, smoothstep(0.2, 0.9, a))
+		for k in ["kn_l", "kn_r"]:
+			var v0: Vector3 = p[k]
+			p[k] = Vector3(v0.x * flat, v0.y, v0.z)
 		# Bei hohem Tempo weiter ausschreiten (Beugung von Huefte und Knie verstaerken).
 		if _stride_amp > 1.001:
 			for k in ["hip_l", "hip_r", "kn_l", "kn_r"]:
@@ -1185,12 +1233,7 @@ func restore_mix(a: Array, b: Array, w: float) -> void:
 	restore(a if w < 0.5 else b)
 	position = (a[0] as Vector3).lerp(b[0], w)
 	jump_h = lerpf(a[1], b[1], w)
-	var ca: Array = a[8]
-	var cb: Array = b[8]
-	var c := []
-	for i in ca.size():
-		c.append((ca[i] as Vector3).lerp(cb[i], w))
-	fig.apply(c)
+	fig.apply(HumanFigure.mix_capture(a[8], b[8], w))
 	fig.rotation.y = lerp_angle(a[9], b[9], w)
 	_yaw = fig.rotation.y
 	_root_y = fig.root_node.position.y
