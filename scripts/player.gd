@@ -330,6 +330,12 @@ func _animate(delta: float) -> void:
 		_toe = TOE_RISE * smoothstep(-0.22, -0.03, rs) * (1.0 - smoothstep(0.06, 0.28, rs))
 		fig.root_node.position.y += _toe
 		fig._sync()
+	elif anim_kind in ["set", "pass", "free"] and anim_tech == "over" and contact_on and not airborne:
+		# Pritschen: nach dem Kontakt streckt sich der ganze Koerper bis auf die Zehenspitzen
+		var rs := now - anim_t
+		_toe = 0.05 * smoothstep(-0.02, 0.14, rs) * (1.0 - smoothstep(0.32, 0.55, rs))
+		fig.root_node.position.y += _toe
+		fig._sync()
 	_reach_ball(delta)
 	_net_guard(delta)
 	_plant_feet(delta)
@@ -461,6 +467,7 @@ var _was_bumped := false
 ## weich und macht dabei einen kleinen Schritt zur neuen Stelle. So gleitet kein Fuss ueber den
 ## Boden, auch nicht beim Drehen auf der Stelle oder wenn Laufen und Schrittlaenge nicht genau passen.
 const ARM_HIT_LEN := 0.46  # m: Schulter bis Handgelenk, Arm ganz gestreckt (Treffpunkt Angriff)
+var dbg_tg := {}  # nur fuer das Labor: Handziele dieses Takts
 var _toe := 0.0  # m: Zehenstand (Standaufschlag), so weit heben sich Koerper und Fersen
 const TOE_RISE := 0.07
 var _feet_miss := {}  # Seite -> wie weit das Bein den festen Punkt im letzten Takt verfehlt hat
@@ -495,6 +502,10 @@ func _reach_ball(delta: float) -> void:
 		# siehe _target_pose_main, damit die Fuesse am Boden bleiben)
 		var sh_y := (fig.j["sh_r"] as Node3D).global_position.y + _crouch_drop
 		crouch_want = clampf((sh_y - 0.62) - (contact_pt.y - 0.17), 0.0, 0.35) * w
+	elif contact_on and anim_kind in ["set", "pass", "free"] and anim_tech == "over" and not airborne:
+		# Pritschen: unter dem Ball in die Knie gehen, im Kontakt aus den Beinen strecken
+		var rel2 := now - anim_t
+		crouch_want = 0.1 * smoothstep(-0.65, -0.4, rel2) * (1.0 - smoothstep(-0.3, -0.12, rel2))
 	else:
 		crouch_want = 0.0
 	_reach_off = _reach_off.lerp(want, clampf(delta * 18.0, 0.0, 1.0))
@@ -688,13 +699,23 @@ func _contact_ik() -> void:
 		var fd := f * 0.75 - up * 0.65
 		hands = {"l": [fd, r + up * 0.3], "r": [fd, -r + up * 0.3]}
 	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
-		# Pritschen: Haende formen frueh das Dreieck dort, wo der Ball ankommt (ueber der Stirn),
-		# danach strecken sich die Arme in Zielrichtung (auch nach hinten beim Rueckwaertspass).
-		w = smoothstep(-0.55, -0.2, rel) * (1.0 - smoothstep(0.18, 0.38, rel))
+		# Pritschen wie im Lehrbild: frueh die Pritschhaltung (Haende vor und ueber der Stirn,
+		# Ellbogen seitlich, Daumen zu den Augen), damit unter den Ball laufen; erst kurz vor dem
+		# Kontakt gehen die Haende zum Ball. Dann strecken sich Arme und Koerper in Zielrichtung.
+		w = smoothstep(-0.95, -0.55, rel) * (1.0 - smoothstep(0.25, 0.45, rel))
 		var push := (aim_h * (0.55 if anim_kind == "set" else 0.8) + up).normalized()
-		var follow := push * 0.38 * smoothstep(0.0, 0.2, rel)
-		var hb := b + follow
+		var follow := push * 0.42 * smoothstep(0.0, 0.22, rel)
+		var head: Vector3 = fig.j["head"].global_position
+		var cup := head + up * 0.4 + f * 0.2  # Pritschhaltung vor der Stirn (head = Halsgelenk), mit dem Koerper mitgefuehrt
+		var hb := cup.lerp(b, smoothstep(-0.3, -0.04, rel)) + follow
 		tg = {"l": hb - r * 0.1 - up * 0.1 - f * 0.04, "r": hb + r * 0.1 - up * 0.1 - f * 0.04}
+		# Ellbogen zeigen nach aussen (etwa schulterbreit und etwas tiefer als die Haende), bis
+		# sich die Arme strecken.
+		for sd in ["l", "r"]:
+			var s_sign := -1.0 if sd == "l" else 1.0
+			var shp: Vector3 = fig.j["sh_" + sd].global_position
+			poles[sd] = shp + r * (0.45 * s_sign) + f * 0.12 - up * 0.02
+		pole_w = 1.0 - smoothstep(0.04, 0.2, rel)
 		# Handflaechen schauen nach vorn oben zum Ball, Finger zeigen nach oben hinten und leicht
 		# nach aussen (Daumen zur Stirn); nach dem Kontakt zeigen die Handflaechen in Zielrichtung.
 		var palm := (up * 0.8 + f * 0.6).normalized().lerp(push, smoothstep(0.0, 0.15, rel)).normalized()
@@ -776,6 +797,7 @@ func _contact_ik() -> void:
 		# Standaufschlag (der Sprungaufschlag laeuft wie der Angriff, siehe oben)
 		tg = {"r": b - up * 0.02 - f * 0.14}
 		hands = {"r": [up, aim_h]}
+	dbg_tg = tg
 	if w <= 0.001 or tg.is_empty():
 		return
 	# Beim Pritschen bleiben die Ellbogen aussen (staerkere Daempfung haelt die Haltung).
@@ -788,6 +810,9 @@ func _contact_ik() -> void:
 		# Hand am Ball: ganze Kette von der Huefte bis zur Hand haelt das Ziel, aber nur rund um
 		# den Kontakt (und beim Block). Davor und danach glaettet die Physik die Bewegung.
 		var near := 1.0 if block_pose else 1.0 - smoothstep(0.04, 0.14, absf(rel))
+		if over_set:
+			# Pritschhaltung frueh und ruhig halten (sonst schwingen die Arme erst spaet hoch)
+			near = maxf(near, smoothstep(-0.95, -0.6, rel) * (1.0 - smoothstep(0.25, 0.45, rel)))
 		if (anim_kind == "attack" or anim_kind == "serve") and airborne and sd == "r":
 			# Der Schlag ist schnell (Peitsche): der Arm folgt der Bahn eng, statt nachzuschleifen.
 			near = maxf(near, smoothstep(-0.3, -0.18, rel) * (1.0 - smoothstep(0.25, 0.4, rel)))
@@ -796,7 +821,7 @@ func _contact_ik() -> void:
 			fig.pin[k] = maxf(fig.pin.get(k, 0.0), pw)
 		var res: float
 		if over_set:
-			res = fig.ik_arm(sd, tg[sd], ws, 14, 0.12)
+			res = fig.ik_arm(sd, tg[sd], ws, 14, 0.12, poles.get(sd, Vector3.INF), pole_w)
 		else:
 			res = fig.ik_arm(sd, tg[sd], ws, 10, 0.02, poles.get(sd, Vector3.INF), pole_w)
 		if sd == "r" or over_set:

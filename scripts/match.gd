@@ -2897,6 +2897,11 @@ func _update_players(delta: float) -> void:
 	if opp != null and not opp.done:
 		opp.player.anim_kind = opp.kind
 		opp.player.anim_tech = opp.tech
+		# Zuspiel, bevor gedrueckt ist: der Zuspieler geht schon in die Pritschhaltung, wenn der
+		# Ball pritschbar ist (wie im Spiel: die Haende sind frueh oben). Gebaggert wird nur, wenn es so gedrueckt wird.
+		if opp.kind == "set" and not opp.pending and opp.tech == "bump" and opp.speed <= OVER_OK \
+				and not (opp.player.role == "L" and absf(opp.point.x) < 3.0) and clock < opp.t:
+			opp.player.anim_tech = "over"
 		# Zu spaet dran: die Bewegung haelt kurz im Treffpunkt an, bis der Ball wirklich gespielt wird
 		opp.player.anim_t = maxf(opp.t, minf(clock, opp.t + 0.12))
 		# Zu spaet dran: Arme und Haende gehen dem Ball nach, statt am geplanten Punkt zu warten.

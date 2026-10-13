@@ -239,7 +239,9 @@ func _check_player(p, tick: int, rally: bool) -> void:
 		var tj := _trace_joint
 		var bb: Basis = f.global_basis.orthonormalized()
 		var shp: Vector3 = f.j["sh_r"].global_position
-		print("   el-sh(local)=%s wr-sh=%s rel=%.3f" % [(bb.inverse() * (f.j["el_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), (bb.inverse() * (f.j["wr_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), p.now - p.anim_t])
+		print("   on=%s kind=%s/%s el-sh(local)=%s wr-sh=%s rel=%.3f" % [p.contact_on, p.anim_kind, p.anim_tech, (bb.inverse() * (f.j["el_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), (bb.inverse() * (f.j["wr_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), p.now - p.anim_t])
+		if p.dbg_tg.has("r"):
+			print("   tg_r-sh=%s" % (bb.inverse() * ((p.dbg_tg["r"] as Vector3) - shp)).snapped(Vector3.ONE * 0.01))
 		print("T%d %s %s=%s anim=%s phys=%s ikw=%s miss=%s sole=%s run=%.2f v=%.2f feet=%s" % [tick, id, tj, f.j[tj].quaternion, f._q.get(tj), f._pq.get(tj), f._ik_last.get("arm_r"), p._feet_miss, [snappedf(cur["soley_l"], 0.001), snappedf(cur["soley_r"], 0.001), snappedf(p._sole_t.get("l", 0.0), 0.001), snappedf(p._sole_t.get("r", 0.0), 0.001)], p._run_amt, p._vel.length(), {"l": [ft.get("l", {}).get("on"), snappedf(ft.get("l", {}).get("w", 0), 0.01)], "r": [ft.get("r", {}).get("on"), snappedf(ft.get("r", {}).get("w", 0), 0.01)]}])
 
 
