@@ -19,7 +19,10 @@ c = d["contacts"]
 if c:
     print("\nKontakte (Abstand Koerper-Ball, m):")
     k = collections.defaultdict(list)
-    for x in c: k[x["kind"] + "/" + x["anim"]].append(x["dist"])
+    for x in c:
+        if x["kind"] in ("dive", "land"):
+            continue
+        k[x["kind"] + "/" + x["anim"]].append(x["dist"])
     for kk, v in sorted(k.items()):
         v.sort()
         print(f"  {kk:18s} n={len(v):3d} median={v[len(v)//2]:.3f} max={v[-1]:.3f}")

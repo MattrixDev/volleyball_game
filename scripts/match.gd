@@ -2631,6 +2631,7 @@ func _on_ball_landed() -> void:
 
 
 func _fx(kind: String, pos: Vector3, strength: float) -> void:
+	_body_hit(kind, pos, strength)
 	if autoplay:
 		return
 	_rec_events.append([clock, kind, pos, strength])
@@ -2913,6 +2914,7 @@ func _update_players(delta: float) -> void:
 			if not blockers[t].is_empty() and pl in blockers[t]:
 				pl.urgent = true
 			pl.tick(delta)
+	VPlayer.separate(players[0] + players[1], delta)
 
 
 ## Wohin der Spieler den Ball spielt: Annahme zum Zuspieler, Zuspiel zum Angreifer, Angriff
@@ -3131,3 +3133,30 @@ func hint() -> String:
 			if opp != null and opp.team != human_team and opp.kind == "set":
 				return "Block lesen: linker Stick stellt den Mittelblocker am Netz hin, bevor der Ball zum Angreifer fliegt"
 	return ""
+
+
+## Ballkontakt als Stoss auf den Koerper (Semi-Ragdoll, siehe VPlayer.impact): wer den Ball
+## spielt, gibt in Flugrichtung des ankommenden Balls nach; am Block alle Blocker in der Naehe.
+func _body_hit(kind: String, pos: Vector3, strength: float) -> void:
+	var incoming := -ball_vel if ball_vel.length() > 0.1 else Vector3.DOWN
+	match kind:
+		"bump", "set":
+			if last_toucher:
+				var k := kind
+				if kind == "bump" and last_toucher.anim_kind == "dig":
+					k = "dig"
+				# Richtung, aus der der Ball kam: vor dem Kontakt flog er auf den Spieler zu
+				var come: Vector3 = (pos - last_toucher.global_position - Vector3.UP * 1.0)
+				last_toucher.impact(k, strength, -come.normalized() * 0.3 + Vector3.DOWN * 0.7 if kind == "bump" else -come)
+		"spike", "spike_perfect", "tip":
+			if last_toucher:
+				last_toucher.impact("spike", strength * (0.4 if kind == "tip" else 1.0), Vector3.ZERO)
+		"serve":
+			var sv = last_toucher
+			if sv and sv.airborne:
+				sv.impact("serve", strength * 0.6, Vector3.ZERO)
+		"block":
+			for t in 2:
+				for pl in players[t]:
+					if pl.block_pose and pl.global_position.distance_to(Vector3(pos.x, 0, pos.z)) < 1.6:
+						pl.impact("block", strength, Vector3(pl.side, 0.15, 0.0) - incoming.normalized() * 0.0)

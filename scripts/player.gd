@@ -141,6 +141,7 @@ func set_side(s: float) -> void:
 
 
 func reset_state() -> void:
+	_getup = 0.0
 	jump_h = 0.0
 	jump_v = 0.0
 	airborne = false
@@ -254,6 +255,7 @@ func _animate(delta: float) -> void:
 		_takeoff_t = now
 	if _was_air and not airborne:
 		_land_t = now
+		impact("land", clampf(-_vy_last / 4.0, 0.3, 1.2), Vector3.DOWN)
 	_was_air = airborne
 
 	# Blickrichtung: zum Ball, beim Block, Angriff und Aufschlag zum Netz (der Aufschlaeger
@@ -280,6 +282,11 @@ func _animate(delta: float) -> void:
 	fig.rotation.y = _yaw
 
 	_stiff = 20.0
+	if _was_dive and dive_timer <= 0.0:
+		_getup = GETUP_T
+	_was_dive = dive_timer > 0.0
+	if _getup > 0.0:
+		_getup = maxf(_getup - delta * (1.0 + 0.8 * _run_amt), 0.0)
 	var p := _target_pose()
 	fig.pose_spring(p, delta, _stiff)
 	_update_sec(delta)
@@ -305,7 +312,7 @@ func _animate(delta: float) -> void:
 	# Hoehe: am Boden setzt der tiefste Koerperpunkt genau auf, in der Luft traegt die Sprunghoehe.
 	# So sinkt niemand in den Boden ein, egal wie Knie und Huefte gebeugt sind.
 	fig.root_node.position = Vector3.ZERO
-	var low := fig.lowest_point(dive_timer > 0.0)
+	var low := fig.lowest_point(dive_timer > 0.0 or _getup > 0.25)
 	var y := -low
 	if airborne:
 		y = maxf(jump_h, -fig.lowest_point(false))
@@ -313,7 +320,126 @@ func _animate(delta: float) -> void:
 	fig.root_node.position.y = _root_y
 	_plant_feet(delta)
 	_contact_ik()
+	_apply_hits()
 	fig.physics_step(delta)
+
+
+# ---------------------------------------------------------------- Stoesse (Semi-Ragdoll)
+## Der Ball trifft den Koerper: Unterarme, Haende und Rumpf bekommen Schwung in Flugrichtung des
+## Balls und geben fuer einen Moment nach (weichere Gelenke), dann holt die Animation sie zurueck.
+## Im Kontaktmoment selbst haelt pin die Haende am Ball, deshalb wirkt der Stoss kurz danach.
+var _hits := []  # [ab Zeitpunkt, Art, Staerke, Richtung (Welt)]
+var _push := Vector3.ZERO  # sichtbares Wegschieben bei Zusammenprall (nur Figur, nicht die Spielposition)
+var _push_v := Vector3.ZERO
+
+
+func impact(kind: String, strength: float, dir: Vector3) -> void:
+	_hits.append([now + 0.06, kind, clampf(strength, 0.0, 1.5), dir.normalized() if dir.length() > 0.01 else Vector3.DOWN])
+
+
+func _apply_hits() -> void:
+	var i := 0
+	while i < _hits.size():
+		var h: Array = _hits[i]
+		if now < float(h[0]):
+			i += 1
+			continue
+		_hits.remove_at(i)
+		var kind: String = h[1]
+		var st: float = h[2]
+		var d: Vector3 = h[3]
+		var f := Vector3(-sin(_yaw), 0.0, -cos(_yaw))
+		var r := Vector3(cos(_yaw), 0.0, -sin(_yaw))
+		match kind:
+			"bump", "dig":
+				# Ball drueckt die Plattform nach unten/hinten, Oberkoerper nickt mit
+				for sd in ["l", "r"]:
+					_push_limb("sh_" + sd, "wr_" + sd, d, 1.2 + 2.6 * st)
+					fig.soften("sh_" + sd, 0.45, 0.28)
+					fig.soften("el_" + sd, 0.5, 0.28)
+				_push_limb("hips", "chest", d * 0.5 - f * 0.3, 0.5 + 0.8 * st)
+				fig.soften("chest", 0.6, 0.3)
+			"set":
+				# Ball federt in die Haende: Handgelenke klappen kurz nach hinten
+				for sd in ["l", "r"]:
+					_push_limb("wr_" + sd, "wr_" + sd, d, 1.5 + 2.0 * st, 0.08)
+					_push_limb("el_" + sd, "wr_" + sd, d, 0.6 + 1.0 * st)
+					fig.soften("wr_" + sd, 0.4, 0.2)
+					fig.soften("el_" + sd, 0.6, 0.2)
+			"block":
+				# harter Angriff in den Block: Haende und Arme werden zurueckgedrueckt
+				for sd in ["l", "r"]:
+					_push_limb("wr_" + sd, "wr_" + sd, d, 2.0 + 4.0 * st, 0.08)
+					_push_limb("sh_" + sd, "wr_" + sd, d, 1.0 + 2.5 * st)
+					fig.soften("sh_" + sd, 0.4, 0.35)
+					fig.soften("el_" + sd, 0.45, 0.35)
+					fig.soften("wr_" + sd, 0.35, 0.35)
+				_push_limb("hips", "head", d, 0.4 + 0.8 * st)
+				fig.soften("chest", 0.6, 0.35)
+			"spike", "serve":
+				# Rumpf klappt beim Schlag nach vorn ein, Schlagarm schwingt locker aus
+				_push_limb("hips", "head", f - Vector3.UP * 0.5, 0.8 + 1.4 * st)
+				fig.soften("chest", 0.6, 0.3)
+				fig.soften("sh_r", 0.55, 0.35)
+				fig.soften("el_r", 0.5, 0.35)
+			"land":
+				# Landung: Oberkoerper und Kopf nicken nach vorn, Arme schwingen nach unten
+				_push_limb("hips", "head", f * 0.6 - Vector3.UP, 0.6 * st)
+				_push_limb("chest", "head", f - Vector3.UP, 0.8 * st)
+				for sd in ["l", "r"]:
+					_push_limb("sh_" + sd, "wr_" + sd, -Vector3.UP + f * 0.2 + (r if sd == "r" else -r) * 0.2, 1.4 * st)
+				fig.soften("chest", 0.7, 0.25)
+				fig.soften("head", 0.6, 0.3)
+			"bump_body":
+				_push_limb("hips", "head", d, 1.0 * st)
+				fig.soften("chest", 0.5, 0.35)
+				fig.soften("head", 0.5, 0.35)
+
+
+## Schwung so, dass der Punkt am Gelenk tip (oder off m unter dem Gelenk) mit speed m/s in
+## Richtung dir ausweicht: Drehachse = Hebel x Richtung.
+func _push_limb(joint: String, tip: String, dir: Vector3, speed: float, off := 0.0) -> void:
+	var jp: Vector3 = fig.j[joint].global_position
+	var tp: Vector3 = fig.j[tip].global_position
+	if off > 0.0:
+		tp = fig.j[tip].global_transform * Vector3(0, -off, 0)
+	var lever := tp - jp
+	if lever.length() < 0.02:
+		return
+	var w_world := lever.cross(dir.normalized() * speed) / lever.length_squared()
+	fig.impulse(joint, fig.world_to_parent(joint, w_world))
+
+
+## Zusammenprall: Spieler, die sich zu nah kommen, schieben sich sichtbar weg (Federn auf der Figur).
+## Die Spielpositionen bleiben, wie das Match sie will.
+static func separate(all: Array, delta: float) -> void:
+	if delta <= 0.0:
+		return
+	for i in all.size():
+		var a: VPlayer = all[i]
+		var want := Vector3.ZERO
+		for k in all.size():
+			if k == i:
+				continue
+			var b: VPlayer = all[k]
+			var d := a.global_position - b.global_position
+			d.y = 0.0
+			var l := d.length()
+			if l < 0.55 and l > 0.001:
+				want += d / l * (0.55 - l) * 0.5
+		var w := 14.0
+		a._push_v += (want - a._push) * (w * w * delta) - a._push_v * (2.0 * 0.7 * w * delta)
+		a._push += a._push_v * delta
+		a._push = a._push.limit_length(0.3)
+		if want.length() > 0.05 and a._push_v.length() > 0.4 and not a._was_bumped:
+			a._was_bumped = true
+			a.impact("bump_body", clampf(want.length() * 4.0, 0.2, 1.0), want)
+		elif want.length() < 0.01:
+			a._was_bumped = false
+		a.fig.position = a.global_basis.inverse() * a._push
+
+
+var _was_bumped := false
 
 
 ## Feste Fuesse: ein Fuss, der am Boden steht und sich (fast) nicht bewegt, wird an dieser
@@ -333,7 +459,7 @@ const STEP_T := 0.13  # s: Dauer des Loesens / kleinen Schritts
 
 func _plant_feet(delta: float) -> void:
 	var floor_y := global_position.y
-	var free := airborne or dive_timer > 0.0 or delta <= 0.0
+	var free := airborne or dive_timer > 0.0 or _getup > 0.25 or delta <= 0.0
 	if not free:
 		for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
 			fig.pin[k] = 0.5  # am Boden folgen die Beine eng der Animation
@@ -547,9 +673,12 @@ func _contact_ik() -> void:
 		var ws := wl if (sd == "l" and wl >= 0.0) else w
 		if ws <= 0.001:
 			continue
-		# Hand am Ball: ganze Kette von der Huefte bis zur Hand haelt das Ziel
+		# Hand am Ball: ganze Kette von der Huefte bis zur Hand haelt das Ziel, aber nur rund um
+		# den Kontakt (und beim Block). Davor und danach glaettet die Physik die Bewegung.
+		var near := 1.0 if block_pose else 1.0 - smoothstep(0.04, 0.14, absf(rel))
+		var pw := smoothstep(0.3, 0.9, ws) * near
 		for k in ["sh_" + sd, "el_" + sd, "wr_" + sd, "chest", "hips"]:
-			fig.pin[k] = maxf(fig.pin.get(k, 0.0), smoothstep(0.3, 0.9, ws))
+			fig.pin[k] = maxf(fig.pin.get(k, 0.0), pw)
 		var res: float
 		if over_set:
 			res = fig.ik_arm(sd, tg[sd], ws, 14, 0.12)
@@ -835,7 +964,26 @@ static func _mix(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
 	return out
 
 
+## Nach dem Hechten: aus der Bauchlage hochdruecken und aufstehen (zweite Haelfte des
+## Meshy-Hechtbaggers, schneller abgespielt), statt mit einem Ruck im Stand zu sein. Wer schon
+## losrennt, steht schneller auf.
+const GETUP_T := 0.7
+var _getup := 0.0
+var _was_dive := false
+
+
 func _target_pose() -> Dictionary:
+	var p := _target_pose_main()
+	if _getup > 0.0 and dive_timer <= 0.0:
+		var k := 1.0 - _getup / GETUP_T
+		var clip := HumanFigure.clip_pose("vb_hechtbagger", 0.5 + 0.48 * k, false)
+		if not clip.is_empty():
+			p = _mix(clip, p, smoothstep(0.55, 1.0, k))
+			_stiff = 24.0
+	return p
+
+
+func _target_pose_main() -> Dictionary:
 	if dive_timer > 0.0:
 		_stiff = 30.0
 		return _p_dive()

@@ -195,6 +195,13 @@ func _check_player(p, tick: int, rally: bool) -> void:
 			var over: float = (pos.x - nx) * p.side  # > 0 = eigene Seite
 			worst_net = maxf(worst_net, -over)
 	_flag(id, "net_clip", tick, worst_net, worst_net > 0.04 and rally, p)
+	# Hechtsprung, Landung: als Marke merken (zum gezielten Filmen mit tools/lab/contacts.py)
+	cur["dive"] = p.dive_timer > 0.0
+	cur["air"] = p.airborne
+	if cur.dive and not pv.get("dive", false):
+		_contacts.append({"tick": tick, "kind": "dive", "player": id, "anim": p.anim_kind, "tech": p.anim_tech, "dist": 0.0, "part": ""})
+	if pv.get("air", false) and not cur.air:
+		_contacts.append({"tick": tick, "kind": "land", "player": id, "anim": p.anim_kind, "tech": p.anim_tech, "dist": 0.0, "part": ""})
 	_prev[p] = cur
 	if _trace_id == id and tick >= _trace_f0 and tick <= _trace_f1:
 		var ft: Dictionary = p._feet
