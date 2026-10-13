@@ -328,6 +328,7 @@ func _animate(delta: float) -> void:
 		fig.root_node.position.y += _toe
 		fig._sync()
 	_reach_ball(delta)
+	_net_guard(delta)
 	_plant_feet(delta)
 	_contact_ik()
 	_apply_hits()
@@ -498,6 +499,22 @@ func _reach_ball(delta: float) -> void:
 		fig._sync()
 
 
+## Netz: ragt unterhalb der Netzkante ein Koerperteil auf die andere Seite, lehnt sich der Spieler
+## so weit zurueck, dass er das Netz nicht durchdringt (vor den festen Fuessen).
+var _net_off := 0.0
+func _net_guard(delta: float) -> void:
+	var worst := 0.0
+	for n in ["head", "chest", "wr_l", "wr_r", "el_l", "el_r", "kn_l", "kn_r"]:
+		var pos: Vector3 = (fig.j[n] as Node3D).global_position
+		if pos.y < 2.38 and absf(pos.z) < 4.6:
+			worst = maxf(worst, (net_x - pos.x) * side + 0.03)  # > 0: ueber die Netzebene
+	_net_off = maxf(worst, lerpf(_net_off, 0.0, clampf(delta * 6.0, 0.0, 1.0)))
+	if _net_off > 0.002:
+		var shift := Vector3(side * minf(_net_off, 0.3), 0.0, 0.0)
+		fig.root_node.position += fig.global_basis.orthonormalized().inverse() * shift
+		fig._sync()
+
+
 func _plant_feet(delta: float) -> void:
 	var floor_y := global_position.y
 	var free := airborne or dive_timer > 0.0 or _getup > 0.25 or delta <= 0.0
@@ -656,7 +673,10 @@ func _contact_ik() -> void:
 		var ahead := (plat - hp).dot(f)
 		if ahead < 0.4:
 			plat += f * (0.4 - ahead)
-		tg = {"l": plat - r * 0.05, "r": plat + r * 0.05}
+		# beim Hinfuehren in einem Bogen vor dem Koerper, nicht dicht am Bauch entlang
+		if rel < 0.0:
+			plat += f * 0.25 * sin(PI * w)
+		tg = {"l": plat - r * 0.065, "r": plat + r * 0.065}
 		# Haende ineinander: Finger zeigen nach vorn unten, Handflaechen zueinander, Daumen parallel.
 		var fd := f * 0.75 - up * 0.65
 		hands = {"l": [fd, r + up * 0.3], "r": [fd, -r + up * 0.3]}
