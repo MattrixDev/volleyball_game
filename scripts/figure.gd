@@ -465,7 +465,14 @@ func _ik_limb(_key: String, up: Node3D, mid: Node3D, end: Node3D, target: Vector
 	var u := up.global_position
 	var l1 := u.distance_to(mid.global_position)
 	var l2 := mid.global_position.distance_to(end.global_position)
-	var dist := clampf(u.distance_to(target), absf(l1 - l2) + 0.001, l1 + l2 - 0.0005)
+	# Weiche Streckung: kurz vor ganz gestreckt waechst der Abstand nur noch langsam. Sonst
+	# schnappt das Gelenk beim Hineinreichen in einem Takt von gestreckt auf gebeugt.
+	var reach := l1 + l2
+	var soft := reach * 0.06
+	var raw := u.distance_to(target)
+	if raw > reach - soft:
+		raw = reach - soft + soft * (1.0 - exp(-(raw - reach + soft) / soft))
+	var dist := clampf(raw, absf(l1 - l2) + 0.001, reach - 0.0005)
 	# 1. Scharnier: zweimal messen und nachbeugen (die Achse liegt nicht ganz quer zum Glied)
 	for it in 2:
 		var cur := u.distance_to(end.global_position)

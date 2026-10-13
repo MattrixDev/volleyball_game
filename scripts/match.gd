@@ -1329,7 +1329,8 @@ func _do_toss() -> void:
 		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 3.2)
 	else:
 		ball_vel = Vector3(0.0, 5.0, 0.0)
-		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 2.5)
+		# 2,32 m: so hoch reicht der gestreckte Arm auf den Zehenspitzen.
+		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 2.32)
 	last_action = "toss"
 	last_touch_team = serving_team
 	ai_serve_e = ai_e("serve")
@@ -2896,8 +2897,10 @@ func _update_players(delta: float) -> void:
 	if opp != null and not opp.done:
 		opp.player.anim_kind = opp.kind
 		opp.player.anim_tech = opp.tech
-		opp.player.anim_t = opp.t
-		opp.player.contact_pt = opp.point
+		# Zu spaet dran: die Bewegung haelt kurz im Treffpunkt an, bis der Ball wirklich gespielt wird
+		opp.player.anim_t = maxf(opp.t, minf(clock, opp.t + 0.12))
+		# Zu spaet dran: Arme und Haende gehen dem Ball nach, statt am geplanten Punkt zu warten.
+		opp.player.contact_pt = opp.point.lerp(ball.position, smoothstep(0.0, 0.05, clock - opp.t))
 		opp.player.contact_aim = _contact_aim(opp)
 		opp.player.contact_on = true
 	if phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done):

@@ -26,6 +26,7 @@ var _tick0 := -1
 var _trace_id := ""  # --lab-trace=A3:4440:4470 druckt Gelenke eines Spielers
 var _trace_f0 := 0
 var _trace_f1 := 0
+var _trace_joint := "sh_r"
 
 # --- Filmen
 var shots := []
@@ -65,6 +66,8 @@ func _ready() -> void:
 			_trace_id = tr[0]
 			_trace_f0 = int(tr[1])
 			_trace_f1 = int(tr[2])
+			if tr.size() > 3:
+				_trace_joint = tr[3]
 		elif a.begins_with("--lab-end="):
 			_end_tick = int(a.get_slice("=", 1))
 	if match_node.has_signal("contact"):
@@ -205,7 +208,8 @@ func _check_player(p, tick: int, rally: bool) -> void:
 	_prev[p] = cur
 	if _trace_id == id and tick >= _trace_f0 and tick <= _trace_f1:
 		var ft: Dictionary = p._feet
-		print("T%d %s sh_r=%s anim=%s phys=%s ikw=%s feet=%s" % [tick, id, f.j["sh_r"].quaternion, f._q.get("sh_r"), f._pq.get("sh_r"), f._ik_last.get("arm_r"), {"l": [ft.get("l", {}).get("on"), snappedf(ft.get("l", {}).get("w", 0), 0.01)], "r": [ft.get("r", {}).get("on"), snappedf(ft.get("r", {}).get("w", 0), 0.01)]}])
+		var tj := _trace_joint
+		print("T%d %s %s=%s anim=%s phys=%s ikw=%s miss=%s feet=%s" % [tick, id, tj, f.j[tj].quaternion, f._q.get(tj), f._pq.get(tj), f._ik_last.get("arm_r"), p._feet_miss, {"l": [ft.get("l", {}).get("on"), snappedf(ft.get("l", {}).get("w", 0), 0.01)], "r": [ft.get("r", {}).get("on"), snappedf(ft.get("r", {}).get("w", 0), 0.01)]}])
 
 
 func _on_contact(kind: String, pos: Vector3, _strength: float) -> void:
@@ -239,7 +243,7 @@ func _on_contact(kind: String, pos: Vector3, _strength: float) -> void:
 		if df < d:
 			d = df
 			part = "forearm_" + sd
-	var c := {"tick": tick, "kind": kind, "player": _pid(p), "anim": p.anim_kind, "tech": p.anim_tech, "dist": snappedf(d, 0.001), "part": part}
+	var c := {"tick": tick, "kind": kind, "player": _pid(p), "anim": p.anim_kind, "tech": p.anim_tech, "dist": snappedf(d, 0.001), "part": part, "rel": snappedf(p.now - p.anim_t, 0.001), "pt": snappedf(pos.distance_to(p.contact_pt), 0.001)}
 	_contacts.append(c)
 	if d > T_HAND_BALL:
 		_events.append({"type": "contact_far", "player": _pid(p), "team": p.team, "num": p.number, "f0": tick, "f1": tick, "peak_f": tick, "peak": snappedf(d, 0.001), "anim": p.anim_kind, "tech": p.anim_tech, "joint": part, "ctx": kind})

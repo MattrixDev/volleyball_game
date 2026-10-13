@@ -156,6 +156,7 @@ func reset_state() -> void:
 	anim_kind = ""
 	anim_t = -10.0
 	contact_on = false
+	_reach_off = Vector3.ZERO
 	_vel = Vector3.ZERO
 	_last_pos = position
 
@@ -287,6 +288,7 @@ func _animate(delta: float) -> void:
 	_was_dive = dive_timer > 0.0
 	if _getup > 0.0:
 		_getup = maxf(_getup - delta * (1.0 + 0.8 * _run_amt), 0.0)
+	_dt_pose = delta
 	var p := _target_pose()
 	fig.pose_spring(p, delta, _stiff)
 	_update_sec(delta)
@@ -318,6 +320,14 @@ func _animate(delta: float) -> void:
 		y = maxf(jump_h, -fig.lowest_point(false))
 	_root_y = maxf(lerpf(_root_y, y, clampf(delta * 25.0, 0.0, 1.0)), -low)
 	fig.root_node.position.y = _root_y
+	# Standaufschlag: im Treffpunkt auf die Zehenspitzen, der Koerper streckt sich zum Ball.
+	_toe = 0.0
+	if anim_kind == "serve" and anim_tech == "stand" and not airborne:
+		var rs := now - anim_t
+		_toe = TOE_RISE * smoothstep(-0.22, -0.03, rs) * (1.0 - smoothstep(0.06, 0.28, rs))
+		fig.root_node.position.y += _toe
+		fig._sync()
+	_reach_ball(delta)
 	_plant_feet(delta)
 	_contact_ik()
 	_apply_hits()
@@ -446,6 +456,8 @@ var _was_bumped := false
 ## Stelle festgehalten, bis die Animation ihn anhebt oder er zu weit weg muss. Dann loest er sich
 ## weich und macht dabei einen kleinen Schritt zur neuen Stelle. So gleitet kein Fuss ueber den
 ## Boden, auch nicht beim Drehen auf der Stelle oder wenn Laufen und Schrittlaenge nicht genau passen.
+var _toe := 0.0  # m: Zehenstand (Standaufschlag), so weit heben sich Koerper und Fersen
+const TOE_RISE := 0.07
 var _feet_miss := {}  # Seite -> wie weit das Bein den festen Punkt im letzten Takt verfehlt hat
 var _sole_t := {}  # Seite -> Sohlenhoehe der Animation in diesem Takt (vor den Korrekturen)
 var _feet := {}  # Seite -> {on, anchor (Sprunggelenk Welt), basis (Fuss Welt), w, from, from_b, last}
@@ -455,6 +467,35 @@ const PLANT_V := 2.0  # m/s: schneller bewegte Fuesse werden nicht festgehalten
 const STRETCH := 0.2  # m: so weit darf der Fuss vom Ziel der Animation weg, dann Schritt
 const TWIST := 0.6  # rad: Koerper hat sich so weit gedreht, dann Schritt
 const STEP_T := 0.13  # s: Dauer des Loesens / kleinen Schritts
+
+
+## Baggern: ist der Ball ausser Reichweite (zu spaet dran, Ball seitlich), macht der Koerper einen
+## Ausfallschritt zum Ball, statt die Arme ins Leere zu strecken. Vor den festen Fuessen, damit
+## die Fuesse dabei nicht rutschen, sondern nachsetzen.
+var _reach_off := Vector3.ZERO
+var _dt_pose := 0.0
+var crouch_want := 0.0  # m: so tief soll die Huefte fuer einen tiefen Ball
+var _crouch_drop := 0.0  # m: so tief ist sie gerade (geglaettet)
+func _reach_ball(delta: float) -> void:
+	var want := Vector3.ZERO
+	if contact_on and anim_kind in ["pass", "dig", "free", "set"] and anim_tech != "over" and not airborne and dive_timer <= 0.0:
+		var rel := now - anim_t
+		var w := smoothstep(-0.32, -0.06, rel) * (1.0 - smoothstep(0.1, 0.3, rel))
+		var off: Vector3 = contact_pt - (fig.j["hips"] as Node3D).global_position
+		off.y = 0.0
+		var excess := off.length() - 0.55
+		if excess > 0.0:
+			want = off.normalized() * minf(excess, 0.5) * w
+		# tiefer Ball: in die Knie gehen, bis die Plattform unter den Ball kommt (ueber die Haltung,
+		# siehe _target_pose_main, damit die Fuesse am Boden bleiben)
+		var sh_y := (fig.j["sh_r"] as Node3D).global_position.y + _crouch_drop
+		crouch_want = clampf((sh_y - 0.62) - (contact_pt.y - 0.17), 0.0, 0.35) * w
+	else:
+		crouch_want = 0.0
+	_reach_off = _reach_off.lerp(want, clampf(delta * 18.0, 0.0, 1.0))
+	if _reach_off.length() > 0.002:
+		fig.root_node.position += fig.global_basis.orthonormalized().inverse() * _reach_off
+		fig._sync()
 
 
 func _plant_feet(delta: float) -> void:
@@ -505,7 +546,15 @@ func _plant_feet(delta: float) -> void:
 		if f.on:
 			f.w = 1.0
 			shown = f.anchor
-			_pin_foot(sd, f.anchor, f.basis, 1.0)
+			if _toe > 0.001:
+				# Ferse hebt sich, der Fuss dreht um die Zehen
+				var ft := Transform3D(f.basis, f.anchor)
+				var toe: Vector3 = ft * Vector3(0, -0.097, -0.225)
+				var ang := -asin(clampf(_toe / 0.245, 0.0, 0.8))
+				var rot := Basis((f.basis as Basis).x.normalized(), ang)
+				_pin_foot(sd, toe + rot * ((f.anchor as Vector3) - toe), rot * (f.basis as Basis), 1.0)
+			else:
+				_pin_foot(sd, f.anchor, f.basis, 1.0)
 		elif float(f.w) > 0.0:
 			# loesen: vom alten Standpunkt weich zur Animation, beim Schritt mit kleinem Bogen
 			f.w = maxf(float(f.w) - delta / STEP_T, 0.0)
@@ -598,10 +647,15 @@ func _contact_ik() -> void:
 		hands = {"l": [up - r * 0.25 + opp_dir * 0.2, opp_dir], "r": [up + r * 0.25 + opp_dir * 0.2, opp_dir]}
 	elif not contact_on and anim_kind != "serve":
 		return
-	elif anim_kind in ["pass", "dig", "free"] and anim_tech != "over":
+	elif anim_kind in ["pass", "dig", "free", "set"] and anim_tech != "over":
 		# Baggern: gestreckte Arme, Plattform aus beiden Unterarmen unter dem Ball.
 		w = smoothstep(-0.32, -0.06, rel) * (1.0 - smoothstep(0.1, 0.3, rel))
 		var plat := b - up * 0.17 + f * 0.07
+		# Plattform immer vor dem Koerper (sonst gehen die Arme durch Bauch und Beine)
+		var hp: Vector3 = fig.j["hips"].global_position
+		var ahead := (plat - hp).dot(f)
+		if ahead < 0.4:
+			plat += f * (0.4 - ahead)
 		tg = {"l": plat - r * 0.05, "r": plat + r * 0.05}
 		# Haende ineinander: Finger zeigen nach vorn unten, Handflaechen zueinander, Daumen parallel.
 		var fd := f * 0.75 - up * 0.65
@@ -688,10 +742,13 @@ func _contact_ik() -> void:
 			miss = maxf(miss, res * ws)
 	# In der Luft: fehlt dem gestreckten Arm noch etwas bis zum Ball, streckt sich der ganze
 	# Koerper ein Stueck nach (Schultergürtel, hoechstens 20 cm), statt vorbeizuschlagen.
-	if airborne and miss > 0.02 and tg.has("r"):
+	if (airborne or anim_kind == "serve") and miss > 0.02 and tg.has("r"):
 		var wr: Vector3 = fig.j["wr_r"].global_position
 		var lift: Vector3 = ((tg["r"] as Vector3) - wr).limit_length(0.25)
-		lift.y = clampf(lift.y, 0.0, 0.2)
+		lift.y = clampf(lift.y, 0.0, 0.2 if airborne else 0.05)
+		if not airborne:
+			lift.x = 0.0
+			lift.z = 0.0
 		# Verschiebung in Weltrichtung -> Figur-Raum (die Figur ist gedreht)
 		fig.root_node.position += fig.global_basis.orthonormalized().inverse() * lift
 		fig._sync()
@@ -1041,6 +1098,15 @@ func _target_pose_main() -> Dictionary:
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
 		base = _mix(base, tech, w)
 		_stiff = 20.0
+	_crouch_drop = lerpf(_crouch_drop, crouch_want, clampf(_dt_pose * 14.0, 0.0, 1.0))
+	if _crouch_drop > 0.005:
+		# Hocke: Oberschenkel nach vorn, Knie doppelt gebeugt, Fuss bleibt flach; Oberkoerper neigt sich
+		var a := acos(clampf(1.0 - _crouch_drop / 0.9, -1.0, 1.0))
+		for sd in ["l", "r"]:
+			base["hip_" + sd] = base.get("hip_" + sd, Vector3.ZERO) + Vector3(a, 0, 0)
+			base["kn_" + sd] = base.get("kn_" + sd, Vector3.ZERO) + Vector3(-2.0 * a, 0, 0)
+			base["an_" + sd] = base.get("an_" + sd, Vector3.ZERO) + Vector3(a, 0, 0)
+		base["chest"] = base.get("chest", Vector3.ZERO) - Vector3(0.35 * a, 0, 0)
 	return base
 
 
