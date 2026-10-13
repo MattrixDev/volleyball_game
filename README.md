@@ -90,6 +90,7 @@ godot res://scenes/main.tscn -- --botplay --shot-phase=REPLAY:bild.png --quit-af
 | `scripts/figure.gd` | Spielerfigur: lädt das Blender-Modell, Gelenke, weiche Posen, Bodenkontakt |
 | `tools/blender/build_player.py` | Baut das Spielermodell in Blender (`pip install bpy`) und schreibt `assets/models/player.glb` |
 | `tools/anim_strip.gd`, `tools/closeup.gd`, `tools/pose_shot.gd` | Prüfbilder für Bewegungen und Figuren |
+| `scripts/anim_lab.gd`, `tools/lab/` | Animations-Labor: misst Animationsfehler an allen Spielern und filmt die schlimmsten Stellen (siehe unten) |
 | `scripts/arena.gd` | Lädt die Halle, Licht, Banden- und Anzeigetafel-Schrift, Schiedsrichter, Linienrichter, Bänke |
 | `tools/blender/build_arena.py` | Baut Halle, Ball, Fahne und Fans in Blender (`assets/models/arena.glb`, `ball.glb`, `flag.glb`, `fan.glb`) |
 | `scripts/team_style.gd`, `scripts/teams.gd`, `teams/*.tres` | Teams: Name und Trikotfarben |
@@ -110,3 +111,15 @@ godot res://scenes/main.tscn -- --botplay --shot-phase=REPLAY:bild.png --quit-af
 ## Spielerfigur aus dem Meshy-Modell (Phase 2i)
 
 `tools/blender/build_player_meshy.py <meshy.blend> assets/models/player.glb` baut die Figur aus Mattis' Meshy-Modell (CC BY 4.0, Quelle: Low-Poly Volleyball Player): drehen, vereinfachen, nach Bereichen einfärben (Materialnamen wie im Team-System), Skelett mit den Gelenknamen aus `figure.gd`, Arme senken. Die ältere, selbst modellierte Figur steckt weiter in `build_player.py` (4 Frisuren); die Meshy-Figur hat eine Frisur, die Haarfarbe wechselt pro Spieler.
+
+### Animations-Labor
+
+Ein Match mit festem Zufall (`--seed`) läuft erst ohne Bild und misst in jedem Physik-Takt alle zwölf Spieler: Fuß im Boden, Schweben, rutschende Füße, ruckende Gelenke, Teleport, Knie überstreckt oder seitlich geknickt, Arm durch den Rumpf, Unterarme oder Beine ineinander, Körper im Netz, Spieler ineinander, Hand weit weg vom Ball beim Kontakt. Danach wird genau dasselbe Match mit Bild abgespielt und nur an den schlimmsten Stellen gefilmt: Spielkamera plus zwei feste Nahkameras mit Skelett-Linien.
+
+```
+tools/lab/lab.sh audit 11 36000 lab/      # 5 Minuten Spielzeit prüfen -> lab/audit.json, lab/zusammenfassung.txt
+tools/lab/lab.sh film 11 lab/ 8           # die 8 schlimmsten Stellen filmen -> lab/sNN.mp4, lab/sNN_bogen.jpg
+tools/lab/lab.sh film 11 lab/ 4 pop,float # nur bestimmte Fehlerarten
+```
+
+Braucht unter Linux ohne Grafikkarte `xvfb-run` und `ffmpeg`; Godot über `GODOT=/pfad/zu/godot`.

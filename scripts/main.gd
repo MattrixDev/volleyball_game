@@ -64,6 +64,14 @@ func _ready() -> void:
 	match_node.contact.connect(_on_contact)
 	match_node.point_won.connect(_on_point)
 	add_child(match_node)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--lab-"):
+			# Test: Animations-Labor (Fehler messen, Stellen filmen), siehe anim_lab.gd und tools/lab/
+			var lab := AnimLab.new()
+			lab.match_node = match_node
+			lab.main_cam = camera
+			add_child(lab)
+			break
 	var trainer := preload("res://scripts/trainer.gd").new()
 	trainer.match_node = match_node
 	hud.add_child(trainer)
