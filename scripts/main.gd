@@ -143,15 +143,21 @@ func _process(delta: float) -> void:
 				want_look = Vector3(-s * 4.0, 2.6, p.z * 0.4)
 				want_fov = 55.0
 			"attack":
-				want_pos = Vector3(s * 5.2, 3.3, p.z * 0.75 + 0.6)
-				want_look = Vector3(-s * 2.0, 2.4, p.z * 0.6)
+				# Erhoeht hinter dem Angreifer: der Blick geht ueber die Netzkante auf den Schlag
+				# und ins gegnerische Feld, nicht durch das Netz.
+				want_pos = Vector3(s * 5.0, 5.8, p.z * 0.8 + 1.2)
+				want_look = Vector3(-s * 1.2, 2.0, p.z * 0.65)
 				want_fov = 56.0
 			"block":
 				want_pos = Vector3(s * 5.6, 3.6, p.z * 0.7)
 				want_look = Vector3(-s * 3.0, 2.2, p.z * 0.6)
 				want_fov = 56.0
 	# Kritisch gedaempfte Feder statt hartem Nachziehen: kein Ruck beim Wechsel der Ansicht.
-	var w := 3.2 if mode != "replay" else 4.0
+	var w := 3.2
+	if mode == "replay":
+		w = 4.0
+	elif mode == "attack":
+		w = 5.0  # schneller in die Angriffsansicht, damit sie zum Schlag steht
 	var cdt := minf(rd, 0.1)
 	var steps := maxi(1, ceili(cdt / 0.008))
 	var h := cdt / steps
@@ -162,6 +168,7 @@ func _process(delta: float) -> void:
 		_cam_look += _look_vel * h
 		_fov_vel += ((want_fov - camera.fov) * w * w - _fov_vel * 2.0 * w) * h
 		camera.fov += _fov_vel * h
+	_shot_attack_check()
 	var off := Vector3.ZERO
 	if _shake > 0.0:
 		_shake = maxf(0.0, _shake - rd * 2.5)
@@ -339,3 +346,22 @@ func _update_hall() -> void:
 			if now_air != was and m.phase == m.Phase.RALLY and randf() < 0.55:
 				sfx.play("squeak", randf_range(0.3, 0.8))
 			_air[pl] = now_air
+
+
+## Testhilfe: --shot-attack=bild.png speichert ein Bild im Moment des eigenen Schlags
+## (zusammen mit --botplay).
+var _shot_attack_n := 0
+func _shot_attack_check() -> void:
+	if match_node == null or _shot_attack_n >= 3:
+		return
+	for a in OS.get_cmdline_user_args():
+		if not a.begins_with("--shot-attack="):
+			continue
+		var o = match_node.opp
+		if match_node.cam_mode == "attack" and o != null and not o.done and absf(o.t - match_node.clock) < 0.03:
+			_shot_attack_n += 1
+			var path: String = a.get_slice("=", 1).get_basename() + "_%d.png" % _shot_attack_n
+			get_viewport().get_texture().get_image().save_png(path)
+			print("Screenshot gespeichert: ", path)
+			if _shot_attack_n >= 3:
+				get_tree().quit()
