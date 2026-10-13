@@ -188,6 +188,8 @@ var cam_mode := ""
 var cam_subject: VPlayer = null
 var _slow_tail_until := 0.0
 var _hitstop_left := 0.0
+var _hitstop_scale := SLOW  # wie langsam der Treffer-Stopp ist
+var _time_scale := 1.0  # gleitet weich zur gewuenschten Zeitlupe
 
 var _ring_target: MeshInstance3D
 var _ring_target_mat: StandardMaterial3D
@@ -696,7 +698,9 @@ func start_rally() -> void:
 		var form := "serve" if t == serving_team else "receive"
 		for pl in players[t]:
 			var p := formation_pos(t, pl, form)
-			pl.position = p
+			# Wer nah genug steht, laeuft in die Aufstellung, statt hinzuspringen.
+			if flat_dist(pl.position, p) > 4.5 or autoplay:
+				pl.position = p
 			pl.target = p
 			pl.reset_state()
 	if check_rules:
@@ -704,7 +708,7 @@ func start_rally() -> void:
 	ball_vel = Vector3.ZERO
 	_hold_ball_at_server()
 	reset_physics_interpolation()
-	pause_until = clock + (0.15 if autoplay else 1.2)
+	pause_until = clock + (0.15 if autoplay else 0.9)
 	if serving_team == human_team:
 		serve_aim = Vector2(5.5, 0.0)
 	else:
@@ -1100,9 +1104,13 @@ func _physics_process(delta: float) -> void:
 			_ai_actions()
 			_step_ball(delta)
 		Phase.POINT_PAUSE:
+			# A / Leertaste: gleich weiter (nach einem kurzen Moment fuer den Jubel)
+			var skip: bool = start and clock >= _rally_end + 0.5
+			if skip:
+				replay_pending = false
 			if replay_pending and clock >= _rally_end + 1.1:
 				_start_replay()
-			elif clock >= pause_until:
+			elif clock >= pause_until or skip:
 				if side_change_pending:
 					_do_side_change()
 				else:
@@ -1989,7 +1997,10 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 			_do_free(o, q)
 	rally_touches += 1
 	if o.kind == "attack":
-		_fx("tip" if last_action == "tip" else "spike", before, clampf(ball_vel.length() / 30.0, 0.3, 1.0))
+		var kind_fx := "tip" if last_action == "tip" else "spike"
+		if kind_fx == "spike" and o.human and q == Q.PERFECT and o.power > 0.75:
+			kind_fx = "spike_perfect"  # lauter, tiefer Knall
+		_fx(kind_fx, before, clampf(ball_vel.length() / 30.0, 0.3, 1.0))
 	else:
 		_fx("set" if o.tech == "over" else "bump", before, clampf(o.speed / 20.0, 0.25, 1.0))
 	stats["Technik " + ("Pritschen" if o.tech == "over" else "Baggern")] = stats.get("Technik " + ("Pritschen" if o.tech == "over" else "Baggern"), 0) + (1 if o.kind != "attack" else 0)
@@ -2341,7 +2352,12 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	_slow_tail_until = clock + 0.12
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
 	if o.human:
-		big_hit.emit(1.0 if q == Q.PERFECT and o.power > 0.75 else 0.4)
+		var perfect := q == Q.PERFECT and o.power > 0.75
+		big_hit.emit(1.0 if perfect else 0.4)
+		if perfect:
+			# Kurzer Mini-Stopp beim perfekten Schlag, danach gleitet das Spiel weich weiter.
+			_hitstop_left = 0.07
+			_hitstop_scale = 0.06
 	elif last_attack_speed > 24.0:
 		big_hit.emit(0.35)
 
@@ -2480,7 +2496,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		if def == human_team:
 			big_hit.emit(1.0 if in_block >= 2 else 0.7)
 			if in_block >= 2:
-				_hitstop_left = 0.45
+				_hitstop_left = 0.3
+				_hitstop_scale = SLOW
 	elif last_action == "attack" and ball_vel.length() > 19.0 and rng.randf() < 0.35:
 		# Harter Schlag: Ball geht durch den Block, wird etwas gebremst, bleibt aber schnell.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
@@ -2610,7 +2627,7 @@ func _end_rally(winner: int, reason: String) -> void:
 		_finish_set(winner)
 	else:
 		phase = Phase.POINT_PAUSE
-		pause_until = clock + (0.2 if autoplay else 2.4)
+		pause_until = clock + (0.2 if autoplay else 1.6)
 		if deciding and not side_changed_deciding and maxi(score[0], score[1]) >= 8:
 			side_change_pending = true  # im Entscheidungssatz wird bei 8 Punkten gewechselt
 			side_changed_deciding = true
@@ -2727,9 +2744,13 @@ func _update_players(delta: float) -> void:
 	for t in 2:
 		var form := _formation(t)
 		if form != "":
+			# Im Ballwechsel verschieben sich alle ein Stueck zur Ballseite (wie echte Abwehr).
+			var shade := 0.0
+			if phase == Phase.RALLY:
+				shade = clampf((ball.position.z) * 0.15, -0.6, 0.6)
 			for pl in players[t]:
 				if not (phase == Phase.PRE_SERVE and pl == server()):
-					pl.target = formation_pos(t, pl, form)
+					pl.target = formation_pos(t, pl, form) + Vector3(0.0, 0.0, shade)
 			# Gelesener Block: der Mittelblocker bleibt dort stehen, wo der Mensch ihn hingestellt hat.
 			if t == human_team and commit_block[t]:
 				var rp := _lane_player(t, "mid")
@@ -2778,7 +2799,7 @@ func _update_players(delta: float) -> void:
 		var p := _stand_pos(opp, Vector3(opp.point.x, 0.0, opp.point.z))
 		if opp.kind == "attack":
 			var t_jump := opp.t - JUMP_RISE
-			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.05
+			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.25  # Zeit zum Beschleunigen
 			pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
 			if clock >= t_jump and not pl.has_jumped:
 				pl.jump()
@@ -2820,6 +2841,9 @@ func _update_players(delta: float) -> void:
 		sv.contact_on = phase == Phase.TOSS
 	for t in 2:
 		for pl in players[t]:
+			pl.urgent = opp != null and not opp.done and pl == opp.player
+			if not blockers[t].is_empty() and pl in blockers[t]:
+				pl.urgent = true
 			pl.tick(delta)
 
 
@@ -2891,14 +2915,23 @@ func _update_time_and_camera(real_delta: float) -> void:
 		want = 1.0
 	if _hitstop_left > 0.0:
 		_hitstop_left -= real_delta
-		want = minf(want, SLOW)
+		want = minf(want, _hitstop_scale)
 	if not zoom_on:
 		cam_mode = ""
 	if phase == Phase.REPLAY:
 		cam_mode = "replay"
 	if phase != Phase.RALLY and phase != Phase.TOSS:
 		want = 1.0
-	Engine.time_scale = clampf(want, 0.1, 1.0)
+	# Weich in die Zeitlupe hinein (schnell, damit das Timing nicht leidet) und langsamer
+	# wieder heraus, statt hart zu springen. Der Treffer-Stopp greift sofort.
+	want = clampf(want, 0.05, 1.0)
+	if _hitstop_left > 0.0 and want <= _hitstop_scale + 0.001:
+		_time_scale = want
+	elif want < _time_scale:
+		_time_scale = maxf(want, _time_scale - real_delta * 6.0)
+	else:
+		_time_scale = minf(want, _time_scale + real_delta * 1.8)
+	Engine.time_scale = _time_scale
 
 
 func _update_visuals() -> void:

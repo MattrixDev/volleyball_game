@@ -57,6 +57,10 @@ var _yaw := 0.0
 var _run_phase := 0.0
 var _run_amt := 0.0
 var _last_pos := Vector3.ZERO
+var _vel := Vector3.ZERO  # Laufgeschwindigkeit (weich beschleunigen und abbremsen)
+const ACCEL := 40.0  # m/s^2: in ca. 0,15 s auf vollem Tempo
+const ACCEL_URGENT := 110.0  # wer gerade zum Ball muss, sprintet fast sofort los
+var urgent := false  # vom Match gesetzt: dieser Spieler spielt den naechsten Ball
 var _jersey := Color.WHITE
 var _move_fwd := 1.0
 var _move_side := 0.0
@@ -141,6 +145,7 @@ func reset_state() -> void:
 	anim_kind = ""
 	anim_t = -10.0
 	contact_on = false
+	_vel = Vector3.ZERO
 	_last_pos = position
 
 
@@ -181,15 +186,25 @@ func tick(delta: float) -> void:
 		if jump_h <= 0.0:
 			jump_h = 0.0
 			airborne = false
+		_vel = Vector3.ZERO
 	elif dive_timer <= 0.3:
+		# Weich anlaufen und vor dem Ziel abbremsen statt sofort auf vollem Tempo.
+		var acc := ACCEL_URGENT if urgent else ACCEL
+		var want := Vector3.ZERO
+		var to := Vector3(target.x - position.x, 0.0, target.z - position.z)
+		var dist := to.length()
 		if manual_dir.length() > 0.15:
-			position += manual_dir.limit_length(1.0) * run_speed * delta
+			want = manual_dir.limit_length(1.0) * run_speed
+		elif dist > 0.02:
+			want = to / dist * minf(run_speed, sqrt(2.0 * acc * dist))
+		_vel = _vel.move_toward(want, acc * delta)
+		var step := _vel * delta
+		if manual_dir.length() <= 0.15 and step.length() > dist:
+			step = to  # nicht ueber das Ziel hinaus
+			_vel = Vector3.ZERO
+		position += step
+		if manual_dir.length() > 0.15:
 			target = position
-		else:
-			var to := Vector3(target.x - position.x, 0.0, target.z - position.z)
-			var dist := to.length()
-			if dist > 0.02:
-				position += to / dist * minf(dist, run_speed * delta)
 	position.x = clampf(position.x, -13.0, 13.0)
 	position.z = clampf(position.z, -8.0, 8.0)
 	# Niemand laeuft ueber die Mittellinie.
