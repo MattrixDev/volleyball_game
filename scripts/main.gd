@@ -145,9 +145,12 @@ func _process(delta: float) -> void:
 			"attack":
 				# Erhoeht hinter dem Angreifer: der Blick geht ueber die Netzkante auf den Schlag
 				# und ins gegnerische Feld, nicht durch das Netz.
-				want_pos = Vector3(s * 5.0, 5.8, p.z * 0.8 + 1.2)
-				want_look = Vector3(-s * 1.2, 2.0, p.z * 0.65)
-				want_fov = 56.0
+				# Hinterfeldangreifer stehen weit hinter der 3-m-Linie: Kamera rueckt hinter ihn und
+				# blickt weiter, damit man Anlauf und Ball sieht.
+				var back := clampf((absf(p.x) - 2.5) / 3.0, 0.0, 1.0)
+				want_pos = Vector3(s * maxf(5.0, absf(p.x) + 3.6), 5.8 + 1.0 * back, p.z * 0.8 + 1.2)
+				want_look = Vector3(-s * lerpf(1.2, 0.2, back), 2.0, p.z * 0.65)
+				want_fov = 56.0 + 6.0 * back
 			"block":
 				want_pos = Vector3(s * 5.6, 3.6, p.z * 0.7)
 				want_look = Vector3(-s * 3.0, 2.2, p.z * 0.6)

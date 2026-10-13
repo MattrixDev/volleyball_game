@@ -2140,7 +2140,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 ## Dump nur vom Zuspieler selbst: vorn am Netz, kein Libero, Ball nicht schlecht.
 func _can_dump(o: Opp) -> bool:
 	var pl := o.player
-	return pl.role != "L" and is_front_row(pl) and absf(ball.position.x) < 2.0 and ball.position.y > NET_H - 0.4
+	return pl.role != "L" and is_front_row(pl) and absf(ball.position.x) < 2.6 and ball.position.y > NET_H - 0.7
 
 
 ## Setter-Dump: der Zuspieler spielt den zweiten Ball mit einer Hand ueber das Netz,
@@ -2192,6 +2192,13 @@ func _do_setter_attack(o: Opp, q: int, e: float, lane_choice: String) -> void:
 	o.over = 0.78
 	set_tempo[o.team] = "attack"
 	setter.jump()
+	# Schlaganimation statt Zuspiel-Haltung: Kontakt ist jetzt, der Arm schlaegt zum Ziel im Gegnerfeld.
+	setter.anim_kind = "attack"
+	setter.anim_tech = ""
+	setter.anim_t = clock
+	setter.contact_pt = ball.position
+	setter.contact_aim = attack_shot(o.team, ball.position, o.rs, o.power).target
+	setter.contact_on = true
 	popup(setter, "Zuspieler schlägt!", Color(1.0, 0.85, 0.3))
 	stats["Zuspieler-Schlag"] = stats.get("Zuspieler-Schlag", 0) + 1
 	var rb := _lane_player(1 - o.team, "mid")
