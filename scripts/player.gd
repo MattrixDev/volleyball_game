@@ -57,6 +57,9 @@ var fig: HumanFigure
 ## Bewegungscharakter (move_style.gd). movement_style: Schluessel aus den Spielerdaten, leer =
 ## aus Team und Nummer ausgewuerfelt.
 var movement_style := ""
+## Aus den Spielerdaten (vom Match gesetzt): Reichweite ueber/unter dem 1,95-m-Spieler, Absprung.
+var reach_add := 0.0
+var jump_v0 := JUMP_V
 var style := MoveStyle.new()
 var _ring: MeshInstance3D
 var _yaw := 0.0
@@ -178,7 +181,7 @@ func jump() -> void:
 		return
 	airborne = true
 	has_jumped = true
-	jump_v = JUMP_V
+	jump_v = jump_v0
 	takeoff_x = absf(position.x)
 
 
@@ -187,11 +190,11 @@ func dive() -> void:
 
 
 func spike_hand() -> float:
-	return jump_h + SPIKE_REACH
+	return jump_h + SPIKE_REACH + reach_add
 
 
 func block_top() -> float:
-	return jump_h + BLOCK_REACH + hand_reach
+	return jump_h + BLOCK_REACH + reach_add + hand_reach
 
 
 ## Mitte der Blockhaende (Welt-z).

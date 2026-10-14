@@ -1,0 +1,319 @@
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "bernsteinbucht_15"
+first_name = "Fabian"
+last_name = "Hesse"
+number = 15
+role = "S"
+height_m = 1.92
+jump = 77
+power = 71
+serve = 82
+receive = 82
+defense = 86
+setting = 92
+block = 79
+speed = 94
+traits = PackedStringArray("spielmacher")
+left_handed = false
+skin = 0
+hair = 0
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "bernsteinbucht_16"
+first_name = "Mats"
+last_name = "Gerdes"
+number = 16
+role = "OH"
+height_m = 1.96
+jump = 76
+power = 83
+serve = 90
+receive = 80
+defense = 81
+setting = 74
+block = 81
+speed = 77
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 0
+hair = 2
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "bernsteinbucht_08"
+first_name = "Emil"
+last_name = "Mohr"
+number = 8
+role = "MB"
+height_m = 2.03
+jump = 77
+power = 86
+serve = 81
+receive = 52
+defense = 71
+setting = 72
+block = 94
+speed = 79
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 1
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "bernsteinbucht_07"
+first_name = "Benno"
+last_name = "Lorenz"
+number = 7
+role = "OP"
+height_m = 2.03
+jump = 90
+power = 93
+serve = 92
+receive = 72
+defense = 74
+setting = 70
+block = 81
+speed = 84
+traits = PackedStringArray("kraftpaket", "sprungwunder")
+left_handed = false
+skin = 3
+hair = 5
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "bernsteinbucht_10"
+first_name = "Simon"
+last_name = "Paulsen"
+number = 10
+role = "OH"
+height_m = 2.01
+jump = 79
+power = 82
+serve = 77
+receive = 87
+defense = 86
+setting = 78
+block = 80
+speed = 84
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 4
+hair = 3
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "bernsteinbucht_14"
+first_name = "Aaron"
+last_name = "Brandt"
+number = 14
+role = "MB"
+height_m = 2.05
+jump = 84
+power = 77
+serve = 74
+receive = 51
+defense = 71
+setting = 63
+block = 91
+speed = 79
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 0
+hair = 5
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "bernsteinbucht_12"
+first_name = "Malte"
+last_name = "Jessen"
+number = 12
+role = "L"
+height_m = 1.91
+jump = 56
+power = 40
+serve = 48
+receive = 97
+defense = 93
+setting = 81
+block = 40
+speed = 90
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 3
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "bernsteinbucht_19"
+first_name = "Joris"
+last_name = "Frost"
+number = 19
+role = "S"
+height_m = 1.86
+jump = 65
+power = 68
+serve = 72
+receive = 70
+defense = 77
+setting = 92
+block = 69
+speed = 89
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 2
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "bernsteinbucht_03"
+first_name = "Sören"
+last_name = "Claasen"
+number = 3
+role = "OH"
+height_m = 1.92
+jump = 76
+power = 83
+serve = 77
+receive = 76
+defense = 72
+setting = 62
+block = 73
+speed = 81
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 1
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "bernsteinbucht_17"
+first_name = "Kai"
+last_name = "Haas"
+number = 17
+role = "MB"
+height_m = 2.08
+jump = 74
+power = 78
+serve = 65
+receive = 48
+defense = 54
+setting = 57
+block = 87
+speed = 73
+traits = PackedStringArray("sprungwunder", "lange_arme")
+left_handed = false
+skin = 3
+hair = 0
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "bernsteinbucht_06"
+first_name = "Ole"
+last_name = "Jansen"
+number = 6
+role = "OP"
+height_m = 2.05
+jump = 77
+power = 80
+serve = 76
+receive = 59
+defense = 73
+setting = 59
+block = 75
+speed = 69
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 1
+hair = 4
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "bernsteinbucht_09"
+first_name = "Oskar"
+last_name = "Behrens"
+number = 9
+role = "L"
+height_m = 1.86
+jump = 34
+power = 28
+serve = 28
+receive = 78
+defense = 81
+setting = 66
+block = 28
+speed = 79
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 1
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "bernsteinbucht_18"
+first_name = "Henrik"
+last_name = "Peters"
+number = 18
+role = "OH"
+height_m = 2
+jump = 79
+power = 83
+serve = 81
+receive = 77
+defense = 77
+setting = 63
+block = 71
+speed = 74
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 4
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "bernsteinbucht_13"
+first_name = "Sören"
+last_name = "Conrad"
+number = 13
+role = "OH"
+height_m = 2.01
+jump = 75
+power = 83
+serve = 77
+receive = 79
+defense = 79
+setting = 71
+block = 71
+speed = 82
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 3
+hair = 4
+
+[resource]
+script = ExtResource("1")
+id = "bernsteinbucht"
+name = "SG Bernsteinbucht"
+short_name = "SGB"
+play_style = "schnell"
+jersey = Color(0.86, 0.47, 0.14, 1)
+panel = Color(0.98, 0.96, 0.92, 1)
+collar = Color(0.98, 0.96, 0.92, 1)
+logo = Color(0.98, 0.96, 0.92, 1)
+number = Color(0.98, 0.96, 0.92, 1)
+shorts = Color(0.98, 0.96, 0.92, 1)
+socks = Color(0.86, 0.47, 0.14, 1)
+shoes = Color(0.95, 0.95, 0.93, 1)
+accent = Color(0.86, 0.47, 0.14, 1)
+sole = Color(0.85, 0.85, 0.84, 1)
+libero_jersey = Color(0.2, 0.3, 0.45, 1)
+libero_panel = Color(0.98, 0.96, 0.92, 1)
+libero_number = Color(0.98, 0.96, 0.92, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])

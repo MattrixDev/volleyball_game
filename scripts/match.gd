@@ -276,6 +276,7 @@ func _spawn_team(team: int) -> void:
 	for i in 6:
 		var mm: Dictionary = r.m(r.lineup[i])
 		var pl := VPlayer.new()
+		_apply_data(pl, mm)
 		pl.setup(team, mm.role, TeamRoster.ROLE_TAG[mm.role], mm.number, _jersey(team, mm.role))
 		pl.member_id = mm.id
 		pl.slot = i + 1
@@ -292,10 +293,42 @@ func _jersey(team: int, role: String) -> Color:
 	return LIBERO_COLORS[team] if role == "L" else TEAM_COLORS[team]
 
 
+## Spielerdaten der Figur (null: Spieler ohne Daten, verhaelt sich in allem wie Staerke 70).
+func pdata(pl: VPlayer) -> PlayerData:
+	if pl == null or pl.member_id < 0 or pl.team >= rosters.size():
+		return null
+	return rosters[pl.team].m(pl.member_id).get("data")
+
+
+## Staerke als Abweichung vom normalen Spieler (-1 schwach, 0 normal, +1 Weltklasse).
+func pf(pl: VPlayer, key: String) -> float:
+	var d := pdata(pl)
+	return d.f(key) if d else 0.0
+
+
+func ptrait(pl: VPlayer, t: String) -> bool:
+	var d := pdata(pl)
+	return d != null and d.has_trait(t)
+
+
+## Zeit vom Absprung bis zum hoechsten Punkt (haengt von der Sprungkraft ab).
+func rise(pl: VPlayer) -> float:
+	return pl.jump_v0 / G if pl else JUMP_RISE
+
+
+## Groesse und Sprungkraft auf die Figur uebertragen, vor setup / change_identity.
+func _apply_data(pl: VPlayer, mm: Dictionary) -> void:
+	var d: PlayerData = mm.get("data")
+	pl.reach_add = d.reach_add() if d else 0.0
+	pl.jump_v0 = d.jump_v() if d else VPlayer.JUMP_V
+	pl.movement_style = (d.movement_style if d.movement_style != "" else d.id) if d else ""
+
+
 ## Spielerfigur bekommt einen anderen Spieler aus dem Kader (Wechsel, Libero).
 func _apply_identity(pl: VPlayer, member_id: int) -> void:
 	var mm: Dictionary = rosters[pl.team].m(member_id)
 	pl.member_id = member_id
+	_apply_data(pl, mm)
 	pl.change_identity(mm.role, TeamRoster.ROLE_TAG[mm.role], mm.number, _jersey(pl.team, mm.role))
 
 
@@ -1324,7 +1357,7 @@ func _auto_input() -> Dictionary:
 						d.bump_up = true
 			elif human_player() != null and opp != null and opp.kind == "attack":
 				d.rs = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # zweiter Blocker per rechtem Stick
-				if _due(opp.t - JUMP_RISE):
+				if _due(opp.t - rise(human_player())):
 					d.hit_down = true
 			elif opp != null and opp.team != human_team and opp.kind == "set" and rng.randf() < 0.02:
 				d.mv = Vector2(rng.randf_range(-1.0, 1.0), 0.0)  # Block lesen ausprobieren
@@ -1361,7 +1394,7 @@ func _do_toss() -> void:
 		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 2.32)
 	last_action = "toss"
 	last_touch_team = serving_team
-	ai_serve_e = ai_e("serve")
+	ai_serve_e = ai_e("serve") * clampf(1.0 - 0.3 * pf(server(), "serve"), 0.55, 1.45)
 
 
 ## Art des Aufschlags aus dem Trefferpunkt: oben Topspin, Mitte Flatter, unten kurz.
@@ -1409,6 +1442,8 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 			d = minf(d, 3.2)
 			umax = 9.0
 			clear = NET_H + 0.8
+	# Aufschlagstaerke: schnellere Aufschlaege (Aufschlagkanone beim Sprung-Topspin noch mehr).
+	umax *= 1.0 + 0.06 * pf(srv, "serve") + (0.06 if jump and style == "topspin" and ptrait(srv, "kanone") else 0.0)
 	var u := lerpf(10.0, umax, power)
 	# Super-Zone beim Aufschlag: perfekt getroffen und genau dort losgelassen.
 	var sup := false
@@ -1416,7 +1451,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 		if serving_team == human_team:
 			sup = c >= SUPER_LO and c <= SUPER_HI
 		else:
-			sup = jump and rng.randf() < 0.12
+			sup = jump and rng.randf() < 0.12 * (1.0 + pf(srv, "serve") + (0.5 if ptrait(srv, "kanone") else 0.0))
 	if sup:
 		u = 32.0 if (jump and style == "topspin") else umax * 1.12
 	if q == Q.GOOD:
@@ -1444,7 +1479,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	ball_vel = Ballistics.launch_over_net(ball.position, target, clear, 8.0, u, g)
 	flutter = 0.0
 	if style == "float" and q <= Q.GOOD:
-		flutter = 0.32 if jump else 0.26
+		flutter = (0.32 if jump else 0.26) * (1.0 + 0.15 * pf(srv, "serve")) * (1.3 if ptrait(srv, "flatter") else 1.0)
 	if trace:
 		print("AUFSCHLAG T%d %s q=%s e=%.3f p=%.2f target=%s vel=%s" % [serving_team, style, Q_TEXT[q], e, power, target, ball_vel])
 	last_action = "serve"
@@ -1537,6 +1572,15 @@ func _try_team(team: int) -> bool:
 		pl = _nearest(team, p, excluded, kind == "attack")
 	if pl == null:
 		return false
+	if kind == "attack":
+		# Grosse und sprungstarke Angreifer treffen den Ball hoeher (steiler ueber den Block).
+		var jh := pl.jump_v0 * pl.jump_v0 / (2.0 * G)
+		var h2 := H_ATTACK + clampf(pl.reach_add + jh - PlayerData.REF_JUMP_H, -0.3, 0.35)
+		if absf(h2 - h) > 0.01 and apex >= h2 + 0.05:
+			var tc2 := Ballistics.time_to_height(ball.position, ball_vel, h2, ball_g)
+			if tc2 >= 0.0:
+				tc = tc2
+				p = Ballistics.pos_at(ball.position, ball_vel, tc, ball_g)
 
 	var o := Opp.new()
 	o.team = team
@@ -1561,8 +1605,13 @@ func _try_team(team: int) -> bool:
 		_stick_lock_until = clock + 0.45
 		_need_neutral = true
 		popup(pl, "Dein Ball", Color(1.0, 0.9, 0.4))
+	# Staerken: wer gut annimmt, abwehrt, zuspielt oder schlaegt, hat als Mensch etwas mehr Zeit
+	# (groesseres Timing-Fenster) und trifft als KI genauer.
+	var sk := _touch_skill(pl, kind)
+	if o.human:
+		o.win_scale *= 1.0 + 0.12 * sk
 	if not o.human:
-		o.ai_e = ai_e(kind)
+		o.ai_e = ai_e(kind) * clampf(1.0 - 0.3 * sk, 0.55, 1.45)
 		if kind == "dig":
 			_ai_dig_limits(o, tc)
 	if kind == "attack":
@@ -1575,6 +1624,25 @@ func _try_team(team: int) -> bool:
 	return true
 
 
+## Lauftempo nach Schnelligkeit: 40 -> 8 % langsamer, 99 -> 8 % schneller.
+func _speed_k(pl: VPlayer) -> float:
+	return 1.0 + 0.08 * pf(pl, "speed")
+
+
+## Staerke fuer eine Ballberuehrung (-1 .. +1).
+func _touch_skill(pl: VPlayer, kind: String) -> float:
+	match kind:
+		"pass", "free":
+			return pf(pl, "receive")
+		"dig":
+			return pf(pl, "defense") + (0.3 if ptrait(pl, "katze") else 0.0)
+		"set":
+			return pf(pl, "setting")
+		"attack":
+			return 0.5 * pf(pl, "power") + 0.5 * pf(pl, "jump")
+	return 0.0
+
+
 ## 0 = normaler Ball, 1 = sehr harter Ball (ab ca. 16 m/s spuerbar, ab 28 m/s voll).
 func hard_ball(speed: float) -> float:
 	return clampf((speed - 16.0) / 12.0, 0.0, 1.0)
@@ -1585,8 +1653,8 @@ func hard_ball(speed: float) -> float:
 func _ai_dig_limits(o: Opp, tc: float) -> void:
 	var skill := cfg.unit("ai_defense")
 	var react := lerpf(0.42, 0.2, skill)
-	var run := lerpf(3.2, 5.5, skill)
-	var reach := lerpf(1.05, 1.6, skill)
+	var run := lerpf(3.2, 5.5, skill) * (1.0 + 0.1 * pf(o.player, "speed"))
+	var reach := lerpf(1.05, 1.6, skill) * (1.0 + 0.15 * pf(o.player, "defense") + (0.15 if ptrait(o.player, "katze") else 0.0))
 	o.start_pos = o.player.position
 	o.max_run = maxf(0.0, tc - react) * run
 	if flat_dist(o.player.position, o.point) > o.max_run + reach:
@@ -1692,9 +1760,9 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 					partner = pl
 		list.append(partner)
 		dirs.append(-signf(p.z))
-	var base_jump := t_contact - JUMP_RISE
 	for i in list.size():
 		var pl: VPlayer = list[i]
+		var base_jump := t_contact - rise(pl)
 		pl.has_jumped = false
 		pl.hand_shift = 0.0
 		pl.hand_reach = 0.0
@@ -2119,6 +2187,7 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 		spread += 0.4
 	if o.tech == "over" and o.speed <= OVER_OK:
 		spread *= 0.6
+	spread *= clampf(1.0 - 0.25 * _touch_skill(o.player, o.kind), 0.6, 1.4)
 	var off := Vector2.from_angle(rng.randf() * TAU) * rng.randf() * spread
 	var target := court_pos(o.team, Vector2(d + off.x, l + off.y))
 	target.y = H_SET
@@ -2195,6 +2264,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 		popup(setter, "Schneller Ball" if tempo == "fast" else "Schnellangriff", Color(0.6, 0.9, 1.0))
 	l += excess(e, "set") * 10.0
 	var spread: float = [0.15, 0.45, 1.2][q] + tempo_spread
+	spread *= clampf(1.0 - 0.3 * pf(o.player, "setting"), 0.6, 1.45) * (0.75 if ptrait(o.player, "spielmacher") else 1.0)
 	if bump_set:
 		spread = spread * 1.8 + 0.2
 	l += rng.randf_range(-spread, spread)
@@ -2404,12 +2474,16 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	# das bei guten Zuspielen gelegentlich auch.
 	var sup := false
 	if q == Q.PERFECT and (info.style == "spike" or info.style == "topspin"):
+		var wide := 0.03 if ptrait(o.player, "kraftpaket") else 0.0
 		if o.human:
-			sup = o.over >= SUPER_LO and o.over <= SUPER_HI
+			sup = o.over >= SUPER_LO - wide and o.over <= SUPER_HI + wide
 		else:
-			sup = o.power > 0.85 and rng.randf() < lerpf(0.1, 0.3, cfg.unit("ai_block"))
+			sup = o.power > 0.85 and rng.randf() < lerpf(0.1, 0.3, cfg.unit("ai_block")) * (1.0 + 0.6 * pf(o.player, "power") + wide * 10.0)
+	# Schlagkraft: harte Angreifer schlagen schneller (Kraftpaket noch etwas mehr).
+	var pk := 1.0 + 0.07 * pf(o.player, "power") + (0.04 if ptrait(o.player, "kraftpaket") else 0.0)
+	u *= pk
 	if sup:
-		u = SUPER_SPIKE_U
+		u = SUPER_SPIKE_U * (1.0 + 0.5 * (pk - 1.0))
 		g *= 1.1
 		ball_g = g
 	# Zu frueh: Ball fliegt zu lang (Aus). Zu spaet: Ball geht zu steil (Netz).
@@ -2618,6 +2692,14 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	# Der Mensch blockt immer gleich stark; die Staerke des KI-Blocks stellt "Gegner-Block" ein.
 	var base := 0.34 if def == human_team else lerpf(0.1, 0.34, cfg.unit("ai_block"))
 	var stuff_p := base + (0.2 if pl.hand_reach > 0.0 else 0.0) + (0.15 if in_block >= 2 else 0.0) + (0.1 if in_block >= 3 else 0.0)
+	# Blockstaerke des Blockers (Blockleser etwas mehr); ein Linkshaender von der rechten Seite
+	# schlaegt aus ungewohntem Winkel und ist schwerer zu blocken.
+	stuff_p *= 1.0 + 0.35 * pf(pl, "block")
+	if ptrait(pl, "blockleser"):
+		stuff_p += 0.06
+	var att: VPlayer = last_toucher
+	if att and ptrait(att, "linkshaender") and team_local(att.team, att.position).y > 1.5:
+		stuff_p *= 0.85
 	if read_hit[def]:
 		stuff_p += 0.2  # richtig gelesen
 	elif commit_miss[def]:
@@ -2652,7 +2734,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			if in_block >= 2:
 				_hitstop_left = 0.3
 				_hitstop_scale = SLOW
-	elif last_action == "attack" and ball_vel.length() > 19.0 and rng.randf() < 0.35:
+	elif last_action == "attack" and ball_vel.length() > 19.0 and rng.randf() < 0.35 * (1.0 + 0.3 * pf(last_toucher, "power")):
 		# Harter Schlag: Ball geht durch den Block, wird etwas gebremst, bleibt aber schnell.
 		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
 		ball_vel = Vector3(ball_vel.x * rng.randf_range(0.45, 0.6), ball_vel.y * 0.5 + rng.randf_range(-1.0, 1.5), ball_vel.z * 0.6 + rng.randf_range(-2.0, 2.0))
@@ -2912,12 +2994,12 @@ func _update_players(delta: float) -> void:
 				if rp != null and opp != null and opp.team != t and opp.kind == "set":
 					rp.target = Vector3(rp.target.x, 0.0, read_z)
 		for pl in players[t]:
-			pl.run_speed = 6.0
+			pl.run_speed = 6.0 * _speed_k(pl)
 		if opp != null and opp.team != t and opp.kind == "attack" and not blockers[t].is_empty():
 			var list: Array = blockers[t]
 			var prim: VPlayer = list[0]
 			for pl in list:
-				pl.run_speed = 3.0 if commit_miss[t] else 4.5
+				pl.run_speed = (3.0 if commit_miss[t] else 4.5) * _speed_k(pl)
 			prim.target = Vector3(side_of(t) * 0.45, 0.0, clampf(opp.point.z + (block_err[t] if t != human_team else 0.0), -4.1, 4.1))
 			# Helfer schliessen neben dem Hauptblocker (der Mensch kann ihn verschieben).
 			for i in range(1, list.size()):
@@ -2947,17 +3029,17 @@ func _update_players(delta: float) -> void:
 		var goal := Vector3(bx, 0.0, ball.position.z)
 		# Anlauf aus dem Stand: der Aufschlaeger startet so, dass er genau zum Absprung ankommt.
 		var run_dur := flat_dist(srv.position, goal) / 5.0
-		if clock < serve_ideal - JUMP_RISE - run_dur - 0.1:
+		if clock < serve_ideal - rise(srv) - run_dur - 0.1:
 			goal = srv.position
 		srv.target = goal
-		srv.run_speed = 5.0
-		if clock >= serve_ideal - JUMP_RISE and not srv.has_jumped:
+		srv.run_speed = 5.0 * _speed_k(srv)
+		if clock >= serve_ideal - rise(srv) and not srv.has_jumped:
 			srv.jump()
 	if opp != null and not opp.done:
 		var pl := opp.player
 		var p := _stand_pos(opp, Vector3(opp.point.x, 0.0, opp.point.z))
 		if opp.kind == "attack":
-			var t_jump := opp.t - JUMP_RISE
+			var t_jump := opp.t - rise(pl)
 			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.25  # Zeit zum Beschleunigen
 			pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
 			if clock >= t_jump and not pl.has_jumped:
