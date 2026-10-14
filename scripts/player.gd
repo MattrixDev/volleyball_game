@@ -565,8 +565,10 @@ func _plant_feet(delta: float) -> void:
 		if f.has("last"):
 			var dv: Vector3 = tgt - (f["last"] as Vector3)
 			vel = Vector2(dv.x, dv.z).length() / delta
-		if vel > 15.0 or f.is_empty():
-			f = {"on": false, "w": 0.0}  # Teleport (neue Aufstellung) oder erster Takt
+		# Teleport (neue Aufstellung, ab 30 cm pro Takt) oder erster Takt. Der Fuss der Laufanimation
+		# schwingt kurz mit gut 15 m/s nach vorn; das ist kein Teleport (sonst springt das Knie).
+		if vel > 36.0 or f.is_empty():
+			f = {"on": false, "w": 0.0}
 		f["last"] = tgt
 		var shown: Vector3 = tgt
 		if f.on:
@@ -611,8 +613,9 @@ func _plant_feet(delta: float) -> void:
 			var pos: Vector3 = tgt.lerp(from, k)
 			# immer im kleinen Bogen (nie ueber den Boden schleifen), hoeher bei weitem Schritt
 			var dist := Vector2(tgt.x - from.x, tgt.z - from.z).length()
-			# nur so viel anheben, wie die Animation selbst nicht schon hebt (sonst doppelt so hoch)
-			pos.y = maxf(pos.y, from.y) + clampf(dist * 0.35, 0.03, 0.06) * sqrt(sin(k * PI))
+			# Die Hoehe gleitet mit vom alten Standpunkt zur Animation: stand der Fuss hoeher (etwa nach
+			# einer Landung), fiele er sonst am Ende des Schritts auf einmal herunter (Knie springt).
+			pos.y += clampf(dist * 0.35, 0.03, 0.06) * sqrt(sin(k * PI))
 			_pin_foot(sd, pos, (f.from_b as Basis).slerp(tb, 1.0 - k), 1.0)
 			# erst wieder aufsetzen, wenn das Loesen fertig ist
 			if f.w <= 0.0:
