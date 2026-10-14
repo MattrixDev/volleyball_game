@@ -7,8 +7,8 @@ const HudScript := preload("res://scripts/hud.gd")
 var camera: Camera3D
 var match_node
 var _shake := 0.0
-var _cam_base := Vector3(-18.5, 9.5, 0.0)
-var _cam_pos := Vector3(-18.5, 9.5, 0.0)
+var _cam_base := Vector3(-22.0, 11.2, 0.0)
+var _cam_pos := Vector3(-22.0, 11.2, 0.0)
 var _cam_look := Vector3(1.5, 1.0, 0.0)
 var _cam_vel := Vector3.ZERO  # Federung: Kamera beschleunigt und bremst weich
 var _look_vel := Vector3.ZERO
@@ -120,7 +120,7 @@ func _process(delta: float) -> void:
 	var cs: float = match_node.camera_side() if match_node else -1.0
 	var want_pos := Vector3(cs * absf(_cam_base.x), _cam_base.y, bz * 0.25)
 	var want_look := Vector3(-cs * 1.5, 1.0, bz * 0.2)
-	var want_fov := 52.0
+	var want_fov := 55.0
 	var subj = match_node.cam_subject if match_node else null
 	# Nahansicht kurz halten, damit die Kamera nicht zwischen Angriff, Block und Uebersicht
 	# hin- und herspringt.
