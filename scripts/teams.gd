@@ -8,6 +8,8 @@ static var home := "nordhafen"
 static var away := "eichenberg"
 ## Nach einem Teamwechsel im Startmenue wird die Szene neu geladen und das Spiel startet sofort.
 static var autostart := false
+## Schnellspiel: ein Satz bis 15 (wie ein Entscheidungssatz, Seitenwechsel bei 8).
+static var quick := false
 
 
 static func all() -> Array:

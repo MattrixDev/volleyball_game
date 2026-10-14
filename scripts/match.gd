@@ -28,6 +28,10 @@ const DECIDING_POINTS := 15
 const SLOW := 0.35  # Tempo in der Zeitlupe
 const CHARGE_FULL := 0.6  # Sekunden (Echtzeit) bis zur vollen Kraft
 const OVERCHARGE := 1.25  # ab hier ist der Schlag ueberzogen
+## Schmale Zone im Kraftbalken: wer hier loslaesst und perfekt trifft, schlaegt mit voller Wucht.
+const SUPER_LO := 0.93
+const SUPER_HI := 1.07
+const SUPER_SPIKE_U := 34.5  # m/s, etwa 124 km/h
 const OVER_OK := 12.0  # bis zu dieser Ballgeschwindigkeit (m/s) ist Pritschen sicher
 const OVER_RISKY := 17.0  # darueber droht "Ball gehalten"
 
@@ -130,6 +134,7 @@ var set_scores: Array = []  # fertige Saetze, z.B. [[25, 21], [22, 25]]
 var sides := [-1.0, 1.0]  # Spielhaelfte je Team (x-Richtung), wechselt nach jedem Satz
 var match_first_server := 0
 var deciding := false
+var quick := false  # Schnellspiel: ein Satz bis 15
 var side_change_pending := false
 var side_changed_deciding := false
 var streak := [0, 0]  # Punkte in Folge
@@ -167,6 +172,7 @@ var _replay_live: Array = []
 var rally_touches := 0
 var points_since_replay := 99
 var last_attack_speed := 0.0
+var last_super := false  # letzter Angriff / Aufschlag war ein Wuchtschlag (Super-Zone)
 var autoplay_rallies := 200
 var trace := false
 var test_score := []  # Test: Startstand des ersten Satzes, z.B. --score=24:10
@@ -573,22 +579,40 @@ func ai_e(kind: String) -> float:
 	return mag if rng.randf() < 0.5 else -mag
 
 
+var _pops: Array = []  # lebende Popup-Labels, aeltestes zuerst
+
+
 func popup(pl: VPlayer, text: String, color: Color) -> void:
 	if autoplay or attract:
 		return
+	# Lebende Popups: das alte Popup desselben Spielers weicht dem neuen, alle anderen
+	# werden gestapelt, damit nie Text auf Text liegt.
+	_pops = _pops.filter(func(x): return is_instance_valid(x))
+	for old in _pops.duplicate():
+		if old.get_meta("pl") == pl:
+			_pops.erase(old)
+			old.queue_free()
+	while _pops.size() >= 4:
+		_pops.pop_front().queue_free()
 	var l := Label3D.new()
 	l.text = text
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	l.no_depth_test = true
-	l.font_size = 72
-	l.outline_size = 16
-	l.pixel_size = 0.006
+	l.font_size = 48
+	l.outline_size = 12
+	l.pixel_size = 0.005
 	l.modulate = color
+	l.set_meta("pl", pl)
 	add_child(l)
-	l.position = pl.position + Vector3(0, 2.8, 0)
+	var slot := 0
+	for o in _pops:
+		if absf(o.position.x - pl.position.x) < 3.0:
+			slot += 1
+	_pops.append(l)
+	l.position = pl.position + Vector3(0, 2.8 + 0.5 * slot, 0)
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(l, "position:y", l.position.y + 0.8, 0.9)
+	tw.tween_property(l, "position:y", l.position.y + 0.6, 0.9)
 	tw.tween_property(l, "modulate:a", 0.0, 0.9).set_delay(0.3)
 	tw.chain().tween_callback(l.queue_free)
 
@@ -596,7 +620,7 @@ func popup(pl: VPlayer, text: String, color: Color) -> void:
 # ---------------------------------------------------------------- Ablauf
 
 func new_match() -> void:
-	sets_to_win = cfg.sets_to_win
+	sets_to_win = 1 if quick else cfg.sets_to_win
 	sets_won = [0, 0]
 	set_scores = []
 	set_no = 0
@@ -610,6 +634,7 @@ func start_game() -> void:
 	_abort_replay()
 	attract = false
 	human_team = 0
+	quick = Teams.quick
 	for t in 2:
 		rosters[t] = TeamRoster.new(t)
 	new_match()
@@ -619,6 +644,7 @@ func back_to_title() -> void:
 	_abort_replay()
 	attract = true
 	human_team = -1
+	quick = false
 	for t in 2:
 		rosters[t] = TeamRoster.new(t)
 	new_match()
@@ -630,7 +656,7 @@ func set_target() -> int:
 
 func _start_set() -> void:
 	set_no += 1
-	deciding = sets_to_win >= 2 and sets_won[0] == sets_to_win - 1 and sets_won[1] == sets_to_win - 1
+	deciding = quick or (sets_to_win >= 2 and sets_won[0] == sets_to_win - 1 and sets_won[1] == sets_to_win - 1)
 	if set_no > 1:
 		sides = [-sides[0], -sides[1]]  # Seitenwechsel nach jedem Satz
 	var first := match_first_server if set_no % 2 == 1 else 1 - match_first_server
@@ -693,6 +719,7 @@ func start_rally() -> void:
 	commit_block = [false, false]
 	rally_touches = 0
 	last_attack_speed = 0.0
+	last_super = false
 	_rec.clear()
 	_rec_events.clear()
 	for t in 2:
@@ -1374,7 +1401,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	var clear := NET_H + 0.45
 	match style:
 		"topspin":
-			g = G * (1.45 if jump else 1.25)
+			g = G * (1.6 if jump else 1.35)
 			umax = 25.0 if jump else 19.0
 		"float":
 			umax = 22.0 if jump else 17.5
@@ -1383,6 +1410,15 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 			umax = 9.0
 			clear = NET_H + 0.8
 	var u := lerpf(10.0, umax, power)
+	# Super-Zone beim Aufschlag: perfekt getroffen und genau dort losgelassen.
+	var sup := false
+	if q == Q.PERFECT and style != "short":
+		if serving_team == human_team:
+			sup = c >= SUPER_LO and c <= SUPER_HI
+		else:
+			sup = jump and rng.randf() < 0.12
+	if sup:
+		u = 32.0 if (jump and style == "topspin") else umax * 1.12
 	if q == Q.GOOD:
 		clear += 0.3
 		u = minf(u, umax * 0.85)
@@ -1419,8 +1455,13 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	serve_time = clock
 	phase = Phase.RALLY
 	popup(srv, Q_TEXT[q] + (timing_hint(e, q) if serving_team == human_team else ""), Q_COLOR[q])
-	_fx("serve", ball.position, power * (1.0 if jump else 0.65))
-	if serving_team == human_team and q == Q.PERFECT and power > 0.8:
+	last_super = sup
+	_fx("serve", ball.position, (1.0 if sup else power) * (1.0 if jump else 0.65))
+	if serving_team == human_team and sup:
+		big_hit.emit(0.85)
+		_hitstop_left = 0.09
+		_hitstop_scale = 0.05
+	elif serving_team == human_team and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
 	plan_next()
 
@@ -2041,7 +2082,9 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	rally_touches += 1
 	if o.kind == "attack":
 		var kind_fx := "tip" if last_action == "tip" else "spike"
-		if kind_fx == "spike" and o.human and q == Q.PERFECT and o.power > 0.75:
+		if kind_fx == "spike" and last_super:
+			kind_fx = "spike_super"  # Wuchtschlag: noch tieferer Knall, Controller vibriert
+		elif kind_fx == "spike" and o.human and q == Q.PERFECT and o.power > 0.75:
 			kind_fx = "spike_perfect"  # lauter, tiefer Knall
 		_fx(kind_fx, before, clampf(ball_vel.length() / 30.0, 0.3, 1.0))
 	else:
@@ -2320,7 +2363,7 @@ func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float) -> Dict
 		var top := clampf(contact.y, 0.0, 1.0)
 		d = 7.3 - top * 2.2
 		l = _aim_lateral(hl, contact.x, 4.8)
-		res.g = G * (1.0 + 0.45 * top)
+		res.g = G * (1.08 + 0.62 * top)
 		if top > 0.3:
 			res.style = "topspin"
 	var target := court_pos(team, Vector2(-d, l))
@@ -2357,6 +2400,18 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	var d: float = info.d
 	var l: float = info.l
 	var u: float = info.u
+	# Super-Zone: perfekt getimt und genau im schmalen Bereich losgelassen. Die KI schafft
+	# das bei guten Zuspielen gelegentlich auch.
+	var sup := false
+	if q == Q.PERFECT and (info.style == "spike" or info.style == "topspin"):
+		if o.human:
+			sup = o.over >= SUPER_LO and o.over <= SUPER_HI
+		else:
+			sup = o.power > 0.85 and rng.randf() < lerpf(0.1, 0.3, cfg.unit("ai_block"))
+	if sup:
+		u = SUPER_SPIKE_U
+		g *= 1.1
+		ball_g = g
 	# Zu frueh: Ball fliegt zu lang (Aus). Zu spaet: Ball geht zu steil (Netz).
 	var x := excess(e, "attack", o.win_scale)
 	if x < 0.0:
@@ -2399,15 +2454,24 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	ball_vel = vel
 	last_action = "attack"
 	last_attack_speed = vel.length()
+	last_super = sup
 	_slow_tail_until = clock + 0.12
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
+	if sup:
+		stats["Wuchtschlag"] = stats.get("Wuchtschlag", 0) + 1
 	if o.human:
 		var perfect := q == Q.PERFECT and o.power > 0.75
 		big_hit.emit(1.0 if perfect else 0.4)
-		if perfect:
+		if sup:
+			# Wuchtschlag: etwas laengerer Mini-Stopp, dann gleitet das Spiel weich weiter.
+			_hitstop_left = 0.11
+			_hitstop_scale = 0.05
+		elif perfect:
 			# Kurzer Mini-Stopp beim perfekten Schlag, danach gleitet das Spiel weich weiter.
 			_hitstop_left = 0.07
 			_hitstop_scale = 0.06
+	elif sup:
+		big_hit.emit(0.55)
 	elif last_attack_speed > 24.0:
 		big_hit.emit(0.35)
 
@@ -3183,7 +3247,7 @@ func _body_hit(kind: String, pos: Vector3, strength: float) -> void:
 				# Richtung, aus der der Ball kam: vor dem Kontakt flog er auf den Spieler zu
 				var come: Vector3 = (pos - last_toucher.global_position - Vector3.UP * 1.0)
 				last_toucher.impact(k, strength, -come.normalized() * 0.3 + Vector3.DOWN * 0.7 if kind == "bump" else -come)
-		"spike", "spike_perfect", "tip":
+		"spike", "spike_perfect", "spike_super", "tip":
 			if last_toucher:
 				last_toucher.impact("spike", strength * (0.4 if kind == "tip" else 1.0), Vector3.ZERO)
 		"serve":
