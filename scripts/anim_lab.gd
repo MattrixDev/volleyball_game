@@ -441,7 +441,9 @@ func _update_shot(tick: int) -> void:
 			hf = hf.normalized()
 			var hr := hf.cross(Vector3.UP)
 			off = hr * 1.1 + hf * 0.3 if v[3] == "side" else hf * 1.15
-			cam.near = 0.3
+			if v[3] == "side" and s.get("back", false):
+				off = -hf * 0.85 - Vector3.UP * 0.3  # von hinten unten (ueber den Kopf zu den Haenden)
+			cam.near = 0.3 if v[3] != "side" or not s.get("back", false) else 0.05
 		cam.position = look + off + Vector3(0, 0.25, 0)
 		cam.look_at(look)
 		(v[2] as Label).text = "%s  %s  #%d  %s\nTakt %d  %s %s" % [s.get("label", ""), "AB"[int(s.team)], int(s.num), v[3], tick, pl.anim_kind, _ctx(pl)]
@@ -460,6 +462,23 @@ func _draw_skel(p) -> void:
 		_dbg_mesh.surface_add_vertex(f.j[b[0]].global_position)
 		_dbg_mesh.surface_set_color(col)
 		_dbg_mesh.surface_add_vertex(f.j[b[1]].global_position)
+	# Finger (Daumen magenta, Zeigefinger gruen), nur mit --lab-fingers
+	if f.has_fingers and OS.get_cmdline_user_args().has("--lab-fingers"):
+		var sk: Skeleton3D = f._skel
+		var tw := sk.global_transform
+		for sd in ["l", "r"]:
+			for fn in ["th", "ix"]:
+				var col := Color(1, 0, 1) if fn == "th" else Color(0, 1, 0)
+				var a := tw * sk.get_bone_global_pose(sk.find_bone(fn + "1_" + sd)).origin
+				var bt := sk.get_bone_global_pose(sk.find_bone(fn + "2_" + sd))
+				var b2 := tw * bt.origin
+				var c2: Dictionary = f._fg[fn + "2_" + sd]
+				var tip := tw * (bt * ((c2.dir as Vector3) * float(c2.len)))
+				for seg in [[a, b2], [b2, tip]]:
+					_dbg_mesh.surface_set_color(col)
+					_dbg_mesh.surface_add_vertex(seg[0])
+					_dbg_mesh.surface_set_color(col)
+					_dbg_mesh.surface_add_vertex(seg[1])
 	# Sohlen
 	for sd in ["l", "r"]:
 		var an: Transform3D = f.j["an_" + sd].global_transform

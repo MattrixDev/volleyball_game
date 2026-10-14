@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 G=${GODOT:-godot}
-ARGS=(--play --botplay)
+ARGS=(--play --botplay ${LAB_EXTRA:-})
 cmd=$1; seed=$2
 audit() {
   local ticks=$1 out=$2; mkdir -p "$out"

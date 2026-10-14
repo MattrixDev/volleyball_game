@@ -730,13 +730,15 @@ func _contact_ik() -> void:
 		var brow := head + up * 0.13 + f * 0.1  # Stirn (head = Halsgelenk)
 		var ready := brow + f * 0.22 + up * 0.1
 		var to_ball := (b - brow).normalized()
-		var at_ball := b - to_ball * 0.19 - up * 0.01
+		# Die Haende liegen hinten unten am Ball (Fingerkuppen am Ball, Handgelenke gut 7 cm dahinter)
+		var cdir := (to_ball + f * 0.5).normalized()
+		var at_ball := b - cdir * 0.21
 		# Der Ball sinkt in die Haende ein (gut 5 cm, etwa 40 % der Kontaktzeit), dann Strecken
 		var give := -to_ball * 0.055 * smoothstep(-0.025, -0.004, rel) * (1.0 - smoothstep(0.004, 0.04, rel))
 		var follow := push * 0.42 * smoothstep(0.0, 0.2, rel)
 		var hb := ready.lerp(at_ball, smoothstep(-0.2, -0.03, rel)) + give + follow
 		var open := 0.035 * smoothstep(0.04, 0.2, rel)
-		tg = {"l": hb - r * (0.12 + open), "r": hb + r * (0.12 + open)}
+		tg = {"l": hb - r * (0.13 + open), "r": hb + r * (0.13 + open)}
 		# Ellbogen zeigen nach aussen vorn (etwas breiter als die Schultern), bis sich die Arme strecken.
 		for sd in ["l", "r"]:
 			var s_sign := -1.0 if sd == "l" else 1.0
@@ -752,7 +754,7 @@ func _contact_ik() -> void:
 		var fing := (up - palm * up.dot(palm)).normalized()
 		# Das Meshy-Modell hat spiegelverkehrte Haende: die Beugeseite der Finger ist die Seite,
 		# die orient_hand als Handruecken fuehrt, deshalb -palm.
-		hands = {"l": [fing - r * 0.28, -palm], "r": [fing + r * 0.28, -palm]}
+		hands = {"l": [fing - r * 0.08, -palm], "r": [fing + r * 0.08, -palm]}
 	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne):
 		# Angriff wie im Volleyball (Bogenspannung): der Ellbogen holt hoch und weit nach hinten aus,
 		# die Hand liegt hinter dem Kopf auf Ohrhoehe, die Schlagschulter dreht zurueck und der
@@ -897,7 +899,7 @@ func _hand_shape() -> void:
 		var k := smoothstep(-0.95, -0.5, rel) * (1.0 - smoothstep(0.35, 0.6, rel))
 		var grip := smoothstep(-0.025, -0.004, rel) * (1.0 - smoothstep(0.008, 0.035, rel))
 		var rls := smoothstep(0.03, 0.12, rel)
-		shape = {"curl": lerpf(0.5, 0.08, rls), "spread": lerpf(0.34, 0.45, rls), "thumb": lerpf(0.9, 0.7, rls), "grip": 0.65 * grip}
+		shape = {"curl": lerpf(0.4, 0.08, rls), "spread": lerpf(0.3, 0.38, rls), "thumb": lerpf(1.15, 0.9, rls), "grip": 0.65 * grip}
 		shape = _mix_shape(HumanFigure.FINGER_REST, shape, k)
 	elif anim_kind in ["pass", "dig", "free", "set"]:
 		# Baggern: Haende ineinander, Finger locker gebeugt, Daumen nebeneinander
