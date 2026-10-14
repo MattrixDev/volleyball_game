@@ -52,9 +52,9 @@ func has_trait(t: String) -> bool:
 	return traits.has(t)
 
 
-## Abweichung einer Staerke vom normalen Spieler: 40 -> -1, 70 -> 0, 99 -> knapp +1.
+## Abweichung einer Staerke vom normalen Spieler: 50 -> -1, 70 -> 0, 90 -> +1 (begrenzt auf -1,5 .. +1,4).
 func f(key: String) -> float:
-	return clampf((float(get(key)) - 70.0) / 30.0, -1.5, 1.0)
+	return clampf((float(get(key)) - 70.0) / 20.0, -1.5, 1.4)
 
 
 ## So viel hoeher (m) als ein Spieler mit 1,95 m reicht er im Stand mit gestrecktem Arm.

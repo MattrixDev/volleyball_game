@@ -217,6 +217,11 @@ func _ready() -> void:
 	rng.randomize()
 	if not OS.get_cmdline_user_args().has("--autoplay"):
 		cfg.load_file()
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--home="):
+			Teams.home = a.get_slice("=", 1)  # Test: Teams waehlen
+		elif a.begins_with("--away="):
+			Teams.away = a.get_slice("=", 1)
 	for t in 2:
 		_spawn_team(t)
 	_make_ball()

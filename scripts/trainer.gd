@@ -130,7 +130,7 @@ func _rebuild() -> void:
 	for slot in [1, 2, 3, 4, 5, 6]:
 		var id: int = r.lineup[slot - 1]
 		var mm: Dictionary = r.m(id)
-		var label := "P%d  %s #%d %s" % [slot, TeamRoster.ROLE_TAG[mm.role], mm.number, mm.name]
+		var label := "P%d  %s #%d %s%s" % [slot, TeamRoster.ROLE_TAG[mm.role], mm.number, mm.name, _info(mm)]
 		if id == _out_id:
 			label = "▶ " + label
 		left.add_child(_button(label, _on_pick_out.bind(id), mm.role != "L"))
@@ -139,7 +139,7 @@ func _rebuild() -> void:
 		var mm: Dictionary = r.m(id)
 		if mm.role == "L":
 			continue
-		var label := "%s #%d %s" % [TeamRoster.ROLE_TAG[mm.role], mm.number, mm.name]
+		var label := "%s #%d %s%s" % [TeamRoster.ROLE_TAG[mm.role], mm.number, mm.name, _info(mm)]
 		var enabled := _out_id >= 0 and r.sub_error(_out_id, id) == ""
 		right.add_child(_button(label, _on_sub_in.bind(id), enabled))
 	cols.add_child(left)
@@ -151,6 +151,12 @@ func _rebuild() -> void:
 	_box.add_child(_text("Ein Wechsel pro Spieler: Wer raus ist, darf nur für seinen Ersatz zurück. Zurück ins Spiel: T / Y oder B.", 16, Color(0.6, 0.63, 0.7)))
 	_box.add_child(_button("Weiter spielen", close))
 	first.call_deferred("grab_focus")
+
+
+## Groesse, Wertung und Spielstil hinter dem Namen ("  ·  2,04 m · 78 · Lange Arme").
+func _info(mm: Dictionary) -> String:
+	var d: PlayerData = mm.get("data")
+	return "  ·  " + d.summary() if d else ""
 
 
 func _on_timeout() -> void:
