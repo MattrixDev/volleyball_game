@@ -7,9 +7,10 @@ Das Meshy-Modell hat ausmodellierte Finger, aber nur einen Handknochen (wr_l/wr_
      Seitenlage gruppiert) und legt durch jeden Finger eine Achse (Hauptrichtung der Punkte),
   2. setzt pro Finger zwei Knochen (Grundglied ab dem Knoechel, Mittel-+Endglied ab dem
      Mittelgelenk) und zwei Daumenknochen (Sattelgelenk -> Grundgelenk -> Spitze),
-  3. verteilt das bisherige Handgewicht jedes Punkts auf Mittelhand und Fingerglieder: je
+  3. zieht den Wulst an der Kleinfingerseite (sieht aus wie ein zweiter Daumen) an die Handkante,
+  4. verteilt das bisherige Handgewicht jedes Punkts auf Mittelhand und Fingerglieder: je
      naeher ein Punkt an einem Knochenstueck liegt, desto mehr gehoert er dazu (weich an den Gelenken),
-  4. schreibt die glb wieder heraus (gleiche Exportoptionen wie build_figure_rigged.py).
+  5. schreibt die glb wieder heraus (gleiche Exportoptionen wie build_figure_rigged.py).
 Die Knochen heissen th1_r, th2_r, ix1_r, ix2_r, md1_r, ... (Daumen, Zeige-, Mittel-, Ring-, kleiner Finger).
 --test-curl beugt alle Finger zum Test und speichert die Punkte als <ausgabe>_curl.npy.
 """
@@ -46,6 +47,26 @@ def seg_dist(p, a, b):
     t = np.clip(((p - a) @ ab) / max(ab @ ab, 1e-9), 0.0, 1.0)
     return np.linalg.norm(p - (a + t[:, None] * ab), axis=1)
 
+
+# Das Meshy-Netz hat an der Kleinfingerseite jeder Hand einen zweiten "Daumen" (ein Wulst, der wie
+# ein sechster Finger absteht, z 0,935-1,0, y bis -0,096). Er wird an die Handkante gezogen.
+for sd, sx in (("r", 1.0), ("l", -1.0)):
+    g = body.vertex_groups["wr_" + sd].index
+    for v in body.data.vertices:
+        if not any(gg.group == g and gg.weight > 0.0 for gg in v.groups):
+            continue
+        p = mw @ v.co
+        x, y, z = p.x * sx, p.y, p.z
+        if y >= -0.078 or z < 0.925 or z > 1.01:
+            continue
+        t = min((-0.078 - y) / 0.018, 1.0)
+        fz = min(1.0, (z - 0.925) / 0.012, (1.01 - z) / 0.012)  # weich an den Enden
+        y2 = -0.078 + (y + 0.078) * 0.12
+        x2 = x + (0.207 - x) * 0.6 * t
+        p.y = y + (y2 - y) * fz
+        p.x = (x + (x2 - x) * fz) * sx
+        v.co = mwi @ p
+V = np.array([list(mw @ v.co) for v in body.data.vertices])
 
 bones = {}  # name -> (head, tail, parent)
 new_w = {}  # name -> {vertex index: weight}
