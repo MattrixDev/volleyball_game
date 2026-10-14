@@ -1770,28 +1770,52 @@ func _rally_input(inp: Dictionary) -> void:
 				elif inp.over_up:
 					_human_touch("over", "")
 	elif hp != null and not blockers[human_team].is_empty() and hp == blockers[human_team][0]:
-		var d := _stick_dir(mv)
-		# Doppelblock: der rechte Stick steuert den zweiten Blocker (sonst schliesst er von selbst).
-		var helper: VPlayer = blockers[human_team][1] if blockers[human_team].size() > 1 else null
-		var d2 := _stick_dir(inp.rs)
+		# Einzel- und Dreierblock: beide Sticks steuern den ganzen Block. Doppelblock: der linke
+		# Stick gehoert dem Blocker, der aus deiner Sicht links steht, der rechte dem rechten.
+		var team_block: Array = []
+		for b in blockers[human_team]:
+			if b != null:
+				team_block.append(b)
+		var s := side_of(human_team)
 		var rs_on: bool = inp.rs.length() > 0.3
-		var dt := get_physics_process_delta_time()
-		if not hp.airborne:
-			hp.manual_dir = Vector3(0, 0, d.z)
-			if helper != null and not helper.airborne and rs_on:
-				helper.manual_dir = Vector3(0, 0, d2.z)
-			if inp.hit_down and not hp.has_jumped:
-				hp.jump()
-				if helper != null and not helper.has_jumped:
-					helper.jump()
-					_ai_block_hands(human_team, helper)
+		var both := mv
+		if inp.rs.length() > mv.length():
+			both = inp.rs
+		var ctl: Dictionary = {}  # Blocker -> Stickrichtung (Vector2) oder null = KI
+		if team_block.size() == 2:
+			var left_b: VPlayer = team_block[0]
+			var right_b: VPlayer = team_block[1]
+			if -s * left_b.position.z > -s * right_b.position.z:
+				left_b = team_block[1]
+				right_b = team_block[0]
+			ctl[left_b] = mv
+			ctl[right_b] = inp.rs if rs_on else null
 		else:
-			# In der Luft: Haende mit dem Stick verschieben, Stick nach vorn = ueber das Netz greifen.
-			hp.hand_shift = move_toward(hp.hand_shift, d.z * 0.45, 3.0 * dt)
-			hp.hand_reach = 0.12 if mv.y > 0.5 else 0.0
-			if helper != null and helper.airborne and rs_on:
-				helper.hand_shift = move_toward(helper.hand_shift, d2.z * 0.45, 3.0 * dt)
-				helper.hand_reach = 0.12 if inp.rs.y > 0.5 else 0.0
+			for b in team_block:
+				ctl[b] = both
+		var dt := get_physics_process_delta_time()
+		var any_jump := false
+		for b in team_block:
+			var c = ctl[b]
+			var cd := Vector3.ZERO
+			var cy := 0.0
+			if c != null:
+				cd = _stick_dir(c)
+				cy = c.y
+			if not b.airborne:
+				if c != null:
+					b.manual_dir = Vector3(0, 0, cd.z)
+			else:
+				if c != null:
+					# In der Luft: Haende mit dem Stick verschieben, Stick nach vorn = ueber das Netz greifen.
+					b.hand_shift = move_toward(b.hand_shift, cd.z * 0.45, 3.0 * dt)
+					b.hand_reach = 0.12 if cy > 0.5 else 0.0
+		if inp.hit_down and not hp.airborne and not hp.has_jumped:
+			for b in team_block:
+				if not b.has_jumped:
+					b.jump()
+					if b != hp:
+						_ai_block_hands(human_team, b)
 
 
 func _attack_input(inp: Dictionary) -> void:
