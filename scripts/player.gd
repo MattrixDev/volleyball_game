@@ -452,10 +452,23 @@ static func separate(all: Array, delta: float) -> void:
 			var l := d.length()
 			if l < 0.55 and l > 0.001:
 				want += d / l * (0.55 - l) * 0.5
-		var w := 14.0
+			# Vorausschauen: laufen zwei aufeinander zu (oder durcheinander durch, etwa beim
+			# Positionswechsel), weichen sie schon vorher seitlich aus. Sonst kommt die Feder zu spaet.
+			var rv: Vector3 = a._vel - b._vel
+			rv.y = 0.0
+			var rv2 := rv.length_squared()
+			if rv2 > 1.0 and l < 2.0:
+				var t := clampf(-d.dot(rv) / rv2, 0.0, 0.3)
+				if t > 0.0:
+					var c := d + rv * t
+					var lc := c.length()
+					if lc < 0.6:
+						var side := c / lc if lc > 0.03 else Vector3(-rv.z, 0.0, rv.x).normalized()
+						want += side * (0.6 - lc) * 0.5 * (1.0 - t / 0.3 * 0.6)
+		var w := 18.0
 		a._push_v += (want - a._push) * (w * w * delta) - a._push_v * (2.0 * 0.7 * w * delta)
 		a._push += a._push_v * delta
-		a._push = a._push.limit_length(0.3)
+		a._push = a._push.limit_length(0.4)
 		if want.length() > 0.05 and a._push_v.length() > 0.4 and not a._was_bumped:
 			a._was_bumped = true
 			a.impact("bump_body", clampf(want.length() * 4.0, 0.2, 1.0), want)
