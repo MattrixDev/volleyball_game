@@ -54,6 +54,10 @@ var contact_on := false
 var net_x := 0.0  # Lage des Netzes (x), nur zum Testen anders
 
 var fig: HumanFigure
+## Bewegungscharakter (move_style.gd). movement_style: Schluessel aus den Spielerdaten, leer =
+## aus Team und Nummer ausgewuerfelt.
+var movement_style := ""
+var style := MoveStyle.new()
 var _ring: MeshInstance3D
 var _yaw := 0.0
 var _run_phase := 0.0
@@ -92,6 +96,7 @@ func setup(p_team: int, p_role: String, _tag_letter: String, p_number: int, colo
 	fig = HumanFigure.new()
 	add_child(fig)
 	var h := hash(team * 1000 + number)
+	_pick_style()
 	fig.build(_colors(color), true, (h / 13) % HumanFigure.HAIR_STYLES, false, 1.04 + 0.07 * float((h / 31) % 10) / 9.0)
 	fig.set_number(number, _number_color(color), (Teams.playing()[team] as TeamStyle).number)
 	fig.pose(_p_idle())
@@ -129,9 +134,14 @@ func _number_color(_jersey_color: Color) -> Color:
 
 
 ## Neue Identitaet (Wechsel, Libero): Rolle, Nummer und Trikotfarbe tauschen.
+func _pick_style() -> void:
+	style = MoveStyle.from_key(movement_style if movement_style != "" else "%d-%d" % [team, number])
+
+
 func change_identity(p_role: String, _tag_letter: String, p_number: int, color: Color) -> void:
 	role = p_role
 	number = p_number
+	_pick_style()
 	var c := _colors(color)
 	for k in c:
 		fig.set_color(k, c[k])
@@ -295,7 +305,13 @@ func _animate(delta: float) -> void:
 		_getup = maxf(_getup - delta * (1.0 + 0.8 * _run_amt), 0.0)
 	_dt_pose = delta
 	var p := _target_pose()
-	fig.pose_spring(p, delta, _stiff)
+	if dive_timer <= 0.0 and _getup <= 0.0:
+		# Haltung: Oberkoerper etwas weiter vorn oder aufrechter, Kopf etwas anders
+		p["chest"] = (p.get("chest", Vector3.ZERO) as Vector3) + Vector3(-style.posture, 0, 0)
+		p["head"] = (p.get("head", Vector3.ZERO) as Vector3) + Vector3(style.posture * 0.6 + style.head, 0, 0)
+	fig.phys_k = 42.0 * lerpf(1.0, style.tempo, 0.7)
+	fig.phys_zeta = style.sway
+	fig.pose_spring(p, delta, _stiff * style.tempo)
 	_update_sec(delta)
 	# Hechten: ganzer Koerper kippt nach vorn.
 	var tilt := 0.0
@@ -769,7 +785,7 @@ func _contact_ik() -> void:
 		for sd in ["l", "r"]:
 			var s_sign := -1.0 if sd == "l" else 1.0
 			var shp: Vector3 = fig.j["sh_" + sd].global_position
-			poles[sd] = shp + r * (0.55 * s_sign) + f * 0.1 - up * 0.1
+			poles[sd] = shp + r * (0.55 * style.set_elbows * s_sign) + f * 0.1 - up * 0.1
 		pole_w = 1.0 - smoothstep(0.04, 0.2, rel)
 		# Handflaechen schauen zum Ball (nach dem Kontakt in Zielrichtung), die Finger nach oben und
 		# leicht nach aussen, so zeigen die Daumen nach innen zu den Augen (Dreieck vor der Stirn).
@@ -968,14 +984,50 @@ func _p_idle() -> Dictionary:
 	_arm(p, "r", 0.1, 0.1, 0.25)
 	_leg(p, "l", 0.1, 0.15, 0.05)
 	_leg(p, "r", 0.1, 0.15, 0.05)
-	return p
+	# Eigenheit zwischen den Ballwechseln (je Spieler eine), immer wieder fuer ein paar Sekunden
+	var t := now * style.bob_rate + style.bob_phase * 3.0
+	var on := smoothstep(0.0, 0.25, fposmod(t, 7.0) / 7.0) * (1.0 - smoothstep(0.55, 0.75, fposmod(t, 7.0) / 7.0))
+	if on <= 0.001:
+		return p
+	var q := p.duplicate()
+	match style.idle:
+		0:
+			# Gewicht von einem Bein aufs andere, ein Knie locker
+			var w := sin(t * 1.3)
+			q["hips"] = Vector3(0, 0, w * 0.06)
+			_leg(q, "l", 0.1 + maxf(w, 0.0) * 0.15, 0.15 + maxf(w, 0.0) * 0.35, 0.08)
+			_leg(q, "r", 0.1 + maxf(-w, 0.0) * 0.15, 0.15 + maxf(-w, 0.0) * 0.35, 0.08)
+		1:
+			# Auf den Fussballen wippen und die Arme ausschuetteln
+			var b := absf(sin(t * 7.0))
+			_leg(q, "l", 0.25 + b * 0.12, 0.4 + b * 0.25, 0.1)
+			_leg(q, "r", 0.25 + b * 0.12, 0.4 + b * 0.25, 0.1)
+			var sh := sin(t * 18.0) * 0.12
+			_arm(q, "l", 0.15 + sh, 0.2, 0.3 - sh)
+			_arm(q, "r", 0.15 - sh, 0.2, 0.3 + sh)
+		2:
+			# Haende in die Hueften
+			_arm(q, "l", 0.25, 0.75, 1.6, 0.3)
+			_arm(q, "r", 0.25, 0.75, 1.6, 0.3)
+			q["chest"] = Vector3(0.04, 0, 0)
+		3:
+			# Haende auf die Knie, kurz durchschnaufen
+			q["hips"] = Vector3(-0.45, 0, 0)
+			q["chest"] = Vector3(-0.35, 0, 0)
+			q["head"] = Vector3(0.55, 0, 0)
+			_arm(q, "l", 0.75, 0.12, 0.25)
+			_arm(q, "r", 0.75, 0.12, 0.25)
+			_leg(q, "l", 0.55, 0.45, 0.12)
+			_leg(q, "r", 0.55, 0.45, 0.12)
+	return _mix(p, q, on)
 
 
 func _p_ready() -> Dictionary:
 	# Meshy: Bereitschaftshaltung, langsam vor und zurueck abgespielt (wirkt wie Wippen).
-	var cu := 0.05 + 0.55 * (0.5 - 0.5 * cos((now + number * 0.9) * PI / 2.2))
+	var cu := 0.05 + 0.55 * (0.5 - 0.5 * cos(now * style.bob_rate * PI / 2.2 + style.bob_phase))
 	var clip := HumanFigure.clip_pose("vb_bereitschaft", cu, false)
 	if not clip.is_empty():
+		MoveStyle.legs(clip, style.stance_depth, style.stance_width)
 		return clip
 	# Leichtes Wippen und Gewicht verlagern, damit niemand wie eingefroren dasteht.
 	var t := now * 3.2 + number * 1.7
@@ -1017,6 +1069,11 @@ func _p_run(a: float) -> Dictionary:
 			for k in ["hip_l", "hip_r", "kn_l", "kn_r"]:
 				var v: Vector3 = p[k]
 				p[k] = Vector3(v.x * _stride_amp, v.y, v.z)
+	# Armschwung je Spieler staerker oder schwaecher
+	if absf(style.arm_swing - 1.0) > 0.01:
+		for k in ["sh_l", "sh_r"]:
+			var v: Vector3 = p.get(k, Vector3.ZERO)
+			p[k] = Vector3(v.x * style.arm_swing, v.y, v.z)
 	var side_clip := HumanFigure.clip_pose("seitschritt_rechts" if _move_side > 0.0 else "seitschritt_links", fposmod(_run_phase / 4.4, 1.0))
 	if side_w > 0.0 and not side_clip.is_empty():
 		p = _mix(p, side_clip, side_w)
@@ -1093,11 +1150,13 @@ func _p_spike(rel: float) -> Dictionary:
 
 ## Anlauf vor dem Absprung: Arme weit nach hinten, tief in die Knie.
 func _p_approach() -> Dictionary:
-	var p := {"hips": Vector3(-0.3, 0, 0), "chest": Vector3(-0.35, 0, 0), "head": Vector3(0.5, 0, 0)}
-	_arm(p, "l", -1.0, 0.15, 0.2)
-	_arm(p, "r", -1.0, 0.15, 0.2)
-	_leg(p, "l", 0.8, 1.3, 0.1)
-	_leg(p, "r", 0.8, 1.3, 0.1)
+	# Je Spieler (und je Anlauf ein wenig) tiefer oder hoeher, Arme weiter oder weniger weit hinten
+	var d := style.approach_depth * (1.0 + 0.05 * MoveStyle.noise(anim_t, number))
+	var p := {"hips": Vector3(-0.3 * d, 0, 0), "chest": Vector3(-0.35 * d, 0, 0), "head": Vector3(0.5, 0, 0)}
+	_arm(p, "l", -1.0 * d, 0.15, 0.2)
+	_arm(p, "r", -1.0 * d, 0.15, 0.2)
+	_leg(p, "l", 0.8 * d, 1.3 * d, 0.1)
+	_leg(p, "r", 0.8 * d, 1.3 * d, 0.1)
 	return p
 
 
@@ -1172,15 +1231,32 @@ func _p_serve_hold() -> Dictionary:
 
 
 func _p_celebrate() -> Dictionary:
-	var clip := HumanFigure.clip_pose("jubel_faust", 1.0 - clampf((celebrate_until - now) / 1.6, 0.0, 1.0), false)
-	if not clip.is_empty():
+	var k := 1.0 - clampf((celebrate_until - now) / 1.6, 0.0, 1.0)  # 0..1 durch den Jubel
+	var clip := HumanFigure.clip_pose("jubel_faust", k, false)
+	if style.cheer == 0 and not clip.is_empty():
 		return clip
-	var pump := sin(now * 9.0 + number) * 0.25
 	var p := {"chest": Vector3(0.15, 0, 0), "head": Vector3(0.5, 0, 0)}
-	_arm(p, "l", 2.7 + pump, 0.55, 0.7)
-	_arm(p, "r", 2.7 - pump, 0.55, 0.7)
 	_leg(p, "l", 0.1, 0.15, 0.1)
 	_leg(p, "r", 0.1, 0.15, 0.1)
+	match style.cheer:
+		2:
+			# "Komm schon!": Faust nach unten gezogen, Oberkoerper nach vorn, in die Knie
+			var pull := smoothstep(0.1, 0.25, k) * (1.0 - smoothstep(0.8, 1.0, k))
+			p = {"hips": Vector3(-0.25 * pull, 0, 0), "chest": Vector3(-0.35 * pull, 0, 0), "head": Vector3(0.45, 0, 0)}
+			_arm(p, "r", lerpf(0.3, 0.9, pull), 0.35, lerpf(0.4, 2.0, pull))
+			_arm(p, "l", 0.35, 0.3, 0.9)
+			_leg(p, "l", 0.45 * pull + 0.1, 0.8 * pull + 0.15, 0.18)
+			_leg(p, "r", 0.45 * pull + 0.1, 0.8 * pull + 0.15, 0.18)
+		3:
+			# Klatschen vor der Brust
+			var c := 0.5 + 0.5 * sin(now * 14.0)
+			_arm(p, "l", 1.25, lerpf(-0.05, 0.35, c), 0.7)
+			_arm(p, "r", 1.25, lerpf(-0.05, 0.35, c), 0.7)
+		_:
+			# Beide Arme hoch und pumpen
+			var pump := sin(now * 9.0 + number) * 0.25
+			_arm(p, "l", 2.7 + pump, 0.55, 0.7)
+			_arm(p, "r", 2.7 - pump, 0.55, 0.7)
 	return p
 
 
@@ -1320,7 +1396,9 @@ func _p_over(rel: float) -> Dictionary:
 ## Baggern: Meshy-Kernanimation (gestreckte Arme, Schwung aus den Beinen), sonst eigene Haltung.
 func _p_under(rel: float) -> Dictionary:
 	var clip := _clip_at("kern_baggern", rel, BUMP_KEYS)
-	return _p_bump(rel) if clip.is_empty() else clip
+	var p := _p_bump(rel) if clip.is_empty() else clip
+	MoveStyle.legs(p, style.bump_depth * (1.0 + 0.04 * MoveStyle.noise(anim_t, number + 7)), 0.0)
+	return p
 
 
 func _p_land() -> Dictionary:
