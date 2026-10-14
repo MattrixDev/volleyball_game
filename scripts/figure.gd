@@ -202,9 +202,7 @@ func _sync() -> void:
 ## thumb = Daumen abspreizen, grip = zugreifen), und der Ball ist ein fester Koerper: ein Finger, der
 ## in ihn hineinbeugt, wird an seiner Oberflaeche aufgehalten (oder zurueckgedrueckt). So legen sich
 ## die Finger von selbst um den Ball und geben beim Kontakt nach.
-## Die "Handflaeche" ist hier die Seite, zu der sich die Finger beugen: beim Meshy-Modell sind die
-## Haende spiegelverkehrt modelliert (Daumen hinten), deshalb ist das die Handrueckenseite des Netzes;
-## so sitzt der Daumen anatomisch richtig (rechte Hand: Handflaeche zeigt nach aussen, Daumen hinten).
+## In Ruhe (Arm haengt) zeigt die Handflaeche zum Koerper und der Daumen nach vorn.
 const FINGERS := ["th", "ix", "md", "rg", "pk"]
 const FINGER_REST := {"curl": 0.22, "spread": 0.04, "thumb": 0.15, "grip": 0.0}
 const FINGER_SKIN := 0.009  # halbe Fingerdicke
@@ -219,7 +217,7 @@ func _build_fingers() -> void:
 		return
 	has_fingers = true
 	for sd in ["l", "r"]:
-		var n := Vector3(1.0 if sd == "r" else -1.0, 0.0, 0.0)  # Beugeseite in Ruhe (Skelett-Raum)
+		var n := Vector3(-1.0 if sd == "r" else 1.0, 0.0, 0.0)  # Handflaeche in Ruhe (Skelett-Raum, zum Koerper)
 		var md0 := _skel.get_bone_global_rest(_skel.find_bone("md1_" + sd)).origin
 		var ix0 := _skel.get_bone_global_rest(_skel.find_bone("ix1_" + sd)).origin
 		for fn in FINGERS:
@@ -731,6 +729,9 @@ func orient_world(name: String, want: Basis, w: float) -> void:
 
 ## Hand ausrichten: fingers = Richtung der Finger, palm = wohin die Handflaeche zeigt (Welt).
 ## In Ruhe zeigen die Finger nach unten und die Handflaeche zum Oberschenkel. w blendet ein.
+var _hand_q := {}  # letzte Zieldrehung je Hand (orient_hand)
+
+
 func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
 	if w <= 0.001 or fingers.length() < 0.01 or palm.length() < 0.01:
 		return
@@ -745,7 +746,16 @@ func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
 	var local := (parent_b.inverse() * want).orthonormalized()
 	var q0 := Quaternion.from_euler(wr.rotation)
 	var q1 := local.get_rotation_quaternion()
-	wr.rotation = q0.slerp(q1, clampf(w, 0.0, 1.0)).get_euler()
+	# Liegt das Ziel fast eine halbe Drehung weg, wuerde slerp je nach Vorzeichen mal links-, mal
+	# rechtsherum drehen (die Hand springt). Deshalb die Drehrichtung beim Einblenden festhalten.
+	var last: Quaternion = _hand_q.get(sd, Quaternion())
+	if w < 0.05 or not _hand_q.has(sd):
+		if q0.dot(q1) < 0.0:
+			q1 = -q1
+	elif last.dot(q1) < 0.0:
+		q1 = -q1
+	_hand_q[sd] = q1
+	wr.rotation = q0.slerpni(q1, clampf(w, 0.0, 1.0)).get_euler()
 
 
 

@@ -21,13 +21,15 @@ from mathutils import Matrix, Vector
 
 SRC, OUT = sys.argv[1], sys.argv[2]
 TEST = float(sys.argv[sys.argv.index("--test-curl") + 1]) if "--test-curl" in sys.argv else None
-FINGERS = ["ix", "md", "rg", "pk"]
-Y0 = [-0.068, -0.052, -0.032, -0.009]  # Startwerte der Seitenlage (rechte Hand, Blender-Koordinaten)
+# Nach der Seitenlage von hinten nach vorn (rechte Hand, Blender-Koordinaten, +y = vorn): der kleine
+# Finger liegt hinten, der Zeigefinger vorn, der Daumen sitzt vorn innen (Handflaeche zum Koerper).
+FINGERS = ["pk", "rg", "md", "ix"]
+Y0 = [-0.068, -0.052, -0.032, -0.009]  # Startwerte der Seitenlage
 KNUCKLE_Z = 0.948  # Hoehe der Fingerknoechel bei haengendem Arm
-KNUCKLE_Y = [-0.066, -0.047, -0.027, -0.008]  # Seitenlage der Knoechel (Zeige- und Mittelfinger liegen unten eng)
+KNUCKLE_Y = [-0.066, -0.047, -0.027, -0.008]  # Seitenlage der Knoechel
 PIP_T = 0.47  # Mittelgelenk: Anteil der Strecke Knoechel -> Fingerspitze
 # Daumen (rechte Hand): Sattelgelenk, Grundgelenk, Spitze
-THUMB = [Vector((0.200, -0.064, 1.030)), Vector((0.190, -0.083, 0.988)), Vector((0.182, -0.090, 0.946))]
+THUMB = [Vector((0.207, -0.006, 1.035)), Vector((0.201, 0.011, 0.992)), Vector((0.197, 0.014, 0.940))]
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=SRC)
@@ -59,7 +61,7 @@ for sd, sx in (("r", 1.0), ("l", -1.0)):
     P = V[idx] * mir  # in Koordinaten der rechten Hand
     wr_head = np.array(list(rig.matrix_world @ rig.data.bones["wr_" + sd].head_local)) * mir
     # Finger: Punkte unterhalb der Knoechel nach der Seitenlage gruppieren
-    sel = (P[:, 2] < 0.915) & (P[:, 1] > -0.082) & (hand_w[idx] > 0.5)
+    sel = (P[:, 2] < 0.915) & (P[:, 1] > -0.082) & (P[:, 1] < 0.004) & (hand_w[idx] > 0.5)
     F = P[sel]
     c = np.array(Y0)
     for _ in range(25):

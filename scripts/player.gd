@@ -738,7 +738,7 @@ func _contact_ik() -> void:
 		var follow := push * 0.42 * smoothstep(0.0, 0.2, rel)
 		var hb := ready.lerp(at_ball, smoothstep(-0.2, -0.03, rel)) + give + follow
 		var open := 0.035 * smoothstep(0.04, 0.2, rel)
-		tg = {"l": hb - r * (0.13 + open), "r": hb + r * (0.13 + open)}
+		tg = {"l": hb - r * (0.11 + open), "r": hb + r * (0.11 + open)}
 		# Ellbogen zeigen nach aussen vorn (etwas breiter als die Schultern), bis sich die Arme strecken.
 		for sd in ["l", "r"]:
 			var s_sign := -1.0 if sd == "l" else 1.0
@@ -752,9 +752,7 @@ func _contact_ik() -> void:
 		var palm0 := (to_ball + f * 1.1 + up * 0.5).normalized()
 		var palm := palm0.lerp(push, smoothstep(0.0, 0.12, rel)).normalized()
 		var fing := (up - palm * up.dot(palm)).normalized()
-		# Das Meshy-Modell hat spiegelverkehrte Haende: die Beugeseite der Finger ist die Seite,
-		# die orient_hand als Handruecken fuehrt, deshalb -palm.
-		hands = {"l": [fing - r * 0.08, -palm], "r": [fing + r * 0.08, -palm]}
+		hands = {"l": [fing - r * 0.08, palm], "r": [fing + r * 0.08, palm]}
 	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne):
 		# Angriff wie im Volleyball (Bogenspannung): der Ellbogen holt hoch und weit nach hinten aus,
 		# die Hand liegt hinter dem Kopf auf Ohrhoehe, die Schlagschulter dreht zurueck und der
@@ -899,7 +897,7 @@ func _hand_shape() -> void:
 		var k := smoothstep(-0.95, -0.5, rel) * (1.0 - smoothstep(0.35, 0.6, rel))
 		var grip := smoothstep(-0.025, -0.004, rel) * (1.0 - smoothstep(0.008, 0.035, rel))
 		var rls := smoothstep(0.03, 0.12, rel)
-		shape = {"curl": lerpf(0.4, 0.08, rls), "spread": lerpf(0.3, 0.38, rls), "thumb": lerpf(1.15, 0.9, rls), "grip": 0.65 * grip}
+		shape = {"curl": lerpf(0.4, 0.08, rls), "spread": lerpf(0.3, 0.38, rls), "thumb": lerpf(1.4, 1.0, rls), "grip": 0.65 * grip}
 		shape = _mix_shape(HumanFigure.FINGER_REST, shape, k)
 	elif anim_kind in ["pass", "dig", "free", "set"]:
 		# Baggern: Haende ineinander, Finger locker gebeugt, Daumen nebeneinander
