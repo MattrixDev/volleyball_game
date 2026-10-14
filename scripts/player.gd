@@ -716,7 +716,7 @@ func _contact_ik() -> void:
 		hands = {"l": [fd, r + up * 0.3], "r": [fd, -r + up * 0.3]}
 	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
 		# Pritschen nach Lehrbild und Sportwissenschaft: frueh die Pritschhaltung (Handgelenke etwa
-		# 12 cm vor und 10 cm ueber der Stirn, Ellbogen gebeugt und leicht ausserhalb der Schultern,
+		# 20 cm vor und 10 cm ueber der Stirn, Ellbogen gebeugt und leicht ausserhalb der Schultern,
 		# Handflaechen zum Ball, Daumen zu den Augen). Kurz vor dem Kontakt gehen die Haende unter den
 		# Ball, der Ball sinkt rund 5 cm in die Haende ein (die Finger umfassen ihn, siehe
 		# _hand_shape), dann strecken sich Arme und Koerper in Zielrichtung; die Haende oeffnen sich
@@ -728,13 +728,13 @@ func _contact_ik() -> void:
 		var push := (aim_l * (0.55 if anim_kind == "set" else 0.8) + up).normalized()
 		var head: Vector3 = fig.j["head"].global_position
 		var brow := head + up * 0.13 + f * 0.1  # Stirn (head = Halsgelenk)
-		var ready := brow + f * 0.12 + up * 0.1
+		var ready := brow + f * 0.22 + up * 0.1
 		var to_ball := (b - brow).normalized()
 		var at_ball := b - to_ball * 0.19 - up * 0.01
 		# Der Ball sinkt in die Haende ein (gut 5 cm, etwa 40 % der Kontaktzeit), dann Strecken
 		var give := -to_ball * 0.055 * smoothstep(-0.025, -0.004, rel) * (1.0 - smoothstep(0.004, 0.04, rel))
 		var follow := push * 0.42 * smoothstep(0.0, 0.2, rel)
-		var hb := ready.lerp(at_ball, smoothstep(-0.32, -0.05, rel)) + give + follow
+		var hb := ready.lerp(at_ball, smoothstep(-0.2, -0.03, rel)) + give + follow
 		var open := 0.035 * smoothstep(0.04, 0.2, rel)
 		tg = {"l": hb - r * (0.12 + open), "r": hb + r * (0.12 + open)}
 		# Ellbogen zeigen nach aussen vorn (etwas breiter als die Schultern), bis sich die Arme strecken.
