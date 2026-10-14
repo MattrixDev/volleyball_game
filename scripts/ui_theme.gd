@@ -22,12 +22,94 @@ static var font_semibold: Font = preload("res://assets/fonts/Inter-SemiBold.otf"
 static var font_display: Font = preload("res://assets/fonts/InterDisplay-ExtraBold.otf")
 
 static var _theme: Theme
+static var _light: Theme
 
 
 static func get_theme() -> Theme:
 	if _theme == null:
 		_theme = _make()
 	return _theme
+
+
+## Helles Theme (Pausenmenue): weisse Kacheln, Auswahl = dunkle Kachel, Fokus = dunkler Ring.
+static func get_light_theme() -> Theme:
+	if _light == null:
+		_light = _make_light()
+	return _light
+
+
+static func _make_light() -> Theme:
+	var t := Theme.new()
+	t.default_font = font_medium
+	t.default_font_size = 20
+	var line := Color(INK, 0.08)
+	t.set_stylebox("normal", "Button", box(TILE, 12, line, 1))
+	t.set_stylebox("hover", "Button", box(Color(0.96, 0.955, 0.94), 12, line, 1))
+	t.set_stylebox("pressed", "Button", box(INK, 12))
+	t.set_stylebox("hover_pressed", "Button", box(INK.lightened(0.12), 12))
+	t.set_stylebox("disabled", "Button", box(Color(0.93, 0.92, 0.9), 12))
+	var focus := box(Color(0, 0, 0, 0), 14, INK, 3)
+	focus.expand_margin_left = 2
+	focus.expand_margin_right = 2
+	focus.expand_margin_top = 2
+	focus.expand_margin_bottom = 2
+	t.set_stylebox("focus", "Button", focus)
+	t.set_color("font_color", "Button", INK)
+	t.set_color("font_hover_color", "Button", INK)
+	t.set_color("font_focus_color", "Button", INK)
+	t.set_color("font_pressed_color", "Button", Color.WHITE)
+	t.set_color("font_hover_pressed_color", "Button", Color.WHITE)
+	t.set_color("font_disabled_color", "Button", INK_MUTED)
+	t.set_color("font_color", "Label", INK)
+	var rail := StyleBoxFlat.new()
+	rail.bg_color = Color(0.85, 0.84, 0.81)
+	rail.set_corner_radius_all(4)
+	rail.content_margin_top = 4
+	rail.content_margin_bottom = 4
+	t.set_stylebox("slider", "HSlider", rail)
+	var fill := rail.duplicate()
+	fill.bg_color = NAVY
+	t.set_stylebox("grabber_area", "HSlider", fill)
+	var fill_hl := rail.duplicate()
+	fill_hl.bg_color = INK
+	t.set_stylebox("grabber_area_highlight", "HSlider", fill_hl)
+	t.set_icon("grabber", "HSlider", _dot(18, NAVY))
+	t.set_icon("grabber_highlight", "HSlider", _dot(22, ACCENT))
+	var sfocus := StyleBoxFlat.new()
+	sfocus.bg_color = Color(0, 0, 0, 0)
+	sfocus.border_color = INK
+	sfocus.set_border_width_all(2)
+	sfocus.set_corner_radius_all(6)
+	sfocus.expand_margin_left = 6
+	sfocus.expand_margin_right = 6
+	sfocus.expand_margin_top = 4
+	sfocus.expand_margin_bottom = 4
+	t.set_stylebox("focus", "HSlider", sfocus)
+	return t
+
+
+## Weisse Kachel mit grosser Rundung (heller Stil).
+static func card_light() -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := box(TILE, 18)
+	sb.set_content_margin_all(18)
+	p.add_theme_stylebox_override("panel", sb)
+	return p
+
+
+## Kleine graue Ueberschrift mit gelbem Punkt (heller Stil).
+static func heading_light(t: String) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var dot := Panel.new()
+	dot.custom_minimum_size = Vector2(10, 10)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	dot.add_theme_stylebox_override("panel", box(ACCENT, 5))
+	row.add_child(dot)
+	var l := label(t, 17, INK)
+	l.add_theme_font_override("font", font_semibold)
+	row.add_child(l)
+	return row
 
 
 static func box(c: Color, radius := 8, border := Color(0, 0, 0, 0), bw := 0) -> StyleBoxFlat:
