@@ -322,6 +322,8 @@ func _apply_data(pl: VPlayer, mm: Dictionary) -> void:
 	pl.reach_add = d.reach_add() if d else 0.0
 	pl.jump_v0 = d.jump_v() if d else VPlayer.JUMP_V
 	pl.movement_style = (d.movement_style if d.movement_style != "" else d.id) if d else ""
+	pl.height_m = d.height_m if d else 0.0
+	pl.left_handed = d.left_handed if d else false
 
 
 ## Spielerfigur bekommt einen anderen Spieler aus dem Kader (Wechsel, Libero).
