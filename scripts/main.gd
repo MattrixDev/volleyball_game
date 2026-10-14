@@ -16,6 +16,7 @@ var _fov_vel := 0.0
 var _hold_mode := ""  # letzte Nahansicht (Angriff, Block), bleibt kurz stehen
 var _hold_subj = null
 var _hold_left := 0.0
+var _fov_kick := 0.0  # Grad: kurzes Heranruecken beim Wuchtschlag, klingt schnell ab
 var arena: Arena
 var fx: HitFx
 var _air := {}  # Spieler -> war in der Luft (fuer Schuhquietschen)
@@ -91,6 +92,8 @@ func _ready() -> void:
 	if match_node.attract:
 		hud.set_attract(true)
 		start_menu.call_deferred("open")
+	if OS.get_cmdline_user_args().has("--quick"):
+		Teams.quick = true  # Test: Schnellspiel
 	if OS.get_cmdline_user_args().has("--play") or Teams.autostart:
 		Teams.autostart = false
 		call_deferred("_on_play")  # Test: Startmenue ueberspringen; nach Teamwechsel direkt spielen
@@ -115,11 +118,16 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	# Kamera in Echtzeit bewegen, auch waehrend der Zeitlupe.
 	var rd := delta / maxf(Engine.time_scale, 0.01)
-	var bz: float = match_node.ball.position.z if match_node and match_node.ball else 0.0
+	var bpos: Vector3 = match_node.ball.position if match_node and match_node.ball else Vector3.ZERO
+	var bz := bpos.z
 	# Die Kamera steht immer hinter dem eigenen Team, auch nach dem Seitenwechsel.
 	var cs: float = match_node.camera_side() if match_node else -1.0
-	var want_pos := Vector3(cs * absf(_cam_base.x), _cam_base.y, bz * 0.25)
-	var want_look := Vector3(-cs * 1.5, 1.0, bz * 0.2)
+	# Lebendige Uebersicht: die Kamera geht etwas mit dem Ball mit (seitlich, zur Hoehe, und
+	# rueckt ein Stueck vor, wenn der Ball beim Gegner ist). Die Ausschlaege bleiben klein,
+	# damit immer das ganze Feld und alle eigenen Spieler im Bild sind.
+	var far := clampf(-cs * bpos.x / 9.0, 0.0, 1.0)  # 0 = Ball bei uns, 1 = Ball tief beim Gegner
+	var want_pos := Vector3(cs * (absf(_cam_base.x) - 1.2 * far), _cam_base.y - 0.4 * far, bz * 0.35)
+	var want_look := Vector3(-cs * 1.5 + 0.15 * (bpos.x + cs * 1.5), 1.0 + clampf(bpos.y - 2.0, 0.0, 6.0) * 0.08, bz * 0.32)
 	var want_fov := 55.0
 	var subj = match_node.cam_subject if match_node else null
 	# Nahansicht kurz halten, damit die Kamera nicht zwischen Angriff, Block und Uebersicht
@@ -163,6 +171,9 @@ func _process(delta: float) -> void:
 				want_pos = Vector3(s * 5.6, 3.6, p.z * 0.7)
 				want_look = Vector3(-s * 3.0, 2.2, p.z * 0.6)
 				want_fov = 56.0
+	if _fov_kick > 0.0:
+		want_fov -= _fov_kick
+		_fov_kick = maxf(0.0, _fov_kick - rd * 9.0)
 	# Kritisch gedaempfte Feder statt hartem Nachziehen: kein Ruck beim Wechsel der Ansicht.
 	var w := 3.2
 	if mode == "replay":
@@ -204,6 +215,14 @@ func _process(delta: float) -> void:
 
 func _on_big_hit(strength: float) -> void:
 	_shake = maxf(_shake, strength)
+	if strength >= 0.8:
+		_rumble(0.35 * strength, 0.7 * strength, 0.16)
+
+
+## Controller kurz vibrieren lassen (alle angeschlossenen Controller).
+func _rumble(weak: float, strong: float, secs: float) -> void:
+	for dev in Input.get_connected_joypads():
+		Input.start_joy_vibration(dev, clampf(weak, 0.0, 1.0), clampf(strong, 0.0, 1.0), secs)
 
 
 func _on_play() -> void:
@@ -226,6 +245,14 @@ func _on_menu_closed() -> void:
 
 ## Ballkontakte: Geraeusch, Lichtblitz bei harten Schlaegen, Staub am Boden.
 func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
+	if kind == "spike_super":
+		# Wuchtschlag: zwei tiefe Knalle, kraeftiger Ruck. Bewusst ohne Leuchtspur, bleibt echt.
+		sfx.play("spike", 1.0)
+		sfx.play("spike", 1.0, 0.7)
+		fx.flash(pos, 1.0)
+		_shake = maxf(_shake, 0.6)
+		_fov_kick = 3.5
+		return
 	if kind == "spike_perfect":
 		# Perfekter Angriff: zweiter, tieferer Knall unter dem normalen Schlag, heller Blitz.
 		sfx.play("spike", 1.0)
@@ -249,8 +276,15 @@ func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
 			# Ball liegt schon wieder auf seiner Seite: das Netz beult zur anderen Seite aus.
 			arena.net.hit(pos, strength, -signf(match_node.ball.position.x))
 		"floor":
-			fx.dust(pos, strength)
-			if strength > 0.8:
+			var heavy: bool = match_node.last_super and match_node.last_action in ["attack", "serve"]
+			fx.dust(pos, 1.0 if heavy else strength)
+			if heavy:
+				# Wuchtschlag schlaegt ein: mehr Staub, tieferer Aufprall, Controller brummt.
+				fx.dust(pos, 1.0)
+				sfx.play("floor", 1.0, 0.75)
+				_shake = maxf(_shake, 0.45)
+				_rumble(0.5, 0.9, 0.22)
+			elif strength > 0.8:
 				_shake = maxf(_shake, 0.3)
 
 

@@ -62,8 +62,11 @@ func _ready() -> void:
 	_main.add_child(gap)
 
 	_play = _big("Spielen")
-	_play.pressed.connect(_on_play)
+	_play.pressed.connect(_on_play.bind(false))
 	_main.add_child(_play)
+	var quick := _big("Schnellspiel  ·  1 Satz bis 15")
+	quick.pressed.connect(_on_play.bind(true))
+	_main.add_child(quick)
 	_sub = UiTheme.label("", 17, UiTheme.MUTED)
 	_main.add_child(_sub)
 	# Teamauswahl: A / Enter oder links / rechts wechselt das Team
@@ -120,7 +123,8 @@ func _update_teams() -> void:
 
 
 ## Spielen: sind andere Teams gewaehlt, wird die Halle mit den neuen Trikots neu aufgebaut.
-func _on_play() -> void:
+func _on_play(quick := false) -> void:
+	Teams.quick = quick
 	if _pick[0] != Teams.home or _pick[1] != Teams.away:
 		Teams.home = _pick[0]
 		Teams.away = _pick[1]
@@ -179,7 +183,7 @@ func _build_controls() -> void:
 			var col := UiTheme.ACCENT if i == 0 else (UiTheme.TEXT if j == 0 else UiTheme.MUTED)
 			grid.add_child(UiTheme.label(rows[i][j], 19 if i > 0 else 17, col))
 	box.add_child(grid)
-	box.add_child(UiTheme.label("Taste früh halten und loslassen, wenn sich der schrumpfende Ring mit dem weißen Ring deckt.\nMit Laufhilfe wird der weiße Ring grün, wenn Pritschen sicher geht, und orange, wenn du besser baggerst.", 17, UiTheme.MUTED))
+	box.add_child(UiTheme.label("Taste früh halten und loslassen, wenn sich der schrumpfende Ring mit dem weißen Ring deckt.\nMit Laufhilfe wird der weiße Ring grün, wenn Pritschen sicher geht, und orange, wenn du besser baggerst.\nWuchtschlag: Lass R2 los, wenn der Kraftbalken im goldenen Streifen steht, und triff perfekt (Angriff und Aufschlag).", 17, UiTheme.MUTED))
 	_back = Button.new()
 	_back.text = "Zurück"
 	_back.custom_minimum_size = Vector2(200, 48)
