@@ -57,6 +57,12 @@ var fig: HumanFigure
 ## Bewegungscharakter (move_style.gd). movement_style: Schluessel aus den Spielerdaten, leer =
 ## aus Team und Nummer ausgewuerfelt.
 var movement_style := ""
+## Koerpergroesse in m (1,80 bis 2,12; 0 = aus Team und Nummer gewuerfelt). Die Figur wird gleichmaessig
+## skaliert (nicht breiter), Fuesse, IK und Kontakte rechnen in Weltkoordinaten und passen sich an.
+var height_m := 0.0
+## Linkshaender: Angriff, Sprung- und Standaufschlag mit links (Bewegung gespiegelt).
+var left_handed := false
+const MODEL_HEIGHT := 1.88  # m: Meshy-Spieler bei Massstab 1 (Sohle bis Scheitel ohne Haare)
 var style := MoveStyle.new()
 var _ring: MeshInstance3D
 var _yaw := 0.0
@@ -96,8 +102,12 @@ func setup(p_team: int, p_role: String, _tag_letter: String, p_number: int, colo
 	fig = HumanFigure.new()
 	add_child(fig)
 	var h := hash(team * 1000 + number)
+	if "--lab-body" in OS.get_cmdline_user_args():
+		# Labor: Linkshaender (ungerade Nummern) und Groessen-Extreme 1,80 / 2,12 m testen
+		left_handed = number % 2 == 1
+		height_m = 1.8 if number % 4 < 2 else 2.12
 	_pick_style()
-	fig.build(_colors(color), true, (h / 13) % HumanFigure.HAIR_STYLES, false, 1.04 + 0.07 * float((h / 31) % 10) / 9.0)
+	fig.build(_colors(color), true, (h / 13) % HumanFigure.HAIR_STYLES, false, _body_scale(h))
 	fig.set_number(number, _number_color(color), (Teams.playing()[team] as TeamStyle).number)
 	fig.pose(_p_idle())
 
@@ -138,10 +148,40 @@ func _pick_style() -> void:
 	style = MoveStyle.from_key(movement_style if movement_style != "" else "%d-%d" % [team, number])
 
 
+## Massstab der Figur: aus height_m, sonst wie bisher leicht gewuerfelt (1,96 bis 2,09 m).
+func _body_scale(h: int) -> float:
+	if height_m > 0.0:
+		return clampf(height_m, 1.7, 2.2) / MODEL_HEIGHT
+	return 1.04 + 0.07 * float((h / 31) % 10) / 9.0
+
+
+## Schlaghand: "r", bei Linkshaendern "l".
+func hit_side() -> String:
+	return "l" if left_handed else "r"
+
+
+## Pose spiegeln (links und rechts tauschen, Drehung um Hoch- und Laengsachse umkehren):
+## so schlaegt ein Linkshaender dieselbe Technik mit links.
+func _mirror(p: Dictionary) -> Dictionary:
+	if not left_handed:
+		return p
+	var out := {}
+	for k in p:
+		var v = p[k]
+		var k2: String = k
+		if k.ends_with("_l"):
+			k2 = k.left(-2) + "_r"
+		elif k.ends_with("_r"):
+			k2 = k.left(-2) + "_l"
+		out[k2] = Vector3(v.x, -v.y, -v.z) if v is Vector3 else v
+	return out
+
+
 func change_identity(p_role: String, _tag_letter: String, p_number: int, color: Color) -> void:
 	role = p_role
 	number = p_number
 	_pick_style()
+	fig.root_node.scale = Vector3.ONE * _body_scale(hash(team * 1000 + number))
 	var c := _colors(color)
 	for k in c:
 		fig.set_color(k, c[k])
@@ -421,8 +461,8 @@ func _apply_hits() -> void:
 				# Rumpf klappt beim Schlag nach vorn ein, Schlagarm schwingt locker aus
 				_push_limb("hips", "head", f - Vector3.UP * 0.5, 0.8 + 1.4 * st)
 				fig.soften("chest", 0.6, 0.3)
-				fig.soften("sh_r", 0.55, 0.35)
-				fig.soften("el_r", 0.5, 0.35)
+				fig.soften("sh_" + hit_side(), 0.55, 0.35)
+				fig.soften("el_" + hit_side(), 0.5, 0.35)
 			"land":
 				# Landung: Oberkoerper und Kopf nicken nach vorn, Arme schwingen nach unten
 				_push_limb("hips", "head", f * 0.6 - Vector3.UP, 0.6 * st)
@@ -716,6 +756,7 @@ func _contact_ik() -> void:
 	var tg := {}
 	var w := 0.0
 	var wl := -1.0  # eigenes Gewicht fuer die linke Hand (Angriff), sonst wie w
+	var _hit_tg := hit_side() if anim_kind in ["attack", "serve"] else "r"  # Schlaghand (Gewicht w, Nachstrecken)
 	var b := contact_pt
 	var hands := {}  # Seite -> [Finger, Handflaeche] (Weltrichtungen)
 	var poles := {}  # Seite -> wohin der Ellbogen zeigen soll (Welt)
@@ -801,22 +842,27 @@ func _contact_ik() -> void:
 		# Oberkoerper spannt sich. Dann fuehrt der Ellbogen nach vorn oben, der Unterarm peitscht
 		# hinterher, und getroffen wird mit ganz gestrecktem Arm hoch vor der Schlagschulter.
 		# Nachschwung nach vorn unten und quer ueber den Koerper zur linken Huefte.
+		# Linkshaender: dieselbe Technik gespiegelt (Schlagseite hs, r zeigt zur Schlagseite).
+		var hs := hit_side()
+		var os := "r" if hs == "l" else "l"
+		var mir := -1.0 if left_handed else 1.0
+		r *= mir
 		var wt := smoothstep(-0.55, -0.35, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
 		var twist := lerpf(-0.5, 0.35, smoothstep(-0.18, 0.1, rel))
 		var arch := 0.2 * (1.0 - smoothstep(-0.12, 0.0, rel)) - 0.3 * smoothstep(0.0, 0.15, rel)
 		var ch: Node3D = fig.j["chest"]
-		ch.quaternion = ch.quaternion * Quaternion(Vector3.UP, twist * wt) * Quaternion(Vector3.RIGHT, arch * wt)
+		ch.quaternion = ch.quaternion * Quaternion(Vector3.UP, twist * wt * mir) * Quaternion(Vector3.RIGHT, arch * wt)
 		fig._sync()
 		var hit := b - up * 0.07 - f * 0.17
 		# Treffen mit ganz gestrecktem Arm: liegt der Treffpunkt naeher an der Schulter als eine
 		# Armlaenge, sinkt der Koerper im Kontaktmoment etwas ab, liegt er weiter weg, streckt er sich.
 		if airborne:
 			var ext := smoothstep(-0.14, -0.02, rel) * (1.0 - smoothstep(0.06, 0.2, rel))
-			var need := (hit - (fig.j["sh_r"] as Node3D).global_position).length() - ARM_HIT_LEN
+			var need := (hit - (fig.j["sh_" + hs] as Node3D).global_position).length() - ARM_HIT_LEN * fig.root_node.scale.x / 1.075
 			fig.root_node.position.y += clampf(need, -0.2, 0.14) * ext
 			fig._sync()
-		var sh_r: Vector3 = fig.j["sh_r"].global_position
-		var sh_l: Vector3 = fig.j["sh_l"].global_position
+		var sh_r: Vector3 = fig.j["sh_" + hs].global_position
+		var sh_l: Vector3 = fig.j["sh_" + os].global_position
 		var chest: Vector3 = fig.j["chest"].global_position
 		# Ausholen: Oberarm seitlich und zurueck, Ellbogen etwa auf Schulterhoehe, Hand hinter dem Kopf.
 		var cock := sh_r + up * 0.3 - f * 0.1 + r * 0.08
@@ -829,16 +875,16 @@ func _contact_ik() -> void:
 		var cross := sh_r + (f * 0.5 - r * 0.45 - up * 0.9).normalized() * 0.45
 		var hand := cock
 		pole_w = 1.0
-		poles["r"] = cock_el
+		poles[hs] = cock_el
 		if rel >= -0.2 and rel < 0.0:
 			var sw := smoothstep(-0.2, -0.01, rel)
 			# Hand bleibt zurueck (peitscht spaet), der Ellbogen fuehrt
 			var t := pow(sw, 1.5)
 			hand = cock * (1.0 - t) * (1.0 - t) + over * 2.0 * (1.0 - t) * t + hit * t * t
-			poles["r"] = cock_el.lerp(lead_el, smoothstep(0.0, 0.55, sw))
+			poles[hs] = cock_el.lerp(lead_el, smoothstep(0.0, 0.55, sw))
 		elif rel >= 0.0:
 			# Ellbogen zeigt beim Nachschwung nach aussen unten (Pol bleibt, damit nichts umklappt)
-			poles["r"] = lead_el.lerp(sh_r + r * 0.4 - up * 0.25 + f * 0.1, smoothstep(0.0, 0.12, rel))
+			poles[hs] = lead_el.lerp(sh_r + r * 0.4 - up * 0.25 + f * 0.1, smoothstep(0.0, 0.12, rel))
 			# Richtung um die Schulter drehen (Bogen auf Armlaenge), nicht quer durch den Raum mischen
 			var hd := (hit - sh_r).normalized()
 			if rel < 0.07:
@@ -846,7 +892,7 @@ func _contact_ik() -> void:
 			else:
 				hd = (thru - sh_r).normalized().slerp((cross - sh_r).normalized(), smoothstep(0.07, 0.18, rel))
 			hand = sh_r + hd * 0.45
-		tg = {"r": hand}
+		tg = {hs: hand}
 		w = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.3, 0.45, rel))
 		if not airborne:
 			w *= 0.6
@@ -858,19 +904,20 @@ func _contact_ik() -> void:
 			var lt := smoothstep(-0.1, 0.06, rel)
 			ld = ld.slerp((f * 0.3 - up * 0.85 - r * 0.05).normalized(), lt)
 			ld = (ld - r * 0.15 * sin(PI * lt)).normalized()
-		tg["l"] = sh_l + ld * 0.6
+		tg[os] = sh_l + ld * 0.6
 		wl = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.12, 0.3, rel))
 		# Hand: beim Ausholen Handflaeche nach vorn, im Treffpunkt flach hinter dem Ball,
 		# danach klappt das Handgelenk ab (Finger ueber den Ball nach vorn unten).
 		var snap := smoothstep(0.0, 0.1, rel)
 		var fingers := up.lerp(aim_h - up * 0.9, snap)
 		var palm := (aim_h - up * 0.25).lerp(-up - aim_h * 0.9, snap)
-		hands = {"r": [fingers, palm], "l": [b - sh_l, -r]}
+		hands = {hs: [fingers, palm], os: [b - sh_l, -r]}
+		r *= mir
 	elif anim_kind == "serve":
 		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.03, 0.16, rel))
 		# Standaufschlag (der Sprungaufschlag laeuft wie der Angriff, siehe oben)
-		tg = {"r": b - up * 0.02 - f * 0.14}
-		hands = {"r": [up, aim_h]}
+		tg = {hit_side(): b - up * 0.02 - f * 0.14}
+		hands = {hit_side(): [up, aim_h]}
 	dbg_tg = tg
 	if w <= 0.001 or tg.is_empty():
 		return
@@ -878,7 +925,7 @@ func _contact_ik() -> void:
 	var over_set := anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over"
 	var miss := 0.0
 	for sd in tg:
-		var ws := wl if (sd == "l" and wl >= 0.0) else w
+		var ws := wl if (sd != _hit_tg and wl >= 0.0) else w
 		if ws <= 0.001:
 			continue
 		# Hand am Ball: ganze Kette von der Huefte bis zur Hand haelt das Ziel, aber nur rund um
@@ -887,7 +934,7 @@ func _contact_ik() -> void:
 		if over_set:
 			# Pritschhaltung frueh und ruhig halten (sonst schwingen die Arme erst spaet hoch)
 			near = maxf(near, smoothstep(-0.95, -0.6, rel) * (1.0 - smoothstep(0.25, 0.45, rel)))
-		if (anim_kind == "attack" or anim_kind == "serve") and airborne and sd == "r":
+		if (anim_kind == "attack" or anim_kind == "serve") and airborne and sd == hit_side():
 			# Der Schlag ist schnell (Peitsche): der Arm folgt der Bahn eng, statt nachzuschleifen.
 			near = maxf(near, smoothstep(-0.3, -0.18, rel) * (1.0 - smoothstep(0.25, 0.4, rel)))
 		var pw := smoothstep(0.3, 0.9, ws) * near
@@ -898,13 +945,13 @@ func _contact_ik() -> void:
 			res = fig.ik_arm(sd, tg[sd], ws, 14, 0.12, poles.get(sd, Vector3.INF), pole_w)
 		else:
 			res = fig.ik_arm(sd, tg[sd], ws, 10, 0.02, poles.get(sd, Vector3.INF), pole_w)
-		if sd == "r" or over_set:
+		if sd == _hit_tg or over_set:
 			miss = maxf(miss, res * ws)
 	# In der Luft: fehlt dem gestreckten Arm noch etwas bis zum Ball, streckt sich der ganze
 	# Koerper ein Stueck nach (Schultergürtel, hoechstens 20 cm), statt vorbeizuschlagen.
-	if (airborne or anim_kind == "serve") and miss > 0.02 and tg.has("r"):
-		var wr: Vector3 = fig.j["wr_r"].global_position
-		var lift: Vector3 = ((tg["r"] as Vector3) - wr).limit_length(0.25)
+	if (airborne or anim_kind == "serve") and miss > 0.02 and tg.has(_hit_tg):
+		var wr: Vector3 = fig.j["wr_" + _hit_tg].global_position
+		var lift: Vector3 = ((tg[_hit_tg] as Vector3) - wr).limit_length(0.25)
 		lift.y = clampf(lift.y, 0.0, 0.2 if airborne else 0.05)
 		if not airborne:
 			lift.x = 0.0
@@ -912,10 +959,10 @@ func _contact_ik() -> void:
 		# Verschiebung in Weltrichtung -> Figur-Raum (die Figur ist gedreht)
 		fig.root_node.position += fig.global_basis.orthonormalized().inverse() * lift
 		fig._sync()
-		fig.ik_arm("r", tg["r"], w, 10, 0.02, poles.get("r", Vector3.INF), pole_w)
+		fig.ik_arm(_hit_tg, tg[_hit_tg], w, 10, 0.02, poles.get(_hit_tg, Vector3.INF), pole_w)
 	fig._sync()
 	for sd in hands:
-		var ws := wl if (sd == "l" and wl >= 0.0) else w
+		var ws := wl if (sd != _hit_tg and wl >= 0.0) else w
 		fig.orient_hand(sd, hands[sd][0], hands[sd][1], ws)
 	fig._sync()
 
@@ -951,8 +998,9 @@ func _hand_shape() -> void:
 		var k := smoothstep(-0.3, -0.1, rel) * (1.0 - smoothstep(0.15, 0.35, rel))
 		var grip := smoothstep(-0.02, 0.0, rel) * (1.0 - smoothstep(0.03, 0.09, rel))
 		shape = _mix_shape(HumanFigure.FINGER_REST, {"curl": 0.1, "spread": 0.14, "thumb": 0.35, "grip": 0.6 * grip}, k)
-	fig.hand["r"] = shape
-	fig.hand["l"] = shape if both else HumanFigure.FINGER_REST.duplicate()
+	var hs := hit_side()
+	fig.hand[hs] = shape
+	fig.hand["r" if hs == "l" else "l"] = shape if both else HumanFigure.FINGER_REST.duplicate()
 
 
 static func _mix_shape(a: Dictionary, b: Dictionary, k: float) -> Dictionary:
@@ -1318,15 +1366,15 @@ func _target_pose_main() -> Dictionary:
 		return _p_celebrate()
 	var rel := now - anim_t
 	if anim_kind == "serve_hold":
-		return _mix(_p_serve_hold(), _p_run(_run_amt), clampf(_run_amt * 2.0, 0.0, 1.0))
+		return _mix(_mirror(_p_serve_hold()), _p_run(_run_amt), clampf(_run_amt * 2.0, 0.0, 1.0))
 	if anim_kind == "serve" and rel < 0.5:
 		_stiff = 42.0
-		return _p_serve(rel, anim_tech == "jump")
+		return _mirror(_p_serve(rel, anim_tech == "jump"))
 	if block_pose:
 		_stiff = 30.0
 		return _p_block()
 	if anim_kind == "attack" and rel < 0.5:
-		var clip := _clip_at("kern_angriff", rel, SPIKE_KEYS)
+		var clip := _mirror(_clip_at("kern_angriff", rel, SPIKE_KEYS))
 		if not clip.is_empty() and rel > -1.1:
 			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
 			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
@@ -1334,26 +1382,26 @@ func _target_pose_main() -> Dictionary:
 			if airborne:
 				# Beine in der Luft kommen aus der eigenen, symmetrischen Haltung: der Clip
 				# schleudert oft ein Bein einzeln durch die Luft.
-				var own := _p_spike(rel)
+				var own := _mirror(_p_spike(rel))
 				for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
 					clip[k] = (clip[k] as Vector3).lerp(own.get(k, Vector3.ZERO), 0.95)
 			var wi := smoothstep(-1.1, -0.85, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
 			return _mix(run0, clip, wi)
 		if airborne:
 			_stiff = 45.0
-			return _p_spike(rel)
+			return _mirror(_p_spike(rel))
 		if rel > -1.0:
 			# Anlauf weich einblenden statt hart umschalten.
 			var wa := smoothstep(-1.0, -0.55, rel)
 			var run := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
 			_stiff = lerpf(22.0, 26.0, wa)
-			return _mix(run, _p_approach(), wa)
+			return _mix(run, _mirror(_p_approach()), wa)
 	_stiff = 22.0 + _run_amt * 10.0
 	var base := _p_ready() if alert else _p_idle()
 	if _run_amt > 0.05:
 		base = _mix(base, _p_run(_run_amt), clampf(_run_amt * 1.6, 0.0, 1.0))
 	if airborne:
-		base = _mix(base, _p_spike(-0.5), 0.6)
+		base = _mix(base, _mirror(_p_spike(-0.5)), 0.6)
 	# Landung: kurz in die Knie federn.
 	var land := 1.0 - clampf((now - _land_t) / 0.35, 0.0, 1.0)
 	if land > 0.0:
