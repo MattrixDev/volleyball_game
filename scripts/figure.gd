@@ -679,7 +679,11 @@ func _ik_limb(_key: String, up: Node3D, mid: Node3D, end: Node3D, target: Vector
 			pv -= ax * pv.dot(ax)
 			if m.length() > 0.005 and pv.length() > 0.005:
 				# fast gestreckt: kaum ein sichtbarer Ellbogen, die Drehung wuerde nur den Arm verdrillen
-				var ang := m.signed_angle_to(pv, ax) * clampf(pole_w, 0.0, 1.0) * smoothstep(0.02, 0.16, m.length()) * smoothstep(0.04, 0.14, pv.length())
+				var ang := m.signed_angle_to(pv, ax)
+				# Zeigt der Ellbogen fast genau vom Pol weg, springt der Winkel zwischen +180 und -180
+				# Grad (Arm dreht sich in einem Takt einmal um). Dort blendet der Pol weich aus.
+				ang *= 1.0 - smoothstep(2.3, 3.05, absf(ang))
+				ang *= clampf(pole_w, 0.0, 1.0) * smoothstep(0.02, 0.16, m.length()) * smoothstep(0.04, 0.14, pv.length())
 				var pr2 := ((up.get_parent() as Node3D).global_basis.orthonormalized()).get_rotation_quaternion()
 				up.quaternion = (pr2.inverse() * Quaternion(ax, ang) * pr2 * up.quaternion).normalized()
 	# 3. Mit w zwischen Animation und Loesung mischen

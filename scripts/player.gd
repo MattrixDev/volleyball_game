@@ -676,6 +676,9 @@ func _apply_sec(a: float) -> void:
 ## Pro Technik gibt es ein Ziel fuer jedes Handgelenk (Weltkoordinaten) und eine Zeitkurve
 ## (Hinfuehren, Kontakt, Loslassen). Neue Techniken (z. B. weitere Zuspielarten) bekommen hier
 ## einen eigenen Zweig.
+var _aim_s := Vector3.ZERO  # geglaettete Zielrichtung (_contact_ik)
+
+
 func _contact_ik() -> void:
 	var rel := now - anim_t
 	var f := Vector3(-sin(_yaw), 0.0, -cos(_yaw))  # blickt nach vorn
@@ -691,6 +694,13 @@ func _contact_ik() -> void:
 	var ad := contact_aim - b
 	ad.y = 0.0
 	var aim_h := ad.normalized() if ad.length() > 0.1 else f
+	# Das Ziel des Schlags kann sich von Takt zu Takt etwas verschieben (Stick, Bot), Hand und
+	# Handgelenk folgen ihm geglaettet (sonst zittert die Hand vor dem Treffpunkt hin und her).
+	if _aim_s == Vector3.ZERO or _aim_s.dot(aim_h) < 0.0:
+		_aim_s = aim_h
+	else:
+		_aim_s = _aim_s.lerp(aim_h, 0.12).normalized()
+	aim_h = _aim_s
 	if block_pose and airborne:
 		# Haende ueber das Netz gedrueckt, Handflaechen zeigen zum Gegner, Finger gespreizt nach oben.
 		var net_side := -side
