@@ -178,6 +178,7 @@ func build(colors: Dictionary, with_pads := true, hair_style := 0, official := f
 		if par == "":
 			off.y = hips_height
 		_joint(name, parent_node, off)
+	_build_fingers()
 	_sync()
 
 
@@ -193,6 +194,183 @@ func _sync() -> void:
 		var r: Quaternion = _rest_rot[name]
 		var q := e * r if par == "" else (_rest_rot[par] as Quaternion).inverse() * e * r
 		_skel.set_bone_pose_rotation(_bone[name], q)
+
+
+## ------------------------------------------------------------------ Finger
+## Das Modell hat je Hand Daumen und vier Finger mit zwei Gliedern (add_finger_bones.py). Die
+## Finger sind gedaempfte Federn: hand[sd] gibt die Zielform vor (curl = Beugen, spread = Spreizen,
+## thumb = Daumen abspreizen, grip = zugreifen), und der Ball ist ein fester Koerper: ein Finger, der
+## in ihn hineinbeugt, wird an seiner Oberflaeche aufgehalten (oder zurueckgedrueckt). So legen sich
+## die Finger von selbst um den Ball und geben beim Kontakt nach.
+## Die "Handflaeche" ist hier die Seite, zu der sich die Finger beugen: beim Meshy-Modell sind die
+## Haende spiegelverkehrt modelliert (Daumen hinten), deshalb ist das die Handrueckenseite des Netzes;
+## so sitzt der Daumen anatomisch richtig (rechte Hand: Handflaeche zeigt nach aussen, Daumen hinten).
+const FINGERS := ["th", "ix", "md", "rg", "pk"]
+const FINGER_REST := {"curl": 0.22, "spread": 0.04, "thumb": 0.15, "grip": 0.0}
+const FINGER_SKIN := 0.009  # halbe Fingerdicke
+var has_fingers := false
+var hand := {"l": FINGER_REST.duplicate(), "r": FINGER_REST.duplicate()}
+var _fg := {}  # "ix1_r" -> Daten des Fingerknochens (siehe _build_fingers)
+var _fa := {}  # "ix1_r" -> [Beugewinkel, Geschwindigkeit]; "ix_r" -> Spreizwinkel
+
+
+func _build_fingers() -> void:
+	if _skel == null or _skel.find_bone("ix1_r") < 0:
+		return
+	has_fingers = true
+	for sd in ["l", "r"]:
+		var n := Vector3(1.0 if sd == "r" else -1.0, 0.0, 0.0)  # Beugeseite in Ruhe (Skelett-Raum)
+		var md0 := _skel.get_bone_global_rest(_skel.find_bone("md1_" + sd)).origin
+		var ix0 := _skel.get_bone_global_rest(_skel.find_bone("ix1_" + sd)).origin
+		for fn in FINGERS:
+			var b1 := _skel.find_bone(fn + "1_" + sd)
+			var b2 := _skel.find_bone(fn + "2_" + sd)
+			var g1 := _skel.get_bone_global_rest(b1)
+			var g2 := _skel.get_bone_global_rest(b2)
+			var d := (g2.origin - g1.origin).normalized()
+			var len2 := g1.origin.distance_to(g2.origin) * (1.05 if fn == "th" else 1.0)
+			var curl := d.cross(n).normalized()
+			# Spreizen: vom Mittelfinger weg (Daumen: vom Zeigefinger weg)
+			var o := g1.origin - (ix0 if fn == "th" else md0)
+			if fn == "th":
+				o = o + (g1.origin - md0) * 0.5
+			o -= d * o.dot(d)
+			var spread := d.cross(o.normalized()).normalized() if o.length() > 0.002 else Vector3.ZERO
+			var i1 := g1.basis.inverse()
+			var i2 := g2.basis.inverse()
+			_fg[fn + "1_" + sd] = {"b": b1, "rest": _skel.get_bone_rest(b1).basis.get_rotation_quaternion(),
+				"curl": (i1 * curl).normalized(), "spread": (i1 * spread).normalized() if spread != Vector3.ZERO else Vector3.ZERO}
+			_fg[fn + "2_" + sd] = {"b": b2, "rest": _skel.get_bone_rest(b2).basis.get_rotation_quaternion(),
+				"curl": (i2 * curl).normalized(), "dir": (i2 * d).normalized(), "len": len2}
+			_fa[fn + "1_" + sd] = [FINGER_REST.curl, 0.0]
+			_fa[fn + "2_" + sd] = [FINGER_REST.curl * 1.2, 0.0]
+			_fa[fn + "_" + sd] = 0.0
+	_apply_fingers()
+
+
+## Zielwinkel eines Fingerglieds aus der Handform.
+func _finger_target(sd: String, fn: String, seg: int) -> float:
+	var h: Dictionary = hand[sd]
+	var c: float = h.get("curl", 0.2)
+	var g: float = h.get("grip", 0.0)
+	if fn == "th":
+		# Daumen: Grundglied beugt wenig (er spreizt vor allem ab), Endglied etwas mehr
+		return (c * 0.5 + g * 0.6) if seg == 1 else (c * 0.8 + g * 0.8)
+	var k := 1.0 if seg == 1 else 1.25
+	if fn == "pk":
+		k *= 1.1
+	return (c + g * 1.1) * k
+
+
+func _finger_spread(sd: String, fn: String) -> float:
+	var h: Dictionary = hand[sd]
+	if fn == "th":
+		return h.get("thumb", 0.15)
+	var w: float = {"ix": 1.0, "md": 0.0, "rg": 0.7, "pk": 1.3}[fn]
+	return (h.get("spread", 0.04) as float) * w
+
+
+## Finger einen Physiktakt weiterrechnen. ball = Ballmitte (Welt) oder INF, ball_r = Radius.
+func fingers_step(delta: float, ball: Vector3, ball_r: float) -> void:
+	if not has_fingers or delta <= 0.0:
+		return
+	var kf := 34.0  # Eigenfrequenz der Finger (1/s): schnell, aber sichtbar weich
+	for sd in ["l", "r"]:
+		for fn in FINGERS:
+			_fa[fn + "_" + sd] = lerpf(_fa[fn + "_" + sd], _finger_spread(sd, fn), 1.0 - exp(-delta * 18.0))
+			for seg in [1, 2]:
+				var key: String = fn + str(seg) + "_" + sd
+				var st: Array = _fa[key]
+				var tgt := _finger_target(sd, fn, seg)
+				var v: float = st[1] + ((tgt - st[0]) * kf * kf - st[1] * 2.0 * 0.8 * kf) * delta
+				st[0] = clampf(st[0] + v * delta, -0.45, 1.65)
+				st[1] = v
+	_apply_fingers()
+	if ball == Vector3.INF:
+		return
+	# Ball als fester Koerper: Fingerglieder, die in ihn hineinragen, werden zur Oberflaeche
+	# zurueckgedreht (zwei Durchgaenge, Endglied zuerst).
+	var to_world := _skel.global_transform
+	for sd in ["l", "r"]:
+		var wr_w: Vector3 = j["wr_" + sd].global_position
+		if wr_w.distance_to(ball) > ball_r + 0.25:
+			continue
+		for _it in 2:
+			var moved := false
+			for fn in FINGERS:
+				for seg in [2, 1]:
+					if _push_out(sd, fn, seg, to_world, ball, ball_r):
+						moved = true
+			if not moved:
+				break
+			_apply_fingers()
+
+
+## Prueft Spitze (seg 2) bzw. Mittelgelenk (seg 1) gegen den Ball und dreht das Glied heraus.
+func _push_out(sd: String, fn: String, seg: int, to_world: Transform3D, ball: Vector3, ball_r: float) -> bool:
+	var b2: Dictionary = _fg[fn + "2_" + sd]
+	var joint_key: String = fn + str(seg) + "_" + sd
+	var jb: int = _fg[joint_key].b
+	var jt := to_world * _skel.get_bone_global_pose(jb)
+	var p: Vector3
+	if seg == 2:
+		p = to_world * (_skel.get_bone_global_pose(b2.b) * ((b2.dir as Vector3) * float(b2.len)))
+	else:
+		p = to_world * _skel.get_bone_global_pose(b2.b).origin
+	var dist := p.distance_to(ball)
+	var pen := ball_r + FINGER_SKIN - dist
+	if pen <= 0.0:
+		return false
+	var nb := (p - ball) / maxf(dist, 1e-5)
+	var ax_w := (jt.basis * (_fg[joint_key].curl as Vector3)).normalized()
+	var g := ax_w.cross(p - jt.origin).dot(nb)  # wie weit die Spitze je rad Beugen nach aussen kommt
+	if absf(g) < 0.004:
+		return false
+	var st: Array = _fa[joint_key]
+	var da := clampf(pen / g, -0.35, 0.35)
+	st[0] = clampf(st[0] + da, -0.45, 1.65)
+	if signf(st[1]) != signf(da):
+		st[1] = 0.0  # Stoss: die Bewegung in den Ball hinein endet
+	return true
+
+
+func _apply_fingers() -> void:
+	if not has_fingers:
+		return
+	for sd in ["l", "r"]:
+		for fn in FINGERS:
+			var a: Dictionary = _fg[fn + "1_" + sd]
+			var q: Quaternion = a.rest
+			if a.spread != Vector3.ZERO:
+				q = q * Quaternion(a.spread, _fa[fn + "_" + sd])
+			_skel.set_bone_pose_rotation(a.b, q * Quaternion(a.curl, (_fa[fn + "1_" + sd] as Array)[0]))
+			var c: Dictionary = _fg[fn + "2_" + sd]
+			_skel.set_bone_pose_rotation(c.b, (c.rest as Quaternion) * Quaternion(c.curl, (_fa[fn + "2_" + sd] as Array)[0]))
+
+
+## Fingerwinkel fuer das Replay (eine flache Liste).
+func finger_state() -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	if has_fingers:
+		for sd in ["l", "r"]:
+			for fn in FINGERS:
+				out.append(_fa[fn + "_" + sd])
+				out.append((_fa[fn + "1_" + sd] as Array)[0])
+				out.append((_fa[fn + "2_" + sd] as Array)[0])
+	return out
+
+
+func set_finger_state(a: PackedFloat32Array) -> void:
+	if not has_fingers or a.size() < 30:
+		return
+	var i := 0
+	for sd in ["l", "r"]:
+		for fn in FINGERS:
+			_fa[fn + "_" + sd] = a[i]
+			_fa[fn + "1_" + sd] = [a[i + 1], 0.0]
+			_fa[fn + "2_" + sd] = [a[i + 2], 0.0]
+			i += 3
+	_apply_fingers()
 
 
 ## Bildschirm-Frame: die Knochen aus den weich interpolierten Gelenklagen setzen. Die Posen
@@ -598,6 +776,7 @@ func capture() -> Array:
 		out.append((j[name] as Node3D).quaternion)
 	out.append(root_node.position)
 	out.append(root_node.quaternion)
+	out.append(finger_state())
 	return out
 
 
@@ -607,6 +786,13 @@ static func mix_capture(a: Array, b: Array, w: float) -> Array:
 	for i in a.size():
 		if a[i] is Quaternion:
 			out.append((a[i] as Quaternion).slerp(b[i], w))
+		elif a[i] is PackedFloat32Array:
+			var fa: PackedFloat32Array = a[i]
+			var fb: PackedFloat32Array = b[i]
+			var fm := fa.duplicate()
+			for k in mini(fa.size(), fb.size()):
+				fm[k] = lerpf(fa[k], fb[k], w)
+			out.append(fm)
 		else:
 			out.append((a[i] as Vector3).lerp(b[i], w))
 	return out
@@ -617,5 +803,7 @@ func apply(c: Array) -> void:
 		(j[JOINTS[i]] as Node3D).quaternion = c[i]
 	root_node.position = c[JOINTS.size()]
 	root_node.quaternion = c[JOINTS.size() + 1]
+	if c.size() > JOINTS.size() + 2:
+		set_finger_state(c[JOINTS.size() + 2])
 	_reset_spring()
 	_sync()

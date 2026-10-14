@@ -240,6 +240,12 @@ func _check_player(p, tick: int, rally: bool) -> void:
 		var bb: Basis = f.global_basis.orthonormalized()
 		var shp: Vector3 = f.j["sh_r"].global_position
 		print("   on=%s kind=%s/%s el-sh(local)=%s wr-sh=%s rel=%.3f" % [p.contact_on, p.anim_kind, p.anim_tech, (bb.inverse() * (f.j["el_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), (bb.inverse() * (f.j["wr_r"].global_position - shp)).snapped(Vector3.ONE * 0.01), p.now - p.anim_t])
+		for hs in ["l", "r"]:
+			var wb: Basis = f.j["wr_" + hs].global_basis.orthonormalized()
+			var sg := 1.0 if hs == "r" else -1.0
+			print("   hand_%s wr=%s fing=%s flex=%s thumb=%s fa=%s" % [hs, (bb.inverse() * (f.j["wr_" + hs].global_position - shp)).snapped(Vector3.ONE * 0.01), (bb.inverse() * -wb.y).snapped(Vector3.ONE * 0.01), (bb.inverse() * (wb.x * sg)).snapped(Vector3.ONE * 0.01), (bb.inverse() * wb.z).snapped(Vector3.ONE * 0.01), f.finger_state().slice(0 if hs == "l" else 15, 6 if hs == "l" else 21)])
+		if p.dbg_tg.has("l"):
+			print("   tg_l-sh=%s" % (bb.inverse() * ((p.dbg_tg["l"] as Vector3) - shp)).snapped(Vector3.ONE * 0.01))
 		if p.dbg_tg.has("r"):
 			print("   tg_r-sh=%s" % (bb.inverse() * ((p.dbg_tg["r"] as Vector3) - shp)).snapped(Vector3.ONE * 0.01))
 		print("T%d %s %s=%s anim=%s phys=%s ikw=%s miss=%s sole=%s run=%.2f v=%.2f feet=%s" % [tick, id, tj, f.j[tj].quaternion, f._q.get(tj), f._pq.get(tj), f._ik_last.get("arm_r"), p._feet_miss, [snappedf(cur["soley_l"], 0.001), snappedf(cur["soley_r"], 0.001), snappedf(p._sole_t.get("l", 0.0), 0.001), snappedf(p._sole_t.get("r", 0.0), 0.001)], p._run_amt, p._vel.length(), {"l": [ft.get("l", {}).get("on"), snappedf(ft.get("l", {}).get("w", 0), 0.01)], "r": [ft.get("r", {}).get("on"), snappedf(ft.get("r", {}).get("w", 0), 0.01)]}])
@@ -427,6 +433,15 @@ func _update_shot(tick: int) -> void:
 	for v in _vp:
 		var cam: Camera3D = v[1]
 		var off: Vector3 = rgt * 3.6 if v[3] == "side" else (fwd * 2.6 - rgt * 2.6)
+		if s.get("cam", "") == "hands":
+			# Nahaufnahme der Haende (Pritschen, Ballkontakt)
+			look = (pl.fig.j["wr_l"].global_position + pl.fig.j["wr_r"].global_position) * 0.5
+			var hf: Vector3 = -pl.fig.global_transform.basis.z
+			hf.y = 0.0
+			hf = hf.normalized()
+			var hr := hf.cross(Vector3.UP)
+			off = hr * 1.1 + hf * 0.3 if v[3] == "side" else hf * 1.15
+			cam.near = 0.3
 		cam.position = look + off + Vector3(0, 0.25, 0)
 		cam.look_at(look)
 		(v[2] as Label).text = "%s  %s  #%d  %s\nTakt %d  %s %s" % [s.get("label", ""), "AB"[int(s.team)], int(s.num), v[3], tick, pl.anim_kind, _ctx(pl)]

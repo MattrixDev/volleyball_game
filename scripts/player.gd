@@ -32,6 +32,8 @@ var hand_shift := 0.0
 var hand_reach := 0.0
 var block_jump_at := -1.0
 var block_pose := false
+static var ball_node: Node3D  # der Spielball (fuer die Finger), setzt das Match
+const BALL_VIS_R := 0.14  # so gross wird der Ball gezeichnet (match.gd)
 ## Blickrichtung beim Angriff (Welt-z der Schulter), damit der Gegner lesen kann.
 var lean := 0.0
 
@@ -342,6 +344,9 @@ func _animate(delta: float) -> void:
 	_contact_ik()
 	_apply_hits()
 	fig.physics_step(delta)
+	_hand_shape()
+	var bp := ball_node.global_position if ball_node != null and is_instance_valid(ball_node) else Vector3.INF
+	fig.fingers_step(delta, bp, BALL_VIS_R)
 
 
 # ---------------------------------------------------------------- Stoesse (Semi-Ragdoll)
@@ -505,7 +510,18 @@ func _reach_ball(delta: float) -> void:
 	elif contact_on and anim_kind in ["set", "pass", "free"] and anim_tech == "over" and not airborne:
 		# Pritschen: unter dem Ball in die Knie gehen, im Kontakt aus den Beinen strecken
 		var rel2 := now - anim_t
-		crouch_want = 0.1 * smoothstep(-0.65, -0.4, rel2) * (1.0 - smoothstep(-0.3, -0.12, rel2))
+		# Ball vor und ueber der Stirn nehmen (Ballmitte gut 30 cm schraeg vor-oben, nicht genau
+		# senkrecht darueber): Koerper etwas hinter den Ball, und so tief, dass die Arme gebeugt
+		# bleiben; im Kontakt streckt der Spieler sich wieder (Beine vor den Armen).
+		var w2 := smoothstep(-0.6, -0.3, rel2) * (1.0 - smoothstep(0.0, 0.15, rel2))
+		var fw := Vector3(-sin(_yaw), 0.0, -cos(_yaw))
+		var head: Vector3 = (fig.j["head"] as Node3D).global_position
+		var brow := head + Vector3.UP * 0.13 + fw * 0.1
+		var ahead := (contact_pt - brow).dot(fw)
+		want = -fw * clampf(0.15 - ahead, 0.0, 0.15) * w2
+		var drop_y := brow.y + _crouch_drop - (contact_pt.y - 0.4)
+		crouch_want = maxf(0.1 * smoothstep(-0.65, -0.4, rel2) * (1.0 - smoothstep(-0.3, -0.12, rel2)),
+			clampf(drop_y, 0.0, 0.16) * smoothstep(-0.5, -0.25, rel2) * (1.0 - smoothstep(-0.02, 0.12, rel2)))
 	else:
 		crouch_want = 0.0
 	_reach_off = _reach_off.lerp(want, clampf(delta * 18.0, 0.0, 1.0))
@@ -699,28 +715,44 @@ func _contact_ik() -> void:
 		var fd := f * 0.75 - up * 0.65
 		hands = {"l": [fd, r + up * 0.3], "r": [fd, -r + up * 0.3]}
 	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
-		# Pritschen wie im Lehrbild: frueh die Pritschhaltung (Haende vor und ueber der Stirn,
-		# Ellbogen seitlich, Daumen zu den Augen), damit unter den Ball laufen; erst kurz vor dem
-		# Kontakt gehen die Haende zum Ball. Dann strecken sich Arme und Koerper in Zielrichtung.
+		# Pritschen nach Lehrbild und Sportwissenschaft: frueh die Pritschhaltung (Handgelenke etwa
+		# 12 cm vor und 10 cm ueber der Stirn, Ellbogen gebeugt und leicht ausserhalb der Schultern,
+		# Handflaechen zum Ball, Daumen zu den Augen). Kurz vor dem Kontakt gehen die Haende unter den
+		# Ball, der Ball sinkt rund 5 cm in die Haende ein (die Finger umfassen ihn, siehe
+		# _hand_shape), dann strecken sich Arme und Koerper in Zielrichtung; die Haende oeffnen sich
+		# dabei leicht nach aussen.
 		w = smoothstep(-0.95, -0.55, rel) * (1.0 - smoothstep(0.25, 0.45, rel))
-		var push := (aim_h * (0.55 if anim_kind == "set" else 0.8) + up).normalized()
-		var follow := push * 0.42 * smoothstep(0.0, 0.22, rel)
+		# Seitlich zum Blick gespielte Baelle: die Haende schieben nur wenig zur Seite (sonst kreuzen
+		# die Unterarme vor dem Gesicht); den Rest uebernimmt die Koerperdrehung.
+		var aim_l := f * aim_h.dot(f) + r * aim_h.dot(r) * 0.35
+		var push := (aim_l * (0.55 if anim_kind == "set" else 0.8) + up).normalized()
 		var head: Vector3 = fig.j["head"].global_position
-		var cup := head + up * 0.4 + f * 0.2  # Pritschhaltung vor der Stirn (head = Halsgelenk), mit dem Koerper mitgefuehrt
-		var hb := cup.lerp(b, smoothstep(-0.3, -0.04, rel)) + follow
-		tg = {"l": hb - r * 0.1 - up * 0.1 - f * 0.04, "r": hb + r * 0.1 - up * 0.1 - f * 0.04}
-		# Ellbogen zeigen nach aussen (etwa schulterbreit und etwas tiefer als die Haende), bis
-		# sich die Arme strecken.
+		var brow := head + up * 0.13 + f * 0.1  # Stirn (head = Halsgelenk)
+		var ready := brow + f * 0.12 + up * 0.1
+		var to_ball := (b - brow).normalized()
+		var at_ball := b - to_ball * 0.19 - up * 0.01
+		# Der Ball sinkt in die Haende ein (gut 5 cm, etwa 40 % der Kontaktzeit), dann Strecken
+		var give := -to_ball * 0.055 * smoothstep(-0.025, -0.004, rel) * (1.0 - smoothstep(0.004, 0.04, rel))
+		var follow := push * 0.42 * smoothstep(0.0, 0.2, rel)
+		var hb := ready.lerp(at_ball, smoothstep(-0.32, -0.05, rel)) + give + follow
+		var open := 0.035 * smoothstep(0.04, 0.2, rel)
+		tg = {"l": hb - r * (0.12 + open), "r": hb + r * (0.12 + open)}
+		# Ellbogen zeigen nach aussen vorn (etwas breiter als die Schultern), bis sich die Arme strecken.
 		for sd in ["l", "r"]:
 			var s_sign := -1.0 if sd == "l" else 1.0
 			var shp: Vector3 = fig.j["sh_" + sd].global_position
-			poles[sd] = shp + r * (0.45 * s_sign) + f * 0.12 - up * 0.02
+			poles[sd] = shp + r * (0.55 * s_sign) + f * 0.1 - up * 0.1
 		pole_w = 1.0 - smoothstep(0.04, 0.2, rel)
-		# Handflaechen schauen nach vorn oben zum Ball, Finger zeigen nach oben hinten und leicht
-		# nach aussen (Daumen zur Stirn); nach dem Kontakt zeigen die Handflaechen in Zielrichtung.
-		var palm := (up * 0.8 + f * 0.6).normalized().lerp(push, smoothstep(0.0, 0.15, rel)).normalized()
+		# Handflaechen schauen zum Ball (nach dem Kontakt in Zielrichtung), die Finger nach oben und
+		# leicht nach aussen, so zeigen die Daumen nach innen zu den Augen (Dreieck vor der Stirn).
+		# (Steht der Ball genau ueber dem Kopf, zeigen die Handflaechen trotzdem schraeg nach vorn
+		# oben: Handgelenke etwa 45 Grad nach hinten abgeknickt, Finger nach oben hinten.)
+		var palm0 := (to_ball + f * 1.1 + up * 0.5).normalized()
+		var palm := palm0.lerp(push, smoothstep(0.0, 0.12, rel)).normalized()
 		var fing := (up - palm * up.dot(palm)).normalized()
-		hands = {"l": [fing - r * 0.3, palm + r * 0.25], "r": [fing + r * 0.3, palm - r * 0.25]}
+		# Das Meshy-Modell hat spiegelverkehrte Haende: die Beugeseite der Finger ist die Seite,
+		# die orient_hand als Handruecken fuehrt, deshalb -palm.
+		hands = {"l": [fing - r * 0.28, -palm], "r": [fing + r * 0.28, -palm]}
 	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne):
 		# Angriff wie im Volleyball (Bogenspannung): der Ellbogen holt hoch und weit nach hinten aus,
 		# die Hand liegt hinter dem Kopf auf Ohrhoehe, die Schlagschulter dreht zurueck und der
@@ -844,6 +876,48 @@ func _contact_ik() -> void:
 		var ws := wl if (sd == "l" and wl >= 0.0) else w
 		fig.orient_hand(sd, hands[sd][0], hands[sd][1], ws)
 	fig._sync()
+
+
+## Handform je Seite fuer die Finger (HumanFigure.hand): curl = Beugen, spread = Spreizen,
+## thumb = Daumen abspreizen, grip = zugreifen (die Finger schliessen, bis der Ball sie aufhaelt).
+func _hand_shape() -> void:
+	if not fig.has_fingers:
+		return
+	var rel := now - anim_t
+	var shape := HumanFigure.FINGER_REST.duplicate()
+	var both := true
+	if block_pose and airborne:
+		# Block: Finger weit gespreizt und fest
+		shape = {"curl": 0.1, "spread": 0.4, "thumb": 0.6, "grip": 0.0}
+	elif not contact_on and anim_kind != "serve":
+		pass
+	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
+		# Pritschen: Korb aus gespreizten, leicht gebeugten Fingern; im Kontakt greifen die Finger
+		# um den Ball (Fingerkuppen, Daumen und Zeigefinger tragen), danach weit geoeffnet.
+		var k := smoothstep(-0.95, -0.5, rel) * (1.0 - smoothstep(0.35, 0.6, rel))
+		var grip := smoothstep(-0.025, -0.004, rel) * (1.0 - smoothstep(0.008, 0.035, rel))
+		var rls := smoothstep(0.03, 0.12, rel)
+		shape = {"curl": lerpf(0.5, 0.08, rls), "spread": lerpf(0.34, 0.45, rls), "thumb": lerpf(0.9, 0.7, rls), "grip": 0.65 * grip}
+		shape = _mix_shape(HumanFigure.FINGER_REST, shape, k)
+	elif anim_kind in ["pass", "dig", "free", "set"]:
+		# Baggern: Haende ineinander, Finger locker gebeugt, Daumen nebeneinander
+		var k := smoothstep(-0.32, -0.06, rel) * (1.0 - smoothstep(0.1, 0.3, rel))
+		shape = _mix_shape(HumanFigure.FINGER_REST, {"curl": 0.55, "spread": 0.0, "thumb": 0.05, "grip": 0.0}, k)
+	elif anim_kind in ["attack", "serve"]:
+		# Schlag: offene, feste Hand; im Treffpunkt legt sie sich ueber den Ball (Topspin)
+		both = false
+		var k := smoothstep(-0.3, -0.1, rel) * (1.0 - smoothstep(0.15, 0.35, rel))
+		var grip := smoothstep(-0.02, 0.0, rel) * (1.0 - smoothstep(0.03, 0.09, rel))
+		shape = _mix_shape(HumanFigure.FINGER_REST, {"curl": 0.1, "spread": 0.14, "thumb": 0.35, "grip": 0.6 * grip}, k)
+	fig.hand["r"] = shape
+	fig.hand["l"] = shape if both else HumanFigure.FINGER_REST.duplicate()
+
+
+static func _mix_shape(a: Dictionary, b: Dictionary, k: float) -> Dictionary:
+	var out := {}
+	for key in a:
+		out[key] = lerpf(a[key], b.get(key, a[key]), k)
+	return out
 
 
 func _arm(p: Dictionary, sd: String, fwd: float, out: float, elbow: float, wrist := 0.0, twist := 0.0) -> void:

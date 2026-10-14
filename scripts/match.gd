@@ -352,6 +352,7 @@ func _unshaded(c: Color) -> StandardMaterial3D:
 func _make_ball() -> void:
 	ball = Node3D.new()
 	add_child(ball)
+	VPlayer.ball_node = ball
 	# Ball aus Blender (assets/models/ball.glb, r = 10,5 cm), etwas groesser gezeichnet,
 	# damit man ihn gut sieht
 	var src: Node3D = preload("res://assets/models/ball.glb").instantiate()
@@ -2899,8 +2900,10 @@ func _update_players(delta: float) -> void:
 		opp.player.anim_tech = opp.tech
 		# Zuspiel, bevor gedrueckt ist: der Zuspieler geht schon in die Pritschhaltung, wenn der
 		# Ball pritschbar ist (wie im Spiel: die Haende sind frueh oben). Gebaggert wird nur, wenn es so gedrueckt wird.
+		# (Auch kurz nach dem geplanten Treffpunkt noch, sonst springen die Haende fuer ein, zwei Takte in
+		# die Baggerhaltung, bis der Druck auf dem Steuerkreuz verarbeitet ist.)
 		if opp.kind == "set" and not opp.pending and opp.tech == "bump" and opp.speed <= OVER_OK \
-				and not (opp.player.role == "L" and absf(opp.point.x) < 3.0) and clock < opp.t:
+				and not (opp.player.role == "L" and absf(opp.point.x) < 3.0) and clock < opp.t + 0.15:
 			opp.player.anim_tech = "over"
 		# Zu spaet dran: die Bewegung haelt kurz im Treffpunkt an, bis der Ball wirklich gespielt wird
 		opp.player.anim_t = maxf(opp.t, minf(clock, opp.t + 0.12))
