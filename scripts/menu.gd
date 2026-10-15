@@ -242,6 +242,13 @@ func _process(_delta: float) -> void:
 			open()
 
 
+## B am Controller schliesst das Menue (Esc und Start macht _process, daher nur Controller hier).
+func _unhandled_input(event: InputEvent) -> void:
+	if visible and event is InputEventJoypadButton and event.is_action_pressed("ui_cancel"):
+		close()
+		get_viewport().set_input_as_handled()
+
+
 ## Im Startmenue oeffnet Esc das Menue nicht (dort gibt es den Knopf "Einstellungen").
 func from_title_blocked() -> bool:
 	return match_node != null and match_node.attract
