@@ -340,6 +340,24 @@ func _finish() -> void:
 		f.store_string(JSON.stringify({"ticks": Engine.get_physics_frames(), "events": _events, "contacts": _contacts}, " "))
 		f.close()
 		print("LAB: %d Ereignisse, %d Kontakte -> %s" % [_events.size(), _contacts.size(), audit_path])
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--lab-jstats="):
+			# Gelenkwinkel je Gelenk (Beugen, Drehung, seitlich) als Perzentile, fuer die Gelenkgrenzen
+			var out := {}
+			for jn in HumanFigure.jstats:
+				var arr: Array = HumanFigure.jstats[jn]
+				var res := {}
+				for c in 3:
+					var vals := PackedFloat32Array()
+					for v in arr:
+						vals.append((v as Vector3)[c])
+					vals.sort()
+					var n := vals.size()
+					res["xyz"[c]] = [vals[0], vals[int(n * 0.001)], vals[int(n * 0.01)], vals[int(n * 0.5)], vals[int(n * 0.99)], vals[int(n * 0.999)], vals[n - 1]]
+				out[jn] = res
+			var jf := FileAccess.open(a.get_slice("=", 1), FileAccess.WRITE)
+			jf.store_string(JSON.stringify(out, " "))
+			jf.close()
 	get_tree().quit()
 
 

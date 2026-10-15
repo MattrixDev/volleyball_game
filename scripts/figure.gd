@@ -572,6 +572,8 @@ func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 			var vl := v.length()
 			if vl > 1e-7:
 				q = (Quaternion(v / vl, vl * dt) * q).normalized()
+		if LEG_JOINTS.has(name):
+			q = _limit(name, q)  # Beine: vor der Fuss-IK begrenzen, damit die Fuesse fest stehen bleiben
 		_q[name] = q
 		_vel[name] = v
 		n.quaternion = q
@@ -580,6 +582,7 @@ func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 
 ## Federzustand an die aktuelle Haltung der Knoten angleichen (nach pose(), Wiederholung).
 func _reset_spring() -> void:
+	_tw_prev.clear()
 	_tq.clear()
 	_tstep.clear()
 	_toff.clear()
@@ -609,12 +612,84 @@ const PHYS_K := {"hips": 1.4, "chest": 0.75, "head": 0.55, "sh_l": 0.95, "sh_r":
 	"wr_l": 0.8, "wr_r": 0.8, "hip_l": 3.0, "hip_r": 3.0, "kn_l": 3.0, "kn_r": 3.0, "an_l": 2.5, "an_r": 2.5}
 
 
+## Menschliche Gelenkgrenzen (rad) als [Drehung um die Knochenachse lo, hi, Beugen um X lo, hi,
+## seitlich um Z lo, hi]. Am Ende jedes Takts wird jedes Gelenk weich in seinen Bereich gebremst:
+## so kann sich nichts unmenschlich verdrehen, auch wenn Clip, IK und Handausrichtung einmal
+## gegeneinander arbeiten. (Werte aus den Bereichen, die die Animationen im Spiel wirklich nutzen.)
+const LIMITS := {
+	"chest": [-1.0, 1.0, -1.2, 0.6, -0.7, 0.7], "head": [-1.2, 1.2, -1.0, 1.55, -0.75, 0.75],
+	"el_l": [-1.1, 1.1, -0.05, 2.6, -0.45, 0.45], "el_r": [-1.1, 1.1, -0.05, 2.6, -0.45, 0.45],
+	"hip_l": [-0.7, 0.7, -0.5, 2.1, -1.0, 0.45], "hip_r": [-0.7, 0.7, -0.5, 2.1, -0.45, 1.0],
+	"kn_l": [-0.55, 0.55, -2.5, 0.0, -0.35, 0.35], "kn_r": [-0.55, 0.55, -2.5, 0.0, -0.35, 0.35],
+	"an_l": [-0.9, 0.9, -1.1, 1.1, -0.8, 0.8], "an_r": [-0.9, 0.9, -1.1, 1.1, -0.8, 0.8]}
+var limits: Dictionary = {} if "limits" in ",".join(OS.get_cmdline_user_args()).get_slice("--lab-off=", 1) else LIMITS
+static var jstats := {}  # Labor: Gelenkwinkel sammeln (--lab-jstats)
+static var _jstat_on := "--lab-jstats" in ",".join(OS.get_cmdline_user_args())
+
+
+## Drehung in (Beugen X, Drehung um Y = Knochenachse, seitlich Z) zerlegen (Swing-Twist).
+static func swing_twist(q: Quaternion) -> Vector3:
+	if q.w < 0.0:
+		q = -q
+	var tw := 2.0 * atan2(q.y, q.w)
+	var twist := Quaternion(Vector3.UP, tw)
+	var sw := (q * twist.inverse()).normalized()
+	if sw.w < 0.0:
+		sw = -sw
+	var sa := 2.0 * acos(clampf(sw.w, -1.0, 1.0))
+	var sv := Vector3(sw.x, sw.y, sw.z)
+	var v := sv.normalized() * sa if sv.length() > 1e-6 else Vector3.ZERO
+	return Vector3(v.x, wrapf(tw, -PI, PI), v.z)
+
+
+static func _soft_clamp(x: float, lo: float, hi: float, k := 0.15) -> float:
+	if x > hi - k:
+		return hi - k + k * tanh((x - hi + k) / k)
+	if x < lo + k:
+		return lo + k - k * tanh((lo + k - x) / k)
+	return x
+
+
+const LEG_JOINTS := ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]
+var _tw_prev := {}  # Gelenk -> letzte Drehung um die Knochenachse (fortlaufend, ohne Sprung bei +-180 Grad)
+
+
+func _limit(name: String, q: Quaternion) -> Quaternion:
+	if _jstat_on:
+		var st: Array = jstats.get(name, [])
+		if st.size() < 200000:
+			st.append(swing_twist(q))
+		jstats[name] = st
+	var lim: Array = limits.get(name, [])
+	if lim.is_empty():
+		return q
+	var a := swing_twist(q)
+	# Drehung fortlaufend zaehlen: steht ein Gelenk ueber der Grenze nahe +-180 Grad, darf es nicht
+	# zwischen beiden Grenzen hin und her springen.
+	if _tw_prev.has(name):
+		var pv: float = _tw_prev[name]
+		a.y = pv + wrapf(a.y - pv, -PI, PI)
+		if absf(a.y) > TAU:
+			a.y = wrapf(a.y, -PI, PI)
+	_tw_prev[name] = a.y
+	var b := Vector3(_soft_clamp(a.x, lim[2], lim[3]), _soft_clamp(a.y, lim[0], lim[1]), _soft_clamp(a.z, lim[4], lim[5]))
+	if b.is_equal_approx(a):
+		return q
+	var sv := Vector3(b.x, 0.0, b.z)
+	var sw := Quaternion(sv.normalized(), sv.length()) if sv.length() > 1e-6 else Quaternion.IDENTITY
+	return (sw * Quaternion(Vector3.UP, b.y)).normalized()
+
+
 func physics_step(delta: float) -> void:
 	if delta <= 0.0:
 		return
 	for name in JOINTS:
 		var n: Node3D = j[name]
 		var t: Quaternion = n.quaternion
+		# Ziel in den menschlichen Bereich holen, die Physik-Feder folgt dann weich dorthin
+		# (Beine schon vor der Fuss-IK, siehe pose_spring).
+		if not LEG_JOINTS.has(name):
+			t = _limit(name, t)
 		var q: Quaternion = _pq.get(name, t)
 		var v: Vector3 = _pv.get(name, Vector3.ZERO)
 		var k: float = phys_k * PHYS_K.get(name, 1.0)
@@ -804,7 +879,7 @@ func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
 	elif last.dot(q1) < 0.0:
 		q1 = -q1
 	_hand_q[sd] = q1
-	wr.rotation = q0.slerpni(q1, clampf(w, 0.0, 1.0)).get_euler()
+	wr.quaternion = q0.slerpni(q1, clampf(w, 0.0, 1.0)).normalized()
 
 
 
