@@ -1,12 +1,308 @@
-[gd_resource type="Resource" script_class="TeamStyle" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "nordhafen_18"
+first_name = "Philipp"
+last_name = "Neumeier"
+number = 18
+role = "S"
+height_m = 1.86
+jump = 77
+power = 70
+serve = 72
+receive = 76
+defense = 76
+setting = 85
+block = 63
+speed = 80
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 2
+hair = 1
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "nordhafen_06"
+first_name = "David"
+last_name = "Ihlenfeld"
+number = 6
+role = "OH"
+height_m = 1.93
+jump = 83
+power = 83
+serve = 80
+receive = 93
+defense = 90
+setting = 61
+block = 84
+speed = 86
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 1
+hair = 0
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "nordhafen_05"
+first_name = "Jonas"
+last_name = "Brandt"
+number = 5
+role = "MB"
+height_m = 2.13
+jump = 93
+power = 82
+serve = 78
+receive = 48
+defense = 66
+setting = 63
+block = 94
+speed = 72
+traits = PackedStringArray("lange_arme")
+left_handed = false
+skin = 0
+hair = 1
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "nordhafen_16"
+first_name = "Felix"
+last_name = "Varga"
+number = 16
+role = "OP"
+height_m = 2.06
+jump = 85
+power = 92
+serve = 85
+receive = 77
+defense = 75
+setting = 70
+block = 89
+speed = 79
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 2
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "nordhafen_11"
+first_name = "Leon"
+last_name = "Hartung"
+number = 11
+role = "OH"
+height_m = 1.92
+jump = 75
+power = 72
+serve = 77
+receive = 72
+defense = 77
+setting = 58
+block = 64
+speed = 83
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 0
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "nordhafen_17"
+first_name = "Florian"
+last_name = "Yilmaz"
+number = 17
+role = "MB"
+height_m = 2.05
+jump = 83
+power = 78
+serve = 71
+receive = 55
+defense = 56
+setting = 64
+block = 86
+speed = 72
+traits = PackedStringArray("lange_arme")
+left_handed = false
+skin = 1
+hair = 3
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "nordhafen_19"
+first_name = "Rafael"
+last_name = "Mertens"
+number = 19
+role = "L"
+height_m = 1.81
+jump = 40
+power = 41
+serve = 35
+receive = 78
+defense = 96
+setting = 62
+block = 28
+speed = 80
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 4
+hair = 0
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "nordhafen_14"
+first_name = "Jonas"
+last_name = "Otten"
+number = 14
+role = "S"
+height_m = 1.87
+jump = 71
+power = 60
+serve = 77
+receive = 62
+defense = 71
+setting = 81
+block = 62
+speed = 73
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 4
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "nordhafen_09"
+first_name = "Marten"
+last_name = "Westphal"
+number = 9
+role = "OH"
+height_m = 1.94
+jump = 75
+power = 76
+serve = 79
+receive = 78
+defense = 66
+setting = 58
+block = 63
+speed = 63
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 1
+hair = 3
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "nordhafen_13"
+first_name = "Mikkel"
+last_name = "Feddersen"
+number = 13
+role = "MB"
+height_m = 2.1
+jump = 75
+power = 75
+serve = 75
+receive = 51
+defense = 62
+setting = 61
+block = 91
+speed = 71
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 4
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "nordhafen_03"
+first_name = "Mika"
+last_name = "Marquardt"
+number = 3
+role = "OP"
+height_m = 2
+jump = 76
+power = 77
+serve = 75
+receive = 48
+defense = 63
+setting = 65
+block = 77
+speed = 61
+traits = PackedStringArray("kraftpaket")
+left_handed = false
+skin = 0
+hair = 5
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "nordhafen_12"
+first_name = "Henrik"
+last_name = "Uhlig"
+number = 12
+role = "L"
+height_m = 1.9
+jump = 47
+power = 34
+serve = 31
+receive = 88
+defense = 80
+setting = 58
+block = 25
+speed = 69
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 4
+hair = 0
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "nordhafen_07"
+first_name = "Niklas"
+last_name = "Voss"
+number = 7
+role = "OH"
+height_m = 1.96
+jump = 78
+power = 77
+serve = 80
+receive = 81
+defense = 83
+setting = 66
+block = 79
+speed = 79
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 2
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "nordhafen_08"
+first_name = "Tjark"
+last_name = "Mohr"
+number = 8
+role = "OH"
+height_m = 1.93
+jump = 69
+power = 75
+serve = 71
+receive = 71
+defense = 76
+setting = 54
+block = 70
+speed = 68
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 4
 
 [resource]
 script = ExtResource("1")
 id = "nordhafen"
 name = "SV Nordhafen"
 short_name = "SVN"
+play_style = "ausgeglichen"
 jersey = Color(0.14, 0.18, 0.31, 1)
 panel = Color(0.9, 0.9, 0.88, 1)
 collar = Color(0.9, 0.9, 0.88, 1)
@@ -20,3 +316,4 @@ sole = Color(0.85, 0.85, 0.84, 1)
 libero_jersey = Color(0.79, 0.64, 0.26, 1)
 libero_panel = Color(0.14, 0.18, 0.31, 1)
 libero_number = Color(0.14, 0.18, 0.31, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])

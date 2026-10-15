@@ -1,0 +1,319 @@
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "graufelden_08"
+first_name = "Erik"
+last_name = "Zeller"
+number = 8
+role = "S"
+height_m = 1.87
+jump = 72
+power = 65
+serve = 72
+receive = 65
+defense = 68
+setting = 84
+block = 67
+speed = 72
+traits = PackedStringArray("spielmacher")
+left_handed = false
+skin = 1
+hair = 0
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "graufelden_11"
+first_name = "Konstantin"
+last_name = "Nordmann"
+number = 11
+role = "OH"
+height_m = 1.94
+jump = 77
+power = 72
+serve = 67
+receive = 71
+defense = 69
+setting = 54
+block = 66
+speed = 70
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 0
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "graufelden_17"
+first_name = "Joris"
+last_name = "Meinke"
+number = 17
+role = "MB"
+height_m = 2.02
+jump = 79
+power = 79
+serve = 74
+receive = 49
+defense = 65
+setting = 59
+block = 95
+speed = 69
+traits = PackedStringArray("sprungwunder", "linkshaender")
+left_handed = true
+skin = 1
+hair = 3
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "graufelden_10"
+first_name = "Marten"
+last_name = "Hollmann"
+number = 10
+role = "OP"
+height_m = 1.98
+jump = 77
+power = 78
+serve = 78
+receive = 51
+defense = 67
+setting = 54
+block = 78
+speed = 65
+traits = PackedStringArray("linkshaender")
+left_handed = true
+skin = 0
+hair = 3
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "graufelden_15"
+first_name = "Jakob"
+last_name = "Nolte"
+number = 15
+role = "OH"
+height_m = 1.98
+jump = 77
+power = 77
+serve = 76
+receive = 80
+defense = 81
+setting = 62
+block = 74
+speed = 71
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 0
+hair = 2
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "graufelden_13"
+first_name = "Kai"
+last_name = "Gerber"
+number = 13
+role = "MB"
+height_m = 2.07
+jump = 84
+power = 75
+serve = 69
+receive = 44
+defense = 63
+setting = 67
+block = 93
+speed = 72
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 4
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "graufelden_09"
+first_name = "Sören"
+last_name = "Vester"
+number = 9
+role = "L"
+height_m = 1.84
+jump = 42
+power = 40
+serve = 31
+receive = 82
+defense = 81
+setting = 65
+block = 25
+speed = 75
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 1
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "graufelden_20"
+first_name = "Paul"
+last_name = "Voss"
+number = 20
+role = "S"
+height_m = 1.86
+jump = 60
+power = 54
+serve = 63
+receive = 54
+defense = 63
+setting = 74
+block = 51
+speed = 76
+traits = PackedStringArray("spielmacher")
+left_handed = false
+skin = 3
+hair = 2
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "graufelden_01"
+first_name = "Adrian"
+last_name = "Andersen"
+number = 1
+role = "OH"
+height_m = 1.94
+jump = 74
+power = 68
+serve = 75
+receive = 75
+defense = 67
+setting = 59
+block = 65
+speed = 69
+traits = PackedStringArray("flatter", "kanone")
+left_handed = false
+skin = 3
+hair = 4
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "graufelden_05"
+first_name = "Fabian"
+last_name = "Ebert"
+number = 5
+role = "MB"
+height_m = 2.09
+jump = 75
+power = 67
+serve = 72
+receive = 43
+defense = 50
+setting = 45
+block = 76
+speed = 62
+traits = PackedStringArray("lange_arme")
+left_handed = false
+skin = 0
+hair = 2
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "graufelden_16"
+first_name = "Jannik"
+last_name = "Lorenz"
+number = 16
+role = "OP"
+height_m = 2.02
+jump = 69
+power = 74
+serve = 66
+receive = 48
+defense = 59
+setting = 43
+block = 69
+speed = 55
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 1
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "graufelden_19"
+first_name = "Kilian"
+last_name = "Keller"
+number = 19
+role = "L"
+height_m = 1.85
+jump = 31
+power = 27
+serve = 28
+receive = 74
+defense = 73
+setting = 61
+block = 32
+speed = 69
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 3
+hair = 1
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "graufelden_04"
+first_name = "Paul"
+last_name = "Gerlach"
+number = 4
+role = "OH"
+height_m = 2.03
+jump = 66
+power = 62
+serve = 71
+receive = 70
+defense = 68
+setting = 53
+block = 64
+speed = 67
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 1
+hair = 0
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "graufelden_02"
+first_name = "Simon"
+last_name = "Christiansen"
+number = 2
+role = "OH"
+height_m = 1.96
+jump = 72
+power = 68
+serve = 73
+receive = 60
+defense = 62
+setting = 53
+block = 66
+speed = 68
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 2
+hair = 4
+
+[resource]
+script = ExtResource("1")
+id = "graufelden"
+name = "TSV Graufelden"
+short_name = "TSG"
+play_style = "blockstark"
+jersey = Color(0.42, 0.45, 0.48, 1)
+panel = Color(0.75, 0.15, 0.17, 1)
+collar = Color(0.75, 0.15, 0.17, 1)
+logo = Color(0.75, 0.15, 0.17, 1)
+number = Color(0.97, 0.97, 0.96, 1)
+shorts = Color(0.2, 0.22, 0.24, 1)
+socks = Color(0.42, 0.45, 0.48, 1)
+shoes = Color(0.2, 0.22, 0.24, 1)
+accent = Color(0.75, 0.15, 0.17, 1)
+sole = Color(0.82, 0.82, 0.8, 1)
+libero_jersey = Color(0.75, 0.15, 0.17, 1)
+libero_panel = Color(0.2, 0.22, 0.24, 1)
+libero_number = Color(0.97, 0.97, 0.96, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])

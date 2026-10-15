@@ -22,7 +22,7 @@ const SQUADS := [
 ]
 
 var team := 0
-## Je Spieler: {id, role, number, name}
+## Je Spieler: {id, role, number, name, data (PlayerData oder null)}
 var members: Array = []
 ## Spieler-Ids auf den Positionen 1 bis 6 (Index 0 = Position 1).
 var lineup: Array = []
@@ -39,9 +39,16 @@ var spent: Array = []
 
 func _init(p_team: int = 0) -> void:
 	team = p_team
-	for i in 12:
-		var s: Array = SQUADS[team][i]
-		members.append({"id": i, "role": s[0], "number": s[1], "name": s[2]})
+	# Feste Spieler aus der Team-Datei (teams/*.tres); ohne Spielerdaten die alten Testkader.
+	var style: TeamStyle = Teams.playing()[team] if Teams.all().size() > 0 else null
+	if style and style.players.size() >= 12:
+		for i in style.players.size():
+			var pd: PlayerData = style.players[i]
+			members.append({"id": i, "role": pd.role, "number": pd.number, "name": pd.full_name(), "data": pd})
+	else:
+		for i in 12:
+			var s: Array = SQUADS[team][i]
+			members.append({"id": i, "role": s[0], "number": s[1], "name": s[2], "data": null})
 	start_lineup = [0, 1, 2, 3, 4, 5]
 	new_set()
 

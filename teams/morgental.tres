@@ -1,0 +1,319 @@
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "morgental_16"
+first_name = "Niklas"
+last_name = "Roth"
+number = 16
+role = "S"
+height_m = 1.97
+jump = 59
+power = 61
+serve = 72
+receive = 68
+defense = 75
+setting = 85
+block = 71
+speed = 63
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 2
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "morgental_01"
+first_name = "Benno"
+last_name = "Weiß"
+number = 1
+role = "OH"
+height_m = 2.02
+jump = 66
+power = 69
+serve = 74
+receive = 83
+defense = 79
+setting = 53
+block = 70
+speed = 66
+traits = PackedStringArray("linkshaender")
+left_handed = true
+skin = 1
+hair = 0
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "morgental_07"
+first_name = "Aaron"
+last_name = "Haas"
+number = 7
+role = "MB"
+height_m = 2.02
+jump = 70
+power = 77
+serve = 73
+receive = 54
+defense = 61
+setting = 53
+block = 77
+speed = 63
+traits = PackedStringArray("lange_arme")
+left_handed = false
+skin = 0
+hair = 4
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "morgental_18"
+first_name = "Paul"
+last_name = "Lorenz"
+number = 18
+role = "OP"
+height_m = 2.03
+jump = 78
+power = 79
+serve = 79
+receive = 58
+defense = 75
+setting = 61
+block = 70
+speed = 71
+traits = PackedStringArray("kanone", "kraftpaket")
+left_handed = false
+skin = 3
+hair = 1
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "morgental_17"
+first_name = "Joris"
+last_name = "Hartung"
+number = 17
+role = "OH"
+height_m = 2
+jump = 71
+power = 70
+serve = 67
+receive = 82
+defense = 73
+setting = 60
+block = 67
+speed = 73
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 2
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "morgental_09"
+first_name = "Levin"
+last_name = "Neumeier"
+number = 9
+role = "MB"
+height_m = 2.05
+jump = 74
+power = 69
+serve = 71
+receive = 54
+defense = 72
+setting = 53
+block = 78
+speed = 65
+traits = PackedStringArray("blockleser")
+left_handed = false
+skin = 4
+hair = 4
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "morgental_11"
+first_name = "Vincent"
+last_name = "Mertens"
+number = 11
+role = "L"
+height_m = 1.84
+jump = 40
+power = 35
+serve = 33
+receive = 94
+defense = 87
+setting = 66
+block = 32
+speed = 76
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 4
+hair = 5
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "morgental_14"
+first_name = "Noah"
+last_name = "Jansen"
+number = 14
+role = "S"
+height_m = 1.88
+jump = 59
+power = 55
+serve = 63
+receive = 71
+defense = 69
+setting = 81
+block = 57
+speed = 74
+traits = PackedStringArray("spielmacher", "flatter")
+left_handed = false
+skin = 4
+hair = 4
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "morgental_13"
+first_name = "Bruno"
+last_name = "Bender"
+number = 13
+role = "OH"
+height_m = 2.01
+jump = 63
+power = 66
+serve = 58
+receive = 69
+defense = 69
+setting = 45
+block = 53
+speed = 63
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 3
+hair = 0
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "morgental_08"
+first_name = "Florian"
+last_name = "Timm"
+number = 8
+role = "MB"
+height_m = 2.09
+jump = 71
+power = 68
+serve = 65
+receive = 47
+defense = 61
+setting = 50
+block = 84
+speed = 62
+traits = PackedStringArray("lange_arme", "sprungwunder")
+left_handed = false
+skin = 0
+hair = 2
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "morgental_03"
+first_name = "Niklas"
+last_name = "Schaaf"
+number = 3
+role = "OP"
+height_m = 1.96
+jump = 70
+power = 79
+serve = 69
+receive = 60
+defense = 66
+setting = 51
+block = 74
+speed = 68
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 3
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "morgental_15"
+first_name = "Milan"
+last_name = "Eilers"
+number = 15
+role = "L"
+height_m = 1.88
+jump = 28
+power = 38
+serve = 25
+receive = 73
+defense = 68
+setting = 60
+block = 25
+speed = 70
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 3
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "morgental_10"
+first_name = "Aaron"
+last_name = "Asmussen"
+number = 10
+role = "OH"
+height_m = 1.94
+jump = 65
+power = 60
+serve = 60
+receive = 77
+defense = 67
+setting = 52
+block = 53
+speed = 68
+traits = PackedStringArray("kraftpaket")
+left_handed = false
+skin = 3
+hair = 3
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "morgental_06"
+first_name = "Samuel"
+last_name = "Vollmer"
+number = 6
+role = "OH"
+height_m = 1.98
+jump = 65
+power = 64
+serve = 63
+receive = 66
+defense = 74
+setting = 44
+block = 60
+speed = 60
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 4
+hair = 1
+
+[resource]
+script = ExtResource("1")
+id = "morgental"
+name = "USC Morgental"
+short_name = "USC"
+play_style = "abwehrstark"
+jersey = Color(0.36, 0.56, 0.78, 1)
+panel = Color(0.97, 0.97, 0.96, 1)
+collar = Color(0.97, 0.97, 0.96, 1)
+logo = Color(0.97, 0.97, 0.96, 1)
+number = Color(0.97, 0.97, 0.96, 1)
+shorts = Color(0.97, 0.97, 0.96, 1)
+socks = Color(0.36, 0.56, 0.78, 1)
+shoes = Color(0.97, 0.97, 0.96, 1)
+accent = Color(0.36, 0.56, 0.78, 1)
+sole = Color(0.86, 0.86, 0.85, 1)
+libero_jersey = Color(0.17, 0.24, 0.37, 1)
+libero_panel = Color(0.97, 0.97, 0.96, 1)
+libero_number = Color(0.97, 0.97, 0.96, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])

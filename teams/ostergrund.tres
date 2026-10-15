@@ -1,0 +1,319 @@
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "ostergrund_03"
+first_name = "Luca"
+last_name = "Mertens"
+number = 3
+role = "S"
+height_m = 1.95
+jump = 70
+power = 54
+serve = 69
+receive = 61
+defense = 66
+setting = 78
+block = 63
+speed = 68
+traits = PackedStringArray("spielmacher")
+left_handed = false
+skin = 1
+hair = 3
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "ostergrund_07"
+first_name = "Jonas"
+last_name = "Vahl"
+number = 7
+role = "OH"
+height_m = 1.97
+jump = 70
+power = 63
+serve = 74
+receive = 71
+defense = 69
+setting = 58
+block = 69
+speed = 68
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 4
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "ostergrund_10"
+first_name = "Malte"
+last_name = "Tewes"
+number = 10
+role = "MB"
+height_m = 2.07
+jump = 75
+power = 61
+serve = 53
+receive = 30
+defense = 48
+setting = 50
+block = 79
+speed = 59
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 5
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "ostergrund_05"
+first_name = "Jakob"
+last_name = "Thiele"
+number = 5
+role = "OP"
+height_m = 2.08
+jump = 69
+power = 76
+serve = 69
+receive = 50
+defense = 59
+setting = 57
+block = 70
+speed = 60
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 4
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "ostergrund_12"
+first_name = "Philipp"
+last_name = "Larsen"
+number = 12
+role = "OH"
+height_m = 1.94
+jump = 79
+power = 75
+serve = 64
+receive = 74
+defense = 78
+setting = 58
+block = 64
+speed = 76
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 1
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "ostergrund_19"
+first_name = "Ole"
+last_name = "Christiansen"
+number = 19
+role = "MB"
+height_m = 2.07
+jump = 71
+power = 65
+serve = 68
+receive = 35
+defense = 55
+setting = 55
+block = 82
+speed = 65
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 1
+hair = 1
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "ostergrund_13"
+first_name = "Daniel"
+last_name = "Vester"
+number = 13
+role = "L"
+height_m = 1.83
+jump = 34
+power = 28
+serve = 25
+receive = 76
+defense = 73
+setting = 53
+block = 25
+speed = 77
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 4
+hair = 4
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "ostergrund_09"
+first_name = "Marten"
+last_name = "Albers"
+number = 9
+role = "S"
+height_m = 1.86
+jump = 61
+power = 46
+serve = 62
+receive = 54
+defense = 63
+setting = 77
+block = 48
+speed = 75
+traits = PackedStringArray()
+left_handed = false
+skin = 0
+hair = 3
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "ostergrund_11"
+first_name = "Paul"
+last_name = "Feddersen"
+number = 11
+role = "OH"
+height_m = 1.95
+jump = 64
+power = 64
+serve = 59
+receive = 67
+defense = 60
+setting = 46
+block = 56
+speed = 71
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 5
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "ostergrund_06"
+first_name = "Sören"
+last_name = "Hollmann"
+number = 6
+role = "MB"
+height_m = 2.01
+jump = 68
+power = 65
+serve = 61
+receive = 32
+defense = 52
+setting = 50
+block = 73
+speed = 65
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 3
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "ostergrund_04"
+first_name = "Mika"
+last_name = "Seidel"
+number = 4
+role = "OP"
+height_m = 2.05
+jump = 67
+power = 74
+serve = 68
+receive = 43
+defense = 62
+setting = 54
+block = 69
+speed = 66
+traits = PackedStringArray("sprungwunder", "kanone")
+left_handed = false
+skin = 2
+hair = 4
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "ostergrund_18"
+first_name = "Bastian"
+last_name = "Meinke"
+number = 18
+role = "L"
+height_m = 1.9
+jump = 28
+power = 28
+serve = 25
+receive = 71
+defense = 69
+setting = 53
+block = 25
+speed = 69
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 4
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "ostergrund_17"
+first_name = "Sören"
+last_name = "Gerdes"
+number = 17
+role = "OH"
+height_m = 1.95
+jump = 69
+power = 72
+serve = 62
+receive = 64
+defense = 60
+setting = 49
+block = 64
+speed = 66
+traits = PackedStringArray("kraftpaket")
+left_handed = false
+skin = 2
+hair = 3
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "ostergrund_02"
+first_name = "Felix"
+last_name = "Claasen"
+number = 2
+role = "OH"
+height_m = 2
+jump = 61
+power = 64
+serve = 67
+receive = 71
+defense = 54
+setting = 42
+block = 56
+speed = 63
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 2
+hair = 0
+
+[resource]
+script = ExtResource("1")
+id = "ostergrund"
+name = "Blau-Weiß Ostergrund"
+short_name = "BWO"
+play_style = "jung"
+jersey = Color(0.17, 0.32, 0.62, 1)
+panel = Color(0.97, 0.97, 0.96, 1)
+collar = Color(0.97, 0.97, 0.96, 1)
+logo = Color(0.97, 0.97, 0.96, 1)
+number = Color(0.97, 0.97, 0.96, 1)
+shorts = Color(0.17, 0.32, 0.62, 1)
+socks = Color(0.97, 0.97, 0.96, 1)
+shoes = Color(0.97, 0.97, 0.96, 1)
+accent = Color(0.17, 0.32, 0.62, 1)
+sole = Color(0.86, 0.86, 0.85, 1)
+libero_jersey = Color(0.93, 0.83, 0.25, 1)
+libero_panel = Color(0.17, 0.32, 0.62, 1)
+libero_number = Color(0.17, 0.32, 0.62, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])

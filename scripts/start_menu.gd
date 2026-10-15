@@ -1,5 +1,5 @@
 extends Control
-## Startmenue im Kachel-Stil ("Bento"): grosse Kachel fuer das Spiel, Teamwahl, Karriere (kommt),
+## Startmenue im Kachel-Stil ("Bento"): grosse Kachel fuer das Spiel, Teamwahl, Mein Verein,
 ## darunter Einstellungen, Steuerung, Beenden und Beta-Feedback. Alles ist mit Controller,
 ## Steuerkreuz oder Tastatur bedienbar (A / Enter waehlt aus, links / rechts wechselt Teams).
 
@@ -15,6 +15,7 @@ const TIPS := [
 	"Aufschlag: LB schlägt aus dem Stand auf, RB im Sprung. Das Ziel wählst du mit dem linken Stick.",
 	"Trainerbank vor dem Aufschlag: Y oder T. Dort wechselst du Spieler und rufst die Auszeit.",
 	"Mit F1 schaltest du die Laufhilfe an oder aus, mit F2 die Zeitlupe.",
+	"Wuchtschlag: Lass R2 los, wenn der Kraftbalken im goldenen Streifen steht, und triff perfekt.",
 ]
 
 var cfg: GameSettings
@@ -32,6 +33,9 @@ var _tip: Label
 var _tip_idx := 0
 var _tip_t := 0.0
 var _tip_hold := 0.0
+var _club: Control
+var _club_btn: Button
+var _club_sub: Label
 
 
 func _ready() -> void:
@@ -62,9 +66,13 @@ func _ready() -> void:
 	row_a.size_flags_stretch_ratio = 3.4
 	col.add_child(row_a)
 	_pick = [Teams.home, Teams.away]
+	if Club.can_play() and not Teams.picked:
+		_pick[0] = Club.ID
+		if _pick[1] == Club.ID:
+			_pick[1] = Teams.away
 	row_a.add_child(_hero_tile(720.0))
 	row_a.add_child(_teams_tile(360.0))
-	row_a.add_child(_career_tile(312.0))
+	row_a.add_child(_club_tile(312.0))
 
 	var row_b := HBoxContainer.new()
 	row_b.add_theme_constant_override("separation", 22)
@@ -73,10 +81,7 @@ func _ready() -> void:
 	col.add_child(row_b)
 	row_b.add_child(_small_tile("gear", "Einstellungen", "Bild, Ton, Schwierigkeit", func(): settings.emit()))
 	row_b.add_child(_small_tile("pad", "Steuerung", "Alle Tasten", _show_controls))
-	var quick := _small_tile("ball", "Kurzes Match", "Ein Satz bis 15 · kommt bald", Callable())
-	quick.disabled = true
-	quick.focus_mode = Control.FOCUS_NONE
-	row_b.add_child(quick)
+	row_b.add_child(_small_tile("ball", "Kurzes Match", "Ein Satz bis 15", _on_play.bind(true)))
 	row_b.add_child(_small_tile("exit", "Beenden", "Zurück zum Desktop", func(): get_tree().quit()))
 	row_b.add_child(_small_tile("chat", "Beta-Feedback", "Fehler melden, Ideen schicken", func(): OS.shell_open(FEEDBACK_URL), true))
 
@@ -84,6 +89,9 @@ func _ready() -> void:
 	col.add_child(_footer())
 	_update_teams()
 	_build_controls()
+	_club = preload("res://scripts/club_menu.gd").new()
+	_club.closed.connect(_on_club_closed)
+	add_child(_club)
 
 
 # ------------------------------------------------------------------ Bausteine
@@ -183,7 +191,7 @@ func _hero_tile(width: float) -> Control:
 	b.custom_minimum_size = Vector2(width * 0.5, 0)
 	b.size_flags_stretch_ratio = width
 	b.clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
-	b.pressed.connect(_on_play)
+	b.pressed.connect(_on_play.bind(false))
 	_play = b
 	var img := TextureRect.new()
 	img.texture = load("res://assets/ui/menu_hero.jpg")
@@ -309,12 +317,14 @@ func _teams_tile(width: float) -> Control:
 	return p
 
 
-func _career_tile(width: float) -> Control:
+## Mein Verein: Spielerkarten sammeln und das eigene Team bauen.
+func _club_tile(width: float) -> Control:
 	var b := _tile_button(UiTheme.NAVY)
 	b.custom_minimum_size = Vector2(width * 0.5, 0)
 	b.size_flags_stretch_ratio = width
 	b.clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
-	b.pressed.connect(func(): _say("Die Karriere kommt nach der Beta."))
+	b.pressed.connect(_open_club)
+	_club_btn = b
 	var pl := TextureRect.new()
 	pl.texture = load("res://assets/ui/menu_block.png")
 	pl.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -336,11 +346,11 @@ func _career_tile(width: float) -> Control:
 	v.add_theme_constant_override("separation", 8)
 	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	m.add_child(v)
-	v.add_child(_caption("Karriere", Color(1, 1, 1, 0.7)))
-	var t := _font_label("Vom Hallenclub\nbis an die Spitze", 24, Color.WHITE, UiTheme.font_display)
+	v.add_child(_caption("Mein Verein", Color(1, 1, 1, 0.7)))
+	var t := _font_label("Karten sammeln,\nTeam bauen", 24, Color.WHITE, UiTheme.font_display)
 	v.add_child(t)
 	var chip := PanelContainer.new()
-	chip.add_theme_stylebox_override("panel", _round(Color(1, 1, 1, 0.16), 7))
+	chip.add_theme_stylebox_override("panel", _round(UiTheme.ACCENT, 7))
 	chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var cm := MarginContainer.new()
@@ -350,9 +360,33 @@ func _career_tile(width: float) -> Control:
 	cm.add_theme_constant_override("margin_bottom", 4)
 	cm.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	chip.add_child(cm)
-	cm.add_child(_font_label("Nach der Beta", 12, Color.WHITE, UiTheme.font_semibold))
+	_club_sub = _font_label("", 12, UiTheme.INK, UiTheme.font_semibold)
+	cm.add_child(_club_sub)
 	v.add_child(chip)
+	_update_club_tile()
 	return b
+
+
+func _update_club_tile() -> void:
+	if _club_sub:
+		_club_sub.text = "%s Münzen" % Club.fmt(Club.data.coins) if Club.exists() else "Neu"
+
+
+func _open_club() -> void:
+	_main.visible = false
+	_club.open()
+
+
+## Zurueck aus Mein Verein: ist das Team spielbereit, wird es gleich als eigenes Team gewaehlt.
+func _on_club_closed() -> void:
+	_main.visible = true
+	if Club.can_play():
+		_pick[0] = Club.ID
+		if _pick[1] == Club.ID:
+			_pick[1] = Teams.next_id(_pick[1], Club.ID)
+	_update_teams()
+	_update_club_tile()
+	_club_btn.grab_focus()
 
 
 func _small_tile(icon: String, title: String, desc: String, action: Callable, yellow := false) -> Button:
@@ -444,7 +478,7 @@ func _say(t: String) -> void:
 
 
 func _cycle(k: int, step: int) -> void:
-	_pick[k] = Teams.next_id(_pick[k], _pick[1 - k], step)
+	_pick[k] = Teams.next_id(_pick[k], _pick[1 - k], step, k == 0)
 	_update_teams()
 
 
@@ -468,8 +502,14 @@ func _update_sub() -> void:
 
 
 ## Spielen: sind andere Teams gewaehlt, wird die Halle mit den neuen Trikots neu aufgebaut.
-func _on_play() -> void:
-	if _pick[0] != Teams.home or _pick[1] != Teams.away:
+func _on_play(quick := false) -> void:
+	Teams.quick = quick
+	Teams.picked = true
+	if _pick[0] == Club.ID and not Club.can_play():
+		_say("Dein Verein ist noch nicht spielbereit: " + Club.missing())
+		return
+	# Mein Verein wird immer frisch aufgebaut (die Aufstellung kann sich geaendert haben).
+	if _pick[0] != Teams.home or _pick[1] != Teams.away or _pick[0] == Club.ID:
 		Teams.home = _pick[0]
 		Teams.away = _pick[1]
 		Teams.autostart = true
@@ -517,7 +557,7 @@ func _build_controls() -> void:
 			var col := UiTheme.ACCENT if i == 0 else (UiTheme.TEXT if j == 0 else UiTheme.MUTED)
 			grid.add_child(UiTheme.label(rows[i][j], 19 if i > 0 else 17, col))
 	box.add_child(grid)
-	box.add_child(UiTheme.label("Taste früh halten und loslassen, wenn sich der schrumpfende Ring mit dem weißen Ring deckt.\nMit Laufhilfe wird der weiße Ring grün, wenn Pritschen sicher geht, und orange, wenn du besser baggerst.", 17, UiTheme.MUTED))
+	box.add_child(UiTheme.label("Taste früh halten und loslassen, wenn sich der schrumpfende Ring mit dem weißen Ring deckt.\nMit Laufhilfe wird der weiße Ring grün, wenn Pritschen sicher geht, und orange, wenn du besser baggerst.\nWuchtschlag: Lass R2 los, wenn der Kraftbalken im goldenen Streifen steht, und triff perfekt (Angriff und Aufschlag).", 17, UiTheme.MUTED))
 	_back = Button.new()
 	_back.text = "Zurück"
 	_back.custom_minimum_size = Vector2(200, 48)
@@ -548,6 +588,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func open() -> void:
 	visible = true
 	_hide_controls()
+	_update_club_tile()
 	focus()
 
 

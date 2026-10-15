@@ -9,6 +9,8 @@ var mode := "attack"  # attack oder serve
 
 const RADIUS := 78.0
 const OVERCHARGE := 1.25
+const SUPER_LO := 0.93  # wie in match.gd: schmale Zone fuer den Wuchtschlag
+const SUPER_HI := 1.07
 
 
 func _ready() -> void:
@@ -57,8 +59,15 @@ func _draw() -> void:
 	var over_y := by + bh * (1.0 - OVERCHARGE / top_v)
 	draw_rect(Rect2(bx, sweet0, bw, sweet1 - sweet0), Color(0.2, 0.7, 0.3, 0.6))
 	draw_rect(Rect2(bx, by, bw, over_y - by), Color(0.8, 0.15, 0.15, 0.5))
+	# Wucht-Zone: schmal und golden; hier loslassen und perfekt treffen = Wuchtschlag
+	var sup0 := by + bh * (1.0 - SUPER_HI / top_v)
+	var sup1 := by + bh * (1.0 - SUPER_LO / top_v)
+	draw_rect(Rect2(bx - 3, sup0, bw + 6, sup1 - sup0), Color(1.0, 0.78, 0.2, 0.85))
+	draw_rect(Rect2(bx - 3, sup0, bw + 6, sup1 - sup0), Color(1, 1, 1, 0.9), false, 1.5)
 	var v := clampf(charge, 0.0, top_v)
 	var fill_col := Color(1.0, 0.85, 0.1)
+	if charge >= SUPER_LO and charge <= SUPER_HI:
+		fill_col = Color(1.0, 1.0, 0.85)  # gerade in der Wucht-Zone: Fuellung leuchtet hell
 	if charge > OVERCHARGE:
 		fill_col = Color(1.0, 0.3, 0.2)
 	var h := bh * v / top_v

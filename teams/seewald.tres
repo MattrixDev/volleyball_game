@@ -1,12 +1,308 @@
-[gd_resource type="Resource" script_class="TeamStyle" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "seewald_13"
+first_name = "Noah"
+last_name = "Yilmaz"
+number = 13
+role = "S"
+height_m = 1.95
+jump = 78
+power = 71
+serve = 78
+receive = 63
+defense = 79
+setting = 91
+block = 67
+speed = 77
+traits = PackedStringArray("spielmacher", "flatter")
+left_handed = false
+skin = 3
+hair = 2
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "seewald_09"
+first_name = "Lukas"
+last_name = "Vollmer"
+number = 9
+role = "OH"
+height_m = 1.92
+jump = 80
+power = 84
+serve = 82
+receive = 82
+defense = 96
+setting = 69
+block = 65
+speed = 81
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 4
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "seewald_18"
+first_name = "Carl"
+last_name = "Haas"
+number = 18
+role = "MB"
+height_m = 2.05
+jump = 84
+power = 72
+serve = 72
+receive = 59
+defense = 72
+setting = 63
+block = 97
+speed = 70
+traits = PackedStringArray("blockleser")
+left_handed = false
+skin = 1
+hair = 4
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "seewald_15"
+first_name = "Tobias"
+last_name = "Weiß"
+number = 15
+role = "OP"
+height_m = 2.08
+jump = 76
+power = 83
+serve = 76
+receive = 76
+defense = 75
+setting = 57
+block = 81
+speed = 70
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 0
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "seewald_07"
+first_name = "Erik"
+last_name = "Eckert"
+number = 7
+role = "OH"
+height_m = 1.98
+jump = 78
+power = 78
+serve = 71
+receive = 83
+defense = 79
+setting = 57
+block = 66
+speed = 75
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 4
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "seewald_20"
+first_name = "Milan"
+last_name = "Albers"
+number = 20
+role = "MB"
+height_m = 2.13
+jump = 73
+power = 76
+serve = 71
+receive = 54
+defense = 68
+setting = 54
+block = 89
+speed = 66
+traits = PackedStringArray("blockleser")
+left_handed = false
+skin = 1
+hair = 2
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "seewald_02"
+first_name = "Paul"
+last_name = "Lange"
+number = 2
+role = "L"
+height_m = 1.81
+jump = 37
+power = 32
+serve = 28
+receive = 94
+defense = 97
+setting = 67
+block = 29
+speed = 89
+traits = PackedStringArray()
+left_handed = false
+skin = 0
+hair = 3
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "seewald_01"
+first_name = "Arvid"
+last_name = "Lenz"
+number = 1
+role = "S"
+height_m = 1.92
+jump = 65
+power = 60
+serve = 67
+receive = 65
+defense = 75
+setting = 73
+block = 46
+speed = 64
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 0
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "seewald_17"
+first_name = "Tomás"
+last_name = "Wiegand"
+number = 17
+role = "OH"
+height_m = 1.98
+jump = 78
+power = 73
+serve = 71
+receive = 78
+defense = 73
+setting = 59
+block = 69
+speed = 74
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 0
+hair = 3
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "seewald_05"
+first_name = "Luca"
+last_name = "Gerber"
+number = 5
+role = "MB"
+height_m = 2.02
+jump = 73
+power = 68
+serve = 63
+receive = 51
+defense = 59
+setting = 61
+block = 75
+speed = 61
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 3
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "seewald_12"
+first_name = "Felix"
+last_name = "Quast"
+number = 12
+role = "OP"
+height_m = 1.99
+jump = 67
+power = 72
+serve = 72
+receive = 49
+defense = 68
+setting = 55
+block = 62
+speed = 58
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 2
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "seewald_16"
+first_name = "Max"
+last_name = "Varga"
+number = 16
+role = "L"
+height_m = 1.91
+jump = 37
+power = 30
+serve = 31
+receive = 86
+defense = 88
+setting = 72
+block = 25
+speed = 69
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 4
+hair = 2
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "seewald_04"
+first_name = "Konstantin"
+last_name = "Ebert"
+number = 4
+role = "OH"
+height_m = 1.92
+jump = 78
+power = 61
+serve = 68
+receive = 82
+defense = 75
+setting = 53
+block = 63
+speed = 69
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 4
+hair = 3
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "seewald_03"
+first_name = "Kai"
+last_name = "Ziegler"
+number = 3
+role = "OH"
+height_m = 1.99
+jump = 73
+power = 84
+serve = 75
+receive = 70
+defense = 71
+setting = 52
+block = 68
+speed = 60
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 0
 
 [resource]
 script = ExtResource("1")
 id = "seewald"
 name = "VC Seewald"
 short_name = "VCS"
+play_style = "abwehrstark"
 jersey = Color(0.2, 0.36, 0.33, 1)
 panel = Color(0.16, 0.18, 0.19, 1)
 collar = Color(0.88, 0.88, 0.85, 1)
@@ -20,3 +316,4 @@ sole = Color(0.84, 0.84, 0.82, 1)
 libero_jersey = Color(0.85, 0.5, 0.28, 1)
 libero_panel = Color(0.16, 0.18, 0.19, 1)
 libero_number = Color(0.16, 0.18, 0.19, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])
