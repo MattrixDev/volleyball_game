@@ -209,6 +209,8 @@ var _shadow_node: MeshInstance3D
 
 # Statistik fuer den automatischen Test
 var stats := {}
+## Pro Team in diesem Spiel: Asse, Blockpunkte, Wuchtschlaege, groesster Satzvorsprung (fuer Mein Verein).
+var mstat := [{}, {}]
 var rally_count := 0
 var touch_total := 0
 
@@ -664,6 +666,7 @@ func new_match() -> void:
 	sets_won = [0, 0]
 	set_scores = []
 	set_no = 0
+	mstat = [{}, {}]
 	sides = [-1.0, 1.0]
 	match_first_server = rng.randi() % 2  # Auslosung
 	_start_set()
@@ -1498,6 +1501,8 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	phase = Phase.RALLY
 	popup(srv, Q_TEXT[q] + (timing_hint(e, q) if serving_team == human_team else ""), Q_COLOR[q])
 	last_super = sup
+	if sup:
+		mstat[serving_team]["wucht"] = mstat[serving_team].get("wucht", 0) + 1
 	_fx("serve", ball.position, (1.0 if sup else power) * (1.0 if jump else 0.65))
 	if serving_team == human_team and sup:
 		big_hit.emit(0.85)
@@ -2540,6 +2545,7 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
 	if sup:
 		stats["Wuchtschlag"] = stats.get("Wuchtschlag", 0) + 1
+		mstat[o.team]["wucht"] = mstat[o.team].get("wucht", 0) + 1
 	if o.human:
 		var perfect := q == Q.PERFECT and o.power > 0.75
 		big_hit.emit(1.0 if perfect else 0.4)
@@ -2853,6 +2859,9 @@ func _end_rally(winner: int, reason: String) -> void:
 	if trace:
 		print("ENDE: %s -> T%d   ball=%s" % [reason, winner, ball.position])
 	stats[reason] = stats.get(reason, 0) + 1
+	var mk: String = {"Ass!": "aces", "Block-Punkt!": "blocks"}.get(reason, "")
+	if mk != "":
+		mstat[winner][mk] = mstat[winner].get(mk, 0) + 1
 	var key: String = "Punkte " + TEAM_NAMES[winner]
 	stats[key] = stats.get(key, 0) + 1
 	var over: bool = score[winner] >= set_target() and score[winner] - score[1 - winner] >= 2
@@ -2882,6 +2891,7 @@ func _end_rally(winner: int, reason: String) -> void:
 func _finish_set(winner: int) -> void:
 	sets_won[winner] += 1
 	set_scores.append(score.duplicate())
+	mstat[winner]["margin"] = maxi(mstat[winner].get("margin", 0), score[winner] - score[1 - winner])
 	stats["Sätze"] = stats.get("Sätze", 0) + 1
 	pause_until = clock + (0.2 if autoplay else 4.0)
 	var history := ""
@@ -2892,14 +2902,34 @@ func _finish_set(winner: int) -> void:
 		matches_done += 1
 		match_wins[winner] += 1
 		stats["Spiele " + TEAM_NAMES[winner]] = stats.get("Spiele " + TEAM_NAMES[winner], 0) + 1
+		var reward := _club_reward(winner)
 		if hud:
 			hud.show_banner("%s gewinnt das Spiel %d:%d" % [TEAM_NAMES[winner], sets_won[winner], sets_won[1 - winner]],
-				"Sätze: %s   ·   A / Leertaste: neues Spiel" % history)
+				"Sätze: %s   ·   A / Leertaste: neues Spiel%s" % [history, "" if reward.is_empty() else "\n" + "\n".join(reward)])
 	else:
 		phase = Phase.SET_OVER
 		if hud:
 			hud.show_banner("Satz %d geht an %s  %d:%d" % [set_no, TEAM_NAMES[winner], score[winner], score[1 - winner]],
 				"Sätze %d:%d   ·   Seitenwechsel   ·   A / Leertaste: nächster Satz" % [sets_won[0], sets_won[1]])
+
+
+## Mein Verein: nach jedem eigenen Spiel Muenzen und Aufgaben (nicht im Zuschauermodus oder Test).
+func _club_reward(winner: int) -> Array:
+	if human_team < 0 or autoplay or attract:
+		return []
+	var t := human_team
+	var pts := 0
+	var opp_pts := 0
+	for sc in set_scores:
+		pts += sc[t]
+		opp_pts += sc[1 - t]
+	var ms: Dictionary = mstat[t]
+	return Club.record_match({
+		"won": winner == t, "points": pts, "opp_points": opp_pts,
+		"aces": ms.get("aces", 0), "blocks": ms.get("blocks", 0), "wucht": ms.get("wucht", 0),
+		"sets_won": sets_won[t], "sets_lost": sets_won[1 - t], "best_margin": ms.get("margin", 0),
+		"quick": quick, "opp": Teams.playing()[1 - t].id, "club": Teams.playing()[t].id == Club.ID,
+	})
 
 
 ## Seitenwechsel im Entscheidungssatz bei 8 Punkten: alle gehen auf die andere Seite.

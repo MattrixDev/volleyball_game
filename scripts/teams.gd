@@ -10,6 +10,8 @@ static var away := "eichenberg"
 static var autostart := false
 ## Schnellspiel: ein Satz bis 15 (wie ein Entscheidungssatz, Seitenwechsel bei 8).
 static var quick := false
+## Schon einmal ein Spiel gestartet? Vorher waehlt das Startmenue Mein Verein vor (wenn spielbereit).
+static var picked := false
 
 
 static func all() -> Array:
@@ -26,6 +28,8 @@ static func all() -> Array:
 
 
 static func by_id(id: String) -> TeamStyle:
+	if id == Club.ID and Club.exists():
+		return Club.style()
 	for t in all():
 		if t.id == id:
 			return t
@@ -38,8 +42,11 @@ static func playing() -> Array:
 
 
 ## Naechstes Team in der Liste nach id, das nicht skip ist (fuer die Auswahl im Startmenue).
-static func next_id(id: String, skip: String, step := 1) -> String:
+## Mein Verein steht vorne in der Liste, aber nur fuer die eigene Seite (with_club).
+static func next_id(id: String, skip: String, step := 1, with_club := false) -> String:
 	var ids: Array = all().map(func(t): return t.id)
+	if with_club and Club.can_play():
+		ids.push_front(Club.ID)
 	var i := ids.find(id)
 	for k in ids.size():
 		i = posmod(i + step, ids.size())

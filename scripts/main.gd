@@ -99,6 +99,10 @@ func _ready() -> void:
 		call_deferred("_on_play")  # Test: Startmenue ueberspringen; nach Teamwechsel direkt spielen
 	if OS.get_cmdline_user_args().has("--menu"):
 		menu.call_deferred("open")
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--club-tab="):  # Test: Mein Verein auf Seite N oeffnen (0 Team, 1 Sammlung, 2 Aufgaben)
+			start_menu._club._tab = int(a.get_slice("=", 1))
+			start_menu.call_deferred("_open_club")
 	if OS.get_cmdline_user_args().has("--trainer"):
 		get_tree().create_timer(0.4).timeout.connect(trainer.open)  # Test: Trainerbank oeffnen
 

@@ -139,7 +139,14 @@ def make_team(t, rng, used_names):
     return players
 
 
-def write_team(t, players):
+# Nachwuchs fuer "Mein Verein": die 14 Startkarten (schwaecher als jedes Ligateam).
+YOUTH = dict(id="nachwuchs", name="Nachwuchs", short="NWS", tier=58, style="jung",
+             jersey=(0.3, 0.3, 0.32), panel=(0.9, 0.9, 0.88), number=(0.95, 0.95, 0.93), shorts=(0.3, 0.3, 0.32),
+             socks=(0.9, 0.9, 0.88), shoes=(0.9, 0.9, 0.88), accent=(0.3, 0.3, 0.32), sole=(0.85, 0.85, 0.84),
+             libero=(0.79, 0.64, 0.26), libero_panel=(0.3, 0.3, 0.32), libero_number=(0.3, 0.3, 0.32))
+
+
+def write_team(t, players, out=OUT):
     lines = ['[gd_resource type="Resource" script_class="TeamStyle" load_steps=%d format=3]' % (len(players) + 3), "",
              '[ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]',
              '[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]', ""]
@@ -159,7 +166,7 @@ def write_team(t, players):
     lines += ["libero_jersey = %s" % col(t["libero"]), "libero_panel = %s" % col(t["libero_panel"]),
               "libero_number = %s" % col(t["libero_number"]),
               'players = Array[ExtResource("2")]([%s])' % ", ".join('SubResource("p%d")' % i for i in range(len(players))), ""]
-    with open(os.path.join(OUT, t["id"] + ".tres"), "w", encoding="utf-8") as f:
+    with open(os.path.join(out, t["id"] + ".tres"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
 
@@ -170,6 +177,12 @@ def main():
         players = make_team(t, rng, used)
         write_team(t, players)
         print("%-22s %2d Spieler" % (t["name"], len(players)))
+    # Eigener Zufall fuer den Nachwuchs, damit die Ligaspieler gleich bleiben.
+    youth = make_team(YOUTH, random.Random(20261015), used)
+    club = os.path.join(os.path.dirname(__file__), "..", "club")
+    os.makedirs(club, exist_ok=True)
+    write_team(YOUTH, youth, club)
+    print("%-22s %2d Spieler (club/)" % (YOUTH["name"], len(youth)))
 
 
 if __name__ == "__main__":
