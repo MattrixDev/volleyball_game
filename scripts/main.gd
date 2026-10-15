@@ -27,6 +27,10 @@ var menu
 var start_menu
 var _shot_phase := ""
 var debug_menu
+## Einstellungsmenue, Seite Kamera: diese Ansicht (view, serve, attack, block, replay) wird zum
+## Ausprobieren gezeigt, auch waehrend das Spiel pausiert. Leer = normal.
+var preview_mode := ""
+var _prev_snd_t := -1.0
 var drill: DebugDrill
 var _shot_phase_t := 0.0
 
@@ -99,6 +103,12 @@ func _ready() -> void:
 	menu.match_node = match_node
 	menu.closed.connect(_on_menu_closed)
 	menu.to_title.connect(_on_to_title)
+	menu.camera_preview.connect(func(m: String): preview_mode = m)
+	menu.setting_changed.connect(_on_setting_changed)
+	# Waehrend das Menue offen ist (Spiel pausiert) laeuft die Kamera und der Ton weiter.
+	var driver := preload("res://scripts/pause_driver.gd").new()
+	driver.target = self
+	add_child(driver)
 	hud.add_child(menu)
 	if match_node.attract:
 		hud.set_attract(true)
@@ -124,6 +134,12 @@ func _ready() -> void:
 			call_deferred("_open_debug_menu")
 	if OS.get_cmdline_user_args().has("--menu"):
 		menu.call_deferred("open")
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--menu-tab="):  # Test: Menue auf Seite N (0 Spiel, 1 Ton, 2 Kamera[:Ansicht]) oeffnen
+			var v: String = a.get_slice("=", 1)
+			menu._cam_group = int(v.get_slice(":", 1)) if v.contains(":") else 0
+			menu.call_deferred("open")
+			menu.call_deferred("_show_tab", int(v.get_slice(":", 0)))
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--club-tab="):  # Test: Mein Verein auf Seite N oeffnen (0 Team, 1 Sammlung, 2 Aufgaben)
 			start_menu._club._tab = int(a.get_slice("=", 1))
@@ -154,7 +170,10 @@ func _process(delta: float) -> void:
 	# Lebendige Uebersicht: die Kamera geht etwas mit dem Ball mit (seitlich, zur Hoehe, und
 	# rueckt ein Stueck vor, wenn der Ball beim Gegner ist). Die Ausschlaege bleiben klein,
 	# damit immer das ganze Feld und alle eigenen Spieler im Bild sind.
-	var far := clampf(-cs * bpos.x / 9.0, 0.0, 1.0)  # 0 = Ball bei uns, 1 = Ball tief beim Gegner
+	var cfg: GameSettings = match_node.cfg if match_node else null
+	var follow: float = cfg.unit("cam_follow") if cfg else 1.0
+	bz *= follow
+	var far := clampf(-cs * bpos.x / 9.0 * follow, 0.0, 1.0)  # 0 = Ball bei uns, 1 = Ball tief beim Gegner
 	var want_pos := Vector3(cs * (absf(_cam_base.x) - 1.2 * far), _cam_base.y - 0.4 * far, bz * 0.35)
 	var want_look := Vector3(-cs * 1.5 + 0.15 * (bpos.x + cs * 1.5), 1.0 + clampf(bpos.y - 2.0, 0.0, 6.0) * 0.08, bz * 0.32)
 	var want_fov := 55.0
@@ -162,7 +181,11 @@ func _process(delta: float) -> void:
 	# Nahansicht kurz halten, damit die Kamera nicht zwischen Angriff, Block und Uebersicht
 	# hin- und herspringt.
 	var mode: String = match_node.cam_mode if match_node else ""
-	if mode == "attack" or mode == "block":
+	if preview_mode != "" and match_node:
+		mode = "replay" if preview_mode == "replay" else ("" if preview_mode == "view" else preview_mode)
+		subj = _preview_subject(preview_mode)
+		_hold_left = 0.0
+	elif mode == "attack" or mode == "block":
 		_hold_mode = mode
 		_hold_subj = subj
 		_hold_left = 0.7
@@ -172,7 +195,7 @@ func _process(delta: float) -> void:
 		subj = _hold_subj
 	else:
 		_hold_left = 0.0
-	if match_node and match_node.cam_mode == "replay":
+	if match_node and mode == "replay":
 		# Fernsehkamera von der Seitenlinie, folgt dem Ball.
 		var b: Vector3 = match_node.ball.position
 		want_pos = Vector3(b.x * 0.6, 5.2, -12.2)
@@ -205,8 +228,14 @@ func _process(delta: float) -> void:
 				want_pos = p + Vector3(-s * 3.2, 2.1, 4.6)
 				want_look = p + Vector3(0.0, 1.15 + 0.5 * subj.jump_h, 0.0)
 				want_fov = 50.0
+	if cfg and mode != "free":
+		var key := "view" if (mode == "" or subj == null and mode != "replay") else mode
+		var res := _cam_tune(key, want_pos, want_look, want_fov, cfg)
+		want_pos = res[0]
+		want_look = res[1]
+		want_fov = res[2]
 	if _fov_kick > 0.0:
-		want_fov -= _fov_kick
+		want_fov -= _fov_kick * (cfg.unit("cam_punch") if cfg else 1.0)
 		_fov_kick = maxf(0.0, _fov_kick - rd * 9.0)
 	# Kritisch gedaempfte Feder statt hartem Nachziehen: kein Ruck beim Wechsel der Ansicht.
 	var w := 3.2
@@ -214,6 +243,8 @@ func _process(delta: float) -> void:
 		w = 4.0
 	elif mode == "attack":
 		w = 5.0  # schneller in die Angriffsansicht, damit sie zum Schlag steht
+	if cfg:
+		w *= cfg.unit("cam_smooth")
 	var cdt := minf(rd, 0.1)
 	var steps := maxi(1, ceili(cdt / 0.008))
 	var h := cdt / steps
@@ -228,7 +259,9 @@ func _process(delta: float) -> void:
 	var off := Vector3.ZERO
 	if _shake > 0.0:
 		_shake = maxf(0.0, _shake - rd * 2.5)
-		off = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * _shake * 0.25
+		off = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * _shake * 0.25 * (cfg.unit("cam_shake") if cfg else 1.0)
+	# Kameraseite im Menue: das Bild nach oben schieben, damit es nicht unter dem Menue liegt.
+	camera.v_offset = lerpf(camera.v_offset, -1.2 if preview_mode != "" else 0.0, minf(rd * 10.0, 1.0))
 	camera.position = _cam_pos + off
 	camera.look_at(_cam_look + off * 0.5)
 	if _shot_phase != "" and match_node:
@@ -243,8 +276,68 @@ func _process(delta: float) -> void:
 				get_tree().quit()
 	if match_node:
 		_update_hall()
-		sfx.sfx_volume = match_node.cfg.get_v("sfx")
-		sfx.crowd_volume = match_node.cfg.get_v("crowd") * (0.6 if match_node.attract else 1.0)
+		_apply_audio()
+
+
+## Kameraeinstellungen eines Ablaufs (key) auf Zielposition, Blickpunkt und Sichtfeld anwenden.
+func _cam_tune(key: String, pos: Vector3, look: Vector3, fov: float, cfg: GameSettings) -> Array:
+	var d := cfg.unit("cam_%s_dist" % key)
+	var hgt := cfg.unit("cam_%s_height" % key)
+	pos = Vector3(look.x + (pos.x - look.x) * d, pos.y * hgt, look.z + (pos.z - look.z) * d)
+	var flat := Vector2(pos.x - look.x, pos.z - look.z).length()
+	look.y += tan(deg_to_rad(cfg.get_v("cam_%s_tilt" % key))) * flat
+	return [pos, look, fov + cfg.get_v("cam_%s_fov" % key)]
+
+
+## Spieler fuer die Ansichtsvorschau im Einstellungsmenue (Aufschlaeger, Angreifer, Blocker).
+func _preview_subject(mode: String):
+	var t: int = maxi(match_node.human_team, 0)
+	match mode:
+		"serve":
+			return match_node.server()
+		"attack", "block":
+			for pl in match_node.players[t]:
+				if match_node.is_front_row(pl) and pl.role != "L":
+					return pl
+	return null
+
+
+## Lautstaerken aus den Einstellungen an Gesamtlautstaerke, Effekte und Publikum geben.
+func _apply_audio() -> void:
+	var c: GameSettings = match_node.cfg
+	var fx := c.unit("fx_vol")
+	AudioServer.set_bus_volume_db(0, -80.0 if c.get_v("master") <= 0.0 else linear_to_db(c.unit("master")))
+	sfx.sfx_volume = c.get_v("sfx") * fx
+	sfx.crowd_volume = c.get_v("crowd") * fx * (0.6 if match_node.attract else 1.0)
+	sfx.cheer_volume = c.get_v("crowd") * c.unit("crowd_fx") * fx
+	sfx.kind_gain = {"spike": c.unit("snd_hit"), "serve": c.unit("snd_hit"), "tip": c.unit("snd_hit"),
+		"block": c.unit("snd_block"), "squeak": c.unit("snd_shoes")}
+
+
+## Einstellungsmenue: beim Verstellen eines Tonreglers kurz Probe hoeren.
+func _on_setting_changed(key: String) -> void:
+	if not GameSettings.AUDIO.has(key):
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _prev_snd_t < 0.3:
+		return
+	_prev_snd_t = now
+	_apply_audio()
+	match key:
+		"whistle":
+			hud.whistle_preview(match_node.cfg.get_v("whistle") * match_node.cfg.unit("fx_vol"))
+		"crowd":
+			pass  # Grundgeraeusch laeuft ohnehin
+		"crowd_fx":
+			sfx.crowd("cheer", 0.8)
+		"snd_hit":
+			sfx.play("spike", 0.9)
+		"snd_block":
+			sfx.play("block", 0.9)
+		"snd_shoes":
+			sfx.play("squeak", 0.8)
+		_:
+			sfx.play("bump", 0.8)
 
 
 func _on_big_hit(strength: float) -> void:

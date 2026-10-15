@@ -4,6 +4,16 @@ Hallenvolleyball 6 gegen 6 für den PC, nach den FIVB-Regeln 2025–2028 (Männe
 
 Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/code/artifact/7f883522-0f38-4b3f-ad4d-9c40c197b89f).
 
+## Einstellungen: Spiel, Ton, Kamera
+
+Das Einstellungsmenü (Pause oder Startmenü) hat drei Seiten, umschaltbar mit LB / RB (Controller) oder Bild hoch / runter:
+
+- **Spiel**: Schwierigkeit, Regeln, Zeitlupe, Hilfen und Gegner.
+- **Ton**: Gesamt-, Effekt- und Musiklautstärke. Unter „Erweitert“ lässt sich jedes Geräusch einzeln einstellen (Pfiff, Ball, Schlag und Aufschlag, Block, Schuhe, Publikum).
+- **Kamera**: je Spielablauf (Übersicht, Aufschlag, Angriff, Block, Wiederholung) Entfernung, Höhe, Neigung und Sichtfeld, dazu Allgemeines (Ball folgen, Reaktion, Wackeln, Heranrücken). Das Spiel dahinter zeigt die gewählte Ansicht live. Standard sind 100 % und 0 °, „Zurücksetzen“ stellt die Ansicht zurück.
+
+Test: `-- --menu-tab=2:3` öffnet das Menü auf der Kameraseite (Ansicht 3 = Block).
+
 ## Debug-Modus
 
 Im Startmenü öffnet die Kachel **Debug** ein Menü zum Testen (für Beta- und Verkaufsversionen in `scripts/debug_mode.gd` `ENABLED = false` setzen, dann ist sie weg).
