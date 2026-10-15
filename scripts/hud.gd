@@ -412,7 +412,7 @@ func update_view(m) -> void:
 	_ref.volume = m.cfg.get_v("whistle")
 	var show := false
 	if m.human_team >= 0 and not m.autoplay:
-		if (m.phase == m.Phase.PRE_SERVE or m.phase == m.Phase.TOSS) and m.serving_team == m.human_team and not m.serve_done:
+		if (m.phase == m.Phase.PRE_SERVE or m.phase == m.Phase.TOSS) and m.human_serves() and not m.serve_done:
 			show = true
 			_pad.mode = "serve"
 			_pad.title = "Aufschlag: " + m.serve_style_text(m.serve_kind, m.serve_contact)

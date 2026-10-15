@@ -26,6 +26,8 @@ var hud
 var menu
 var start_menu
 var _shot_phase := ""
+var debug_menu
+var drill: DebugDrill
 var _shot_phase_t := 0.0
 
 
@@ -83,6 +85,15 @@ func _ready() -> void:
 	start_menu.settings.connect(func(): menu.open(true))
 	hud.add_child(start_menu)
 	start_menu.visible = false
+	if DebugMode.ENABLED:
+		debug_menu = preload("res://scripts/debug_menu.gd").new()
+		debug_menu.start.connect(_on_debug_start)
+		debug_menu.closed.connect(_on_debug_closed)
+		debug_menu.to_title.connect(_on_debug_title)
+		hud.add_child(debug_menu)
+		start_menu.debug.connect(func():
+			start_menu.visible = false
+			debug_menu.open(false))
 	menu = preload("res://scripts/menu.gd").new()
 	menu.cfg = match_node.cfg
 	menu.match_node = match_node
@@ -97,6 +108,20 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--play") or Teams.autostart:
 		Teams.autostart = false
 		call_deferred("_on_play")  # Test: Startmenue ueberspringen; nach Teamwechsel direkt spielen
+	if DebugMode.pending != "":
+		call_deferred("_start_drill", DebugMode.pending)  # Debug: Uebung nach Teamwechsel
+		DebugMode.pending = ""
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--drill-opt="):  # Test: Einstellung der Uebungen, z.B. --drill-opt=start:serve
+			var v: String = a.get_slice("=", 1).get_slice(":", 1)
+			DebugMode.opts[a.get_slice("=", 1).get_slice(":", 0)] = int(v) if v.is_valid_int() else (v == "true" if v in ["true", "false"] else v)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--drill="):  # Test: Debug-Uebung direkt starten
+			call_deferred("_start_drill", a.get_slice("=", 1))
+		elif a.begins_with("--debug-menu"):  # Test: Debug-Menue oeffnen, --debug-menu=1 auf Seite 2
+			if a.contains("="):
+				debug_menu._tab = int(a.get_slice("=", 1))
+			call_deferred("_open_debug_menu")
 	if OS.get_cmdline_user_args().has("--menu"):
 		menu.call_deferred("open")
 	for a in OS.get_cmdline_user_args():
@@ -175,6 +200,11 @@ func _process(delta: float) -> void:
 				want_pos = Vector3(s * 5.6, 3.6, p.z * 0.7)
 				want_look = Vector3(-s * 3.0, 2.2, p.z * 0.6)
 				want_fov = 56.0
+			"free":
+				# Debug, freies Laufen: schraeg von vorn neben dem Spieler, ganzer Koerper im Bild.
+				want_pos = p + Vector3(-s * 3.2, 2.1, 4.6)
+				want_look = p + Vector3(0.0, 1.15 + 0.5 * subj.jump_h, 0.0)
+				want_fov = 50.0
 	if _fov_kick > 0.0:
 		want_fov -= _fov_kick
 		_fov_kick = maxf(0.0, _fov_kick - rd * 9.0)
@@ -237,9 +267,72 @@ func _on_play() -> void:
 
 
 func _on_to_title() -> void:
+	_stop_drill()
 	match_node.back_to_title()
 	hud.set_attract(true)
 	start_menu.open()
+
+
+# ---------------------------------------------------------------- Debug-Modus
+
+## Uebung starten. Sind im Startmenue andere Teams gewaehlt, wird die Halle neu geladen.
+func _on_debug_start(id: String) -> void:
+	get_tree().paused = false
+	var pick: Array = start_menu._pick
+	if pick[0] == Club.ID and not Club.can_play():
+		pick[0] = Teams.home if Teams.home != Club.ID else Teams.next_id(Club.ID, pick[1])
+	if pick[0] != Teams.home or pick[1] != Teams.away or pick[0] == Club.ID:
+		Teams.home = pick[0]
+		Teams.away = pick[1]
+		Teams.picked = true
+		DebugMode.pending = id
+		get_tree().reload_current_scene()
+		return
+	_start_drill(id)
+
+
+func _start_drill(id: String) -> void:
+	_stop_drill()
+	start_menu.visible = false
+	debug_menu.visible = false
+	hud.set_attract(false)
+	sfx.stop_crowd()
+	Teams.quick = false
+	drill = DebugDrill.new()
+	drill.id = id
+	drill.match_node = match_node
+	drill.menu_wanted.connect(_open_debug_menu.bind(true))
+	add_child(drill)
+
+
+func _stop_drill() -> void:
+	if drill != null and is_instance_valid(drill):
+		drill.queue_free()
+		match_node.drill = null
+		match_node.ball.visible = true
+		match_node.ball_shadow.visible = true
+	drill = null
+
+
+func _open_debug_menu(in_game := false) -> void:
+	if in_game:
+		get_tree().paused = true
+	start_menu.visible = false
+	debug_menu.open(in_game)
+
+
+func _on_debug_closed() -> void:
+	if drill != null:
+		# Erst nach diesem Frame weiter, sonst oeffnet dieselbe Esc-Taste gleich das Pausenmenue.
+		get_tree().set_deferred("paused", false)
+		return
+	start_menu.refresh_after_debug()
+	start_menu.open()
+
+
+func _on_debug_title() -> void:
+	get_tree().paused = false
+	_on_to_title()
 
 
 func _on_menu_closed() -> void:

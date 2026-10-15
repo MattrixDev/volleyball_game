@@ -33,7 +33,7 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not Input.is_action_just_pressed("trainer") or match_node.attract:
+	if not Input.is_action_just_pressed("trainer") or match_node.attract or match_node.drill != null:
 		return
 	if visible:
 		close()
