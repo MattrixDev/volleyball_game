@@ -512,11 +512,53 @@ var _q := {}  # Gelenk -> Drehung der Animationsfeder (eigener Zustand, siehe po
 ## Gefedert wird als Drehung (Quaternion, immer der kurze Weg), nicht in Euler-Winkeln: so
 ## springt kein Gelenk, wenn ein Winkel ueber 180 Grad umklappt. Die Feder hat einen eigenen
 ## Zustand; was danach auf die Knoten kommt (Ball-IK, Fuesse, Physik), wirkt nicht zurueck.
+## Bewegungskette: wie schnell jedes Gelenk seiner Zielhaltung folgt (relativ). Kopf und Rumpf
+## fuehren, Arm und Hand folgen spaeter nach (Schwung von innen nach aussen), Beine bleiben straff.
+const CHAIN := {"hips": 1.1, "chest": 0.95, "head": 1.3, "sh_l": 0.88, "sh_r": 0.88, "el_l": 0.78, "el_r": 0.78,
+	"wr_l": 0.68, "wr_r": 0.68}
+const INERT_RATE := 9.0  # rad/s: springt die Zielhaltung schneller, wird der Sprung weich abgebaut
+const INERT_LEG_MAX := 0.3  # rad: Beine nur wenig versetzen (sonst verdreht sich das Knie gegen die Fuss-IK)
+const INERT_T := 0.11  # s: Abklingzeit des Versatzes nach einem Sprung
+var _tq := {}  # Gelenk -> letzte Zielhaltung (ohne Versatz)
+var _tstep := {}  # Gelenk -> Aenderung der Zielhaltung im letzten Takt
+var _toff := {}  # Gelenk -> Versatz, der nach einem Sprung der Zielhaltung abklingt
+
+
+## Weiche Uebergaenge (Traegheits-Ueberblendung): springt die Zielhaltung eines Gelenks (neue
+## Aktion, neu geplanter Ballkontakt), wird nicht dorthin gerissen; der Versatz zum alten Ziel
+## klingt stattdessen weich ab. So bleibt die Bewegung stetig, ohne sie sonst zu verzoegern.
+func _inertial(name: String, target: Quaternion, delta: float) -> Quaternion:
+	var off: Quaternion = _toff.get(name, Quaternion.IDENTITY)
+	var prev: Quaternion = _tq.get(name, target)
+	var last: Quaternion = _tstep.get(name, Quaternion.IDENTITY)
+	_tq[name] = target
+	var step := target * prev.inverse()
+	# Schnelle, aber stetige Bewegung (Schlag, Peitsche) ist kein Sprung: nur wenn sich die
+	# Geschwindigkeit des Ziels in einem Takt sprunghaft aendert.
+	var dev := step * last.inverse()
+	if dev.w < 0.0:
+		dev = -dev
+	if dev.get_angle() > INERT_RATE * delta:
+		# Sprung: Versatz so, dass das wirksame Ziel dort bleibt, wo es war
+		off = (off * prev * target.inverse()).normalized()
+		_tstep[name] = Quaternion.IDENTITY
+	else:
+		_tstep[name] = step
+	off = Quaternion.IDENTITY.slerp(off, exp(-delta / INERT_T))
+	if name.begins_with("kn_") or name.begins_with("hip_") or name.begins_with("an_"):
+		var oa := off.get_angle()
+		if oa > INERT_LEG_MAX:
+			off = Quaternion.IDENTITY.slerp(off, INERT_LEG_MAX / oa)
+	_toff[name] = off
+	return (off * target).normalized()
+
+
 func pose_spring(p: Dictionary, delta: float, w: float) -> void:
-	var steps := maxi(1, ceili(w * delta / 0.3))
+	var steps := maxi(1, ceili(w * 1.3 * delta / 0.3))
 	var dt := delta / steps
 	for name in JOINTS:
-		var target := Quaternion.from_euler(p.get(name, Vector3.ZERO))
+		var target := _inertial(name, Quaternion.from_euler(p.get(name, Vector3.ZERO)), delta) if delta > 0.0 and not "inert" in VPlayer._off else Quaternion.from_euler(p.get(name, Vector3.ZERO))
+		var wj: float = w * (1.0 if "chain" in VPlayer._off else CHAIN.get(name, 1.0))
 		var n: Node3D = j[name]
 		var q: Quaternion = _q.get(name, n.quaternion)
 		var v: Vector3 = _vel.get(name, Vector3.ZERO)
@@ -526,7 +568,7 @@ func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 				e = -e
 			var ang := e.get_angle()
 			var err := e.get_axis() * ang if ang > 1e-6 else Vector3.ZERO
-			v += err * (w * w * dt) - v * (2.0 * w * dt)
+			v += err * (wj * wj * dt) - v * (2.0 * wj * dt)
 			var vl := v.length()
 			if vl > 1e-7:
 				q = (Quaternion(v / vl, vl * dt) * q).normalized()
@@ -538,6 +580,9 @@ func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 
 ## Federzustand an die aktuelle Haltung der Knoten angleichen (nach pose(), Wiederholung).
 func _reset_spring() -> void:
+	_tq.clear()
+	_tstep.clear()
+	_toff.clear()
 	for name in JOINTS:
 		_q[name] = (j[name] as Node3D).quaternion
 		_vel[name] = Vector3.ZERO
