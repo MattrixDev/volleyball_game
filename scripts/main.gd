@@ -323,8 +323,10 @@ func _open_debug_menu(in_game := false) -> void:
 
 func _on_debug_closed() -> void:
 	if drill != null:
-		# Erst nach diesem Frame weiter, sonst oeffnet dieselbe Esc-Taste gleich das Pausenmenue.
-		get_tree().set_deferred("paused", false)
+		# Kurz warten, sonst oeffnet dieselbe Taste (Esc, Start) gleich das Pausenmenue.
+		get_tree().create_timer(0.25, true, false, true).timeout.connect(func():
+			if not debug_menu.visible:
+				get_tree().paused = false)
 		return
 	start_menu.refresh_after_debug()
 	start_menu.open()
@@ -420,6 +422,7 @@ func _screenshot_later(spec: String) -> void:
 # ---------------------------------------------------------------- Steuerung
 
 func _setup_input() -> void:
+	_setup_menu_pad()
 	_action("move_left", [KEY_A, KEY_LEFT], [], [[JOY_AXIS_LEFT_X, -1.0]])
 	_action("move_right", [KEY_D, KEY_RIGHT], [], [[JOY_AXIS_LEFT_X, 1.0]])
 	_action("move_up", [KEY_W, KEY_UP], [], [[JOY_AXIS_LEFT_Y, -1.0]])
@@ -447,6 +450,37 @@ func _setup_input() -> void:
 	_action("toggle_zoom", [KEY_F3], [])
 	_action("menu", [KEY_ESCAPE], [JOY_BUTTON_START])
 	_action("trainer", [KEY_T], [JOY_BUTTON_Y])
+
+
+## Menues: A bestaetigt, B geht zurueck, Steuerkreuz und linker Stick bewegen die Auswahl.
+## Godot bringt das mit, aber nicht auf jedem Rechner mit Controller (Windows, andere Pads);
+## hier wird es ausdruecklich gesetzt, damit jedes Menue mit dem Controller geht.
+func _setup_menu_pad() -> void:
+	var map := {"ui_accept": [JOY_BUTTON_A], "ui_cancel": [JOY_BUTTON_B],
+		"ui_left": [JOY_BUTTON_DPAD_LEFT], "ui_right": [JOY_BUTTON_DPAD_RIGHT],
+		"ui_up": [JOY_BUTTON_DPAD_UP], "ui_down": [JOY_BUTTON_DPAD_DOWN]}
+	for name in map:
+		for b in map[name]:
+			var has := false
+			for ev in InputMap.action_get_events(name):
+				if ev is InputEventJoypadButton and ev.button_index == b:
+					has = true
+			if not has:
+				var jb := InputEventJoypadButton.new()
+				jb.button_index = b
+				InputMap.action_add_event(name, jb)
+	var axes := {"ui_left": [JOY_AXIS_LEFT_X, -1.0], "ui_right": [JOY_AXIS_LEFT_X, 1.0],
+		"ui_up": [JOY_AXIS_LEFT_Y, -1.0], "ui_down": [JOY_AXIS_LEFT_Y, 1.0]}
+	for name in axes:
+		var has := false
+		for ev in InputMap.action_get_events(name):
+			if ev is InputEventJoypadMotion and ev.axis == axes[name][0] and signf(ev.axis_value) == axes[name][1]:
+				has = true
+		if not has:
+			var jm := InputEventJoypadMotion.new()
+			jm.axis = axes[name][0]
+			jm.axis_value = axes[name][1]
+			InputMap.action_add_event(name, jm)
 
 
 func _action(name: String, keys: Array, buttons: Array, axes: Array = []) -> void:

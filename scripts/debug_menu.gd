@@ -21,6 +21,9 @@ var _task_box: VBoxContainer
 var _title_btn: Button
 var _back_btn: Button
 var _club_first: Button
+var _b_label: Label
+var _y_glyph: Control
+var _y_label: Label
 
 
 func _ready() -> void:
@@ -54,6 +57,12 @@ func _ready() -> void:
 	root.add_child(_footer())
 	# Mit dem Steuerkreuz: hoch / runter springt zwischen Einstellungen und Uebungen hin und her
 	# (links / rechts aendert die Einstellung).
+	for i in 4:  # oberste Reihe der Uebungen: Steuerkreuz hoch erreicht Zurueck / Hauptmenue
+		(_drill_btns[i] as Button).focus_neighbor_top = _back_btn.get_path()
+	_back_btn.focus_neighbor_bottom = (_drill_btns[0] as Button).get_path()
+	_title_btn.focus_neighbor_bottom = (_drill_btns[1] as Button).get_path()
+	_title_btn.focus_neighbor_right = _back_btn.get_path()
+	_back_btn.focus_neighbor_left = _title_btn.get_path()
 	var ob: Array = _opt_btns.values()
 	(ob[0] as Button).focus_neighbor_top = (_drill_btns[-1] as Button).get_path()
 	(ob[-1] as Button).focus_neighbor_bottom = (_drill_btns[0] as Button).get_path()
@@ -112,10 +121,10 @@ func _header() -> Control:
 	var sp := Control.new()
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(sp)
-	_title_btn = _button("Hauptmenü", func(): _leave(true), 170)
+	_title_btn = _button("Hauptmenü", func(): _leave(true), 190)
 	_title_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(_title_btn)
-	_back_btn = _button("Zurück", func(): _leave(false), 170)
+	_back_btn = _button("Zurück", func(): _leave(false), 250)
 	_back_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(_back_btn)
 	return h
@@ -139,13 +148,18 @@ func _footer() -> Control:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 10)
 	h.custom_minimum_size = Vector2(0, 30)
-	for g in [["A", "Auswählen"], ["◀ ▶", "Einstellung ändern"], ["B", "Zurück"]]:
+	for g in [["A", "Auswählen"], ["◀ ▶", "Einstellung ändern"], ["LB RB", "Seite wechseln"], ["B", ""], ["Y", "Hauptmenü"]]:
 		var gl := _glyph(g[0])
-		gl.custom_minimum_size = Vector2(maxf(30, 14 * g[0].length() + 16), 30)
+		gl.custom_minimum_size = Vector2(maxf(30, 11 * g[0].length() + 16), 30)
 		h.add_child(gl)
 		var l := _lab(g[1], 15, UiTheme.INK_MUTED)
 		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		h.add_child(l)
+		if g[0] == "B":
+			_b_label = l
+		elif g[0] == "Y":
+			_y_glyph = gl
+			_y_label = l
 		var sp := Control.new()
 		sp.custom_minimum_size = Vector2(14, 0)
 		h.add_child(sp)
@@ -387,7 +401,10 @@ func open(in_game: bool) -> void:
 	_in_game = in_game
 	visible = true
 	_title_btn.visible = in_game
-	_back_btn.text = "Weiter" if in_game else "Zurück"
+	_back_btn.text = "Weiter spielen" if in_game else "Zurück zum Startmenü"
+	_b_label.text = "Weiter spielen" if in_game else "Zurück zum Startmenü"
+	_y_glyph.visible = in_game
+	_y_label.visible = in_game
 	_say("")
 	_refresh_options()
 	_show_tab(_tab)
@@ -418,6 +435,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("ui_cancel"):
 		_leave(false)
+		get_viewport().set_input_as_handled()
+	elif _in_game and (event.is_action_pressed("trainer") or event.is_action_pressed("menu")):
+		# Y / T = Hauptmenue, Start / Esc = weiter spielen
+		if event.is_action_pressed("trainer"):
+			_leave(true)
+		else:
+			_leave(false)
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("serve_prev"):
 		_show_tab(posmod(_tab - 1, TABS.size()))
