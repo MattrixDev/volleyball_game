@@ -896,18 +896,32 @@ func _contact_ik() -> void:
 		var hb := ready.lerp(at_ball, smoothstep(-0.2, -0.03, rel)) + give + follow
 		var open := 0.035 * smoothstep(0.04, 0.2, rel)
 		tg = {"l": hb - r * (0.11 + open), "r": hb + r * (0.11 + open)}
-		# Ellbogen zeigen nach aussen vorn (etwas breiter als die Schultern), bis sich die Arme strecken.
+		# Beim Nachstrecken nicht ganz durchstrecken: kurz vor gestreckt dreht der Ellbogen bei jedem
+		# Zentimeter sehr weit, der Arm wuerde zum Schluss durchschnappen. Der Ellbogen bleibt leicht
+		# gebeugt (so sieht es bei Zuspielern auch aus).
+		for sd in ["l", "r"]:
+			var shp: Vector3 = fig.j["sh_" + sd].global_position
+			var arm: float = shp.distance_to(fig.j["el_" + sd].global_position) + (fig.j["el_" + sd] as Node3D).global_position.distance_to(fig.j["wr_" + sd].global_position)
+			var dv: Vector3 = (tg[sd] as Vector3) - shp
+			if dv.length() > arm * 0.88:
+				tg[sd] = shp + dv.normalized() * arm * 0.88
+		# Ellbogen zeigen leicht nach vorn unten und etwas nach aussen (nicht weit zur Seite), bis
+		# sich die Arme strecken. So zeigen die Unterarme nach oben, und die Handgelenke muessen nur
+		# maessig nach hinten abknicken, damit die Handflaechen zum Ball schauen.
 		for sd in ["l", "r"]:
 			var s_sign := -1.0 if sd == "l" else 1.0
 			var shp: Vector3 = fig.j["sh_" + sd].global_position
-			poles[sd] = shp + r * (0.55 * style.set_elbows * s_sign) + f * 0.1 - up * 0.1
+			poles[sd] = shp + r * (0.45 * style.set_elbows * s_sign) + f * 0.3 - up * 0.12
 		pole_w = 1.0 - smoothstep(0.04, 0.2, rel)
+		# Tiefer Ball (Haende unter Schulterhoehe): keine Pritschhaltung der Ellbogen erzwingen,
+		# der Pol laege sonst fast auf der Linie Schulter -> Hand und der Arm klappte um.
+		pole_w *= smoothstep(-0.1, 0.08, hb.y - (fig.j["sh_r"] as Node3D).global_position.y)
 		# Handflaechen schauen zum Ball (nach dem Kontakt in Zielrichtung), die Finger nach oben und
 		# leicht nach aussen, so zeigen die Daumen nach innen zu den Augen (Dreieck vor der Stirn).
 		# (Steht der Ball genau ueber dem Kopf, zeigen die Handflaechen trotzdem schraeg nach vorn
 		# oben: Handgelenke etwa 45 Grad nach hinten abgeknickt, Finger nach oben hinten.)
 		var palm0 := (to_ball + f * 1.1 + up * 0.5).normalized()
-		var palm := palm0.lerp(push, smoothstep(0.0, 0.12, rel)).normalized()
+		var palm := palm0.lerp(push, smoothstep(0.0, 0.2, rel)).normalized()
 		var fing := (up - palm * up.dot(palm)).normalized()
 		hands = {"l": [fing - r * 0.08, palm], "r": [fing + r * 0.08, palm]}
 	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne):
@@ -1058,9 +1072,10 @@ func _contact_ik() -> void:
 		fig._sync()
 		fig.ik_arm(_hit_tg, tg[_hit_tg], w, 10, 0.02, poles.get(_hit_tg, Vector3.INF), pole_w)
 	fig._sync()
+	fig.jstat_tag = anim_kind + "_" + anim_tech
 	for sd in hands:
 		var ws := wl if (sd != _hit_tg and wl >= 0.0) else w
-		fig.orient_hand(sd, hands[sd][0], hands[sd][1], ws)
+		fig.orient_hand(sd, hands[sd][0], hands[sd][1], ws, 0.9 if over_set else 0.0)
 	fig._sync()
 
 

@@ -120,6 +120,9 @@ var _bone := {}  # Gelenkname -> Knochenindex
 var _rest_rot := {}  # Gelenkname -> Ruhe-Drehung des Knochens (Skelett-Raum)
 var _parent := {}  # Gelenkname -> Elterngelenk ("" fuer die Huefte)
 var _rest_pos := {}  # Gelenkname -> Knochenposition in Ruhehaltung (Modell-Raum)
+var _fa_bone := {}  # Seite -> Knochenindex des Unterarm-Drehknochens (fehlt beim Schiedsrichter-Modell)
+var _fa_rest := {}  # Seite -> Ruhe-Drehung des Unterarm-Drehknochens (Skelett-Raum)
+var _fa_axis := {}  # Seite -> Unterarmachse Ellbogen -> Handgelenk in Ruhehaltung (Raum des Ellbogens)
 var _model_y := 0.0
 var _num_shorts: Label3D
 var _num_style := "player"
@@ -168,6 +171,14 @@ func build(colors: Dictionary, with_pads := true, hair_style := 0, official := f
 		_rest_rot[name] = g.basis.get_rotation_quaternion()
 		var pb := _skel.get_bone_parent(b)
 		_parent[name] = _skel.get_bone_name(pb) if pb >= 0 else ""
+		if _parent[name].begins_with("fa_"):
+			_parent[name] = "el_" + name.right(1)  # Hand haengt am Unterarm-Drehknochen
+	for sd in ["l", "r"]:
+		var fb := _skel.find_bone("fa_" + sd)
+		if fb >= 0:
+			_fa_bone[sd] = fb
+			_fa_rest[sd] = _skel.get_bone_global_rest(fb).basis.get_rotation_quaternion()
+		_fa_axis[sd] = (rest_pos["wr_" + sd] - rest_pos["el_" + sd]).normalized()
 	# Sitzende Figuren (Bank) haben die Huefte tiefer: ganzes Modell verschieben.
 	model.position.y = hips_height - rest_pos["hips"].y
 	_model_y = model.position.y
@@ -188,12 +199,46 @@ func build(colors: Dictionary, with_pads := true, hair_style := 0, official := f
 func _sync() -> void:
 	if _skel == null:
 		return
+	var g := {}
 	for name in JOINTS:
-		var e := (j[name] as Node3D).quaternion
 		var par: String = _parent[name]
-		var r: Quaternion = _rest_rot[name]
-		var q := e * r if par == "" else (_rest_rot[par] as Quaternion).inverse() * e * r
-		_skel.set_bone_pose_rotation(_bone[name], q)
+		var e := (j[name] as Node3D).quaternion
+		g[name] = e if par == "" else (g[par] as Quaternion) * e
+	_pose_bones(g)
+
+
+## Knochen aus den Weltdrehungen der Gelenke (Achsen der Figur) setzen. Die Drehung der Hand um
+## die Unterarmachse (Ellbogen-Drehung plus Hand-Drehung) uebernimmt der Unterarm-Drehknochen:
+## der Unterarm verdrillt sich gleichmaessig vom Ellbogen zum Handgelenk wie bei Elle und Speiche,
+## statt dass sich die Haut am Handgelenk oder Ellbogen verdreht. Die Hand selbst steht genau gleich.
+func _pose_bones(g: Dictionary) -> void:
+	var actual := {}
+	for name in JOINTS:
+		actual[name] = (g[name] as Quaternion) * (_rest_rot[name] as Quaternion)
+	for sd in _fa_bone:
+		var d: Vector3 = _fa_axis[sd]
+		var ge: Quaternion = g["el_" + sd]
+		var gp: Quaternion = g["sh_" + sd]
+		var tw_el := twist_angle(gp.inverse() * ge, d)
+		var tw_h := twist_angle(ge.inverse() * (g["wr_" + sd] as Quaternion), d)
+		actual["el_" + sd] = ge * Quaternion(d, -tw_el) * (_rest_rot["el_" + sd] as Quaternion)
+		actual["fa_" + sd] = ge * Quaternion(d, tw_h) * (_fa_rest[sd] as Quaternion)
+	for name in JOINTS:
+		var par: String = _parent[name]
+		var a: Quaternion = actual[name]
+		if par == "":
+			_skel.set_bone_pose_rotation(_bone[name], a)
+			continue
+		if name.begins_with("wr_") and actual.has("fa_" + name.right(1)):
+			par = "fa_" + name.right(1)
+		_skel.set_bone_pose_rotation(_bone[name], (actual[par] as Quaternion).inverse() * a)
+	for sd in _fa_bone:
+		_skel.set_bone_pose_rotation(_fa_bone[sd], (actual["el_" + sd] as Quaternion).inverse() * (actual["fa_" + sd] as Quaternion))
+
+
+## Drehwinkel von q um die Achse d (Twist der Swing-Twist-Zerlegung, -PI..PI).
+static func twist_angle(q: Quaternion, d: Vector3) -> float:
+	return wrapf(2.0 * atan2(Vector3(q.x, q.y, q.z).dot(d), q.w), -PI, PI)
 
 
 ## ------------------------------------------------------------------ Finger
@@ -381,10 +426,8 @@ func _process(_delta: float) -> void:
 	var g := {}
 	for name in JOINTS:
 		var jb := (inv * (j[name] as Node3D).get_global_transform_interpolated()).basis.orthonormalized()
-		var actual: Quaternion = jb.get_rotation_quaternion() * (_rest_rot[name] as Quaternion)
-		g[name] = actual
-		var par: String = _parent[name]
-		_skel.set_bone_pose_rotation(_bone[name], actual if par == "" else (g[par] as Quaternion).inverse() * actual)
+		g[name] = jb.get_rotation_quaternion()
+	_pose_bones(g)
 
 
 ## Nummern: gross auf dem Ruecken, kleiner vorn auf der Brust und auf dem linken Hosenbein
@@ -583,6 +626,7 @@ func pose_spring(p: Dictionary, delta: float, w: float) -> void:
 ## Federzustand an die aktuelle Haltung der Knoten angleichen (nach pose(), Wiederholung).
 func _reset_spring() -> void:
 	_tw_prev.clear()
+	_swiv.clear()
 	_tq.clear()
 	_tstep.clear()
 	_toff.clear()
@@ -622,6 +666,8 @@ const LIMITS := {
 	"hip_l": [-0.7, 0.7, -0.5, 2.1, -1.0, 0.45], "hip_r": [-0.7, 0.7, -0.5, 2.1, -0.45, 1.0],
 	"kn_l": [-0.55, 0.55, -2.5, 0.0, -0.35, 0.35], "kn_r": [-0.55, 0.55, -2.5, 0.0, -0.35, 0.35],
 	"an_l": [-0.9, 0.9, -1.1, 1.1, -0.8, 0.8], "an_r": [-0.9, 0.9, -1.1, 1.1, -0.8, 0.8]}
+var swivel_on := not "swivel" in ",".join(OS.get_cmdline_user_args()).get_slice("--lab-off=", 1)
+var hand_lim_on := not "handlim" in ",".join(OS.get_cmdline_user_args()).get_slice("--lab-off=", 1)
 var limits: Dictionary = {} if "limits" in ",".join(OS.get_cmdline_user_args()).get_slice("--lab-off=", 1) else LIMITS
 static var jstats := {}  # Labor: Gelenkwinkel sammeln (--lab-jstats)
 static var _jstat_on := "--lab-jstats" in ",".join(OS.get_cmdline_user_args())
@@ -688,7 +734,9 @@ func physics_step(delta: float) -> void:
 		var t: Quaternion = n.quaternion
 		# Ziel in den menschlichen Bereich holen, die Physik-Feder folgt dann weich dorthin
 		# (Beine schon vor der Fuss-IK, siehe pose_spring).
-		if not LEG_JOINTS.has(name):
+		if name.begins_with("wr_"):
+			t = limit_hand(name.right(1), (j["el_" + name.right(1)] as Node3D).quaternion, t)
+		elif not LEG_JOINTS.has(name):
 			t = _limit(name, t)
 		var q: Quaternion = _pq.get(name, t)
 		var v: Vector3 = _pv.get(name, Vector3.ZERO)
@@ -853,10 +901,12 @@ func orient_world(name: String, want: Basis, w: float) -> void:
 
 ## Hand ausrichten: fingers = Richtung der Finger, palm = wohin die Handflaeche zeigt (Welt).
 ## In Ruhe zeigen die Finger nach unten und die Handflaeche zum Oberschenkel. w blendet ein.
-var _hand_q := {}  # letzte Zieldrehung je Hand (orient_hand)
+var _hand_a := {}  # letzte Ziel-Handwinkel je Seite (orient_hand)
+var _hand_f := {}  # Takt dazu
+const HAND_MAX_STEP := 0.09  # rad je Takt (120 Hz): schnellste Drehung des Handziels
 
 
-func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
+func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float, swivel := 0.0) -> void:
 	if w <= 0.001 or fingers.length() < 0.01 or palm.length() < 0.01:
 		return
 	var s := -1.0 if sd == "l" else 1.0
@@ -864,23 +914,132 @@ func orient_hand(sd: String, fingers: Vector3, palm: Vector3, w: float) -> void:
 	var lx := (-s * palm).normalized()
 	lx = (lx - ly * lx.dot(ly)).normalized()  # rechtwinklig zu den Fingern machen
 	var lz := lx.cross(ly).normalized()
-	var want := Basis(lx, ly, lz)
+	var want := Basis(lx, ly, lz).get_rotation_quaternion()
 	var wr: Node3D = j["wr_" + sd]
-	var parent_b := (wr.get_parent() as Node3D).global_basis.orthonormalized()
-	var local := (parent_b.inverse() * want).orthonormalized()
-	var q0 := Quaternion.from_euler(wr.rotation)
-	var q1 := local.get_rotation_quaternion()
-	# Liegt das Ziel fast eine halbe Drehung weg, wuerde slerp je nach Vorzeichen mal links-, mal
-	# rechtsherum drehen (die Hand springt). Deshalb die Drehrichtung beim Einblenden festhalten.
-	var last: Quaternion = _hand_q.get(sd, Quaternion())
-	if w < 0.05 or not _hand_q.has(sd):
-		if q0.dot(q1) < 0.0:
-			q1 = -q1
-	elif last.dot(q1) < 0.0:
-		q1 = -q1
-	_hand_q[sd] = q1
-	wr.quaternion = q0.slerpni(q1, clampf(w, 0.0, 1.0)).normalized()
+	var el: Node3D = j["el_" + sd]
+	# Ellbogen-Kreis: Die Hand kann eine Ausrichtung nur erreichen, wenn der Unterarm passend
+	# steht. Der Arm darf sich dafuer um die Linie Schulter -> Handgelenk drehen (der Ellbogen
+	# wandert auf einem Kreis, das Handgelenk bleibt am Ball). Gesucht wird die Stellung, in der
+	# Unterarm und Handgelenk am bequemsten im menschlichen Bereich bleiben, nahe an der Vorgabe.
+	if swivel > 0.0 and swivel_on:
+		var sh: Node3D = j["sh_" + sd]
+		var ax := wr.global_position - sh.global_position
+		var a_best := 0.0
+		if ax.length() > 0.05:
+			ax = ax.normalized()
+			var eb := el.global_basis.orthonormalized().get_rotation_quaternion()
+			var tw_el := twist_angle(el.quaternion, _fa_axis[sd])
+			var c_best := INF
+			for i in range(-10, 11):
+				var a := swivel * i / 10.0
+				var h := (Quaternion(ax, a) * eb).inverse() * want
+				var c := _hand_cost(sd, tw_el, h) + 0.5 * a * a
+				if c < c_best:
+					c_best = c
+					a_best = a
+		var e: Array = _swiv.get(sd, [0, 0.0])
+		var prev: float = e[1] if Engine.get_physics_frames() - int(e[0]) <= 2 else 0.0
+		var a_s := prev + (a_best - prev) * 0.1
+		_swiv[sd] = [Engine.get_physics_frames(), a_s]
+		# Bei stark gebeugtem Arm (Hand nahe der Schulter) ist die Achse unsicher: dort nicht drehen.
+		var reach := (wr.global_position - sh.global_position).length() / maxf(root_node.scale.x, 0.5)
+		var aw := a_s * clampf(w, 0.0, 1.0) * smoothstep(0.18, 0.32, reach)
+		if absf(aw) > 1e-4 and ax.length() > 0.5:
+			var pr := ((sh.get_parent() as Node3D).global_basis.orthonormalized()).get_rotation_quaternion()
+			sh.quaternion = (pr.inverse() * Quaternion(ax, aw) * pr * sh.quaternion).normalized()
+	var parent_b := el.global_basis.orthonormalized().get_rotation_quaternion()
+	var h := parent_b.inverse() * want
+	if not hand_lim_on or limits.is_empty():
+		wr.quaternion = wr.quaternion.slerp(h, clampf(w, 0.0, 1.0)).normalized()
+		return
+	# Eingeblendet wird in den Gelenkwinkeln (Unterarm-Drehung, Strecken, Seitneigung), nicht als
+	# Drehung im Raum: liegen Pose und Ziel weit auseinander, gibt es sonst zwei Wege um die Achse,
+	# und die Hand springt von einem auf den anderen. Beide Enden liegen im menschlichen Bereich,
+	# also auch alles dazwischen.
+	var tw_el := twist_angle(el.quaternion, _fa_axis[sd])
+	var a0 := _hand_limited(sd, tw_el, wr.quaternion, "hand0_" + sd)
+	var a1 := _hand_limited(sd, tw_el, h, "hand_" + sd)
+	if _jstat_on:
+		var key := "hand_" + sd + "_" + (jstat_tag if w > 0.7 else "lowW")
+		var st: Array = jstats.get(key, [])
+		if st.size() < 200000:
+			st.append(_hand_angles(sd, tw_el, h))
+		jstats[key] = st
+	# Springt das Ziel (etwa wenn der Ball hinter den Kopf wandert), dreht die Hand schnell, aber
+	# sichtbar dorthin statt in einem Bild.
+	if Engine.get_physics_frames() - int(_hand_f.get(sd, -10)) <= 2:
+		var last: Vector3 = _hand_a[sd]
+		var dv := a1 - last
+		if dv.length() > HAND_MAX_STEP:
+			a1 = last + dv * (HAND_MAX_STEP / dv.length())
+			_tw_prev["hand_" + sd] = a1.y
+	_hand_a[sd] = a1
+	_hand_f[sd] = Engine.get_physics_frames()
+	wr.quaternion = _hand_quat(sd, tw_el, a0.lerp(a1, clampf(w, 0.0, 1.0)))
 
+
+## Menschlicher Bereich der Hand (rad): die Drehung um die Unterarmachse (Ellbogen plus Hand,
+## wie Elle und Speiche) und das Abknicken im Handgelenk.
+## [Pronation, Supination, Strecken (Handruecken nach hinten), Beugen, zur Daumenseite, zur Kleinfingerseite]
+const HAND_LIM := [1.45, 1.4, 1.35, 1.3, 0.35, 0.6]
+var _swiv := {}  # Seite -> [Takt, Drehung des Arms um Schulter -> Handgelenk] (orient_hand)
+var jstat_tag := ""  # Labor: Aktion fuer die Statistik der Handwinkel
+
+
+## Hand relativ zum Ellbogen (h) in Unterarm-Drehung und Abknicken zerlegen. Rueckgabe:
+## Vector3(zur Daumenseite +, Pronation +, Strecken +), fuer beide Seiten gleich gerechnet.
+## (Die Unterarmachse zeigt vom Ellbogen zur Hand; Pronation rechts = negative Drehung um sie.)
+func _hand_angles(sd: String, tw_el: float, h: Quaternion) -> Vector3:
+	var d: Vector3 = _fa_axis[sd]
+	var tw_h := twist_angle(h, d)
+	var sw := Quaternion(d, -tw_h) * h
+	if sw.w < 0.0:
+		sw = -sw
+	var v := sw.get_axis() * sw.get_angle() if sw.get_angle() > 1e-6 else Vector3.ZERO
+	var s := -1.0 if sd == "l" else 1.0
+	return Vector3(v.x, -s * (tw_el + tw_h), s * v.z)
+
+
+func _hand_cost(sd: String, tw_el: float, h: Quaternion) -> float:
+	var a := _hand_angles(sd, tw_el, h)
+	var tw := wrapf(a.y, -PI, PI)
+	var c := 0.0
+	c += pow(maxf(0.0, tw - (HAND_LIM[0] - 0.25)), 2.0) + pow(maxf(0.0, -tw - (HAND_LIM[1] - 0.25)), 2.0)
+	c += pow(maxf(0.0, a.z - (HAND_LIM[2] - 0.2)), 2.0) + pow(maxf(0.0, -a.z - (HAND_LIM[3] - 0.2)), 2.0)
+	c += 2.0 * (pow(maxf(0.0, a.x - HAND_LIM[4]), 2.0) + pow(maxf(0.0, -a.x - HAND_LIM[5]), 2.0))
+	return c * 8.0 + 0.04 * tw * tw
+
+
+## Hand weich in den menschlichen Bereich holen (el_q: Ellbogen-Gelenk, h: Hand relativ zum Ellbogen).
+func limit_hand(sd: String, el_q: Quaternion, h: Quaternion) -> Quaternion:
+	if limits.is_empty() or not hand_lim_on or not _fa_axis.has(sd):
+		return h
+	var tw_el := twist_angle(el_q, _fa_axis[sd])
+	return _hand_quat(sd, tw_el, _hand_limited(sd, tw_el, h, "handp_" + sd))
+
+
+## Handwinkel (siehe _hand_angles), fortlaufend gezaehlt (kein Sprung bei +-180 Grad, key merkt
+## sich den letzten Wert) und weich in den menschlichen Bereich gebremst.
+func _hand_limited(sd: String, tw_el: float, h: Quaternion, key: String) -> Vector3:
+	var a := _hand_angles(sd, tw_el, h)
+	a.y = wrapf(a.y, -PI, PI)
+	# Weit hinter der Grenze (nahe 180 Grad) bleibt die Hand auf der Seite, von der sie kam, statt
+	# zur anderen Grenze zu springen. Im erreichbaren Bereich zaehlt immer der echte Winkel.
+	if _tw_prev.has(key):
+		var pv: float = _tw_prev[key]
+		if absf(a.y) > 2.2 and absf(pv) > 1.0 and signf(a.y) != signf(pv):
+			a.y += TAU * signf(pv)
+	_tw_prev[key] = a.y
+	return Vector3(_soft_clamp(a.x, -HAND_LIM[5], HAND_LIM[4]), _soft_clamp(a.y, -HAND_LIM[1], HAND_LIM[0]),
+		_soft_clamp(a.z, -HAND_LIM[3], HAND_LIM[2]))
+
+
+## Handdrehung relativ zum Ellbogen aus den Handwinkeln (Umkehrung von _hand_angles).
+func _hand_quat(sd: String, tw_el: float, a: Vector3) -> Quaternion:
+	var s := -1.0 if sd == "l" else 1.0
+	var sv := Vector3(a.x, 0.0, s * a.z)
+	var sw := Quaternion(sv.normalized(), sv.length()) if sv.length() > 1e-6 else Quaternion()
+	return (Quaternion(_fa_axis[sd], -s * a.y - tw_el) * sw).normalized()
 
 
 ## Tiefster Punkt des Koerpers (Hoehe ueber dem Boden der Figur). Nur Fuesse oder alles
