@@ -573,22 +573,40 @@ func ai_e(kind: String) -> float:
 	return mag if rng.randf() < 0.5 else -mag
 
 
+var _pops: Array = []  # lebende Popup-Labels, aeltestes zuerst
+
+
 func popup(pl: VPlayer, text: String, color: Color) -> void:
 	if autoplay or attract:
 		return
+	# Lebende Popups: das alte Popup desselben Spielers weicht dem neuen, alle anderen
+	# werden gestapelt, damit nie Text auf Text liegt.
+	_pops = _pops.filter(func(x): return is_instance_valid(x))
+	for old in _pops.duplicate():
+		if old.get_meta("pl") == pl:
+			_pops.erase(old)
+			old.queue_free()
+	while _pops.size() >= 4:
+		_pops.pop_front().queue_free()
 	var l := Label3D.new()
 	l.text = text
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	l.no_depth_test = true
-	l.font_size = 72
-	l.outline_size = 16
-	l.pixel_size = 0.006
+	l.font_size = 48
+	l.outline_size = 12
+	l.pixel_size = 0.005
 	l.modulate = color
+	l.set_meta("pl", pl)
 	add_child(l)
-	l.position = pl.position + Vector3(0, 2.8, 0)
+	var slot := 0
+	for o in _pops:
+		if absf(o.position.x - pl.position.x) < 3.0:
+			slot += 1
+	_pops.append(l)
+	l.position = pl.position + Vector3(0, 2.8 + 0.5 * slot, 0)
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(l, "position:y", l.position.y + 0.8, 0.9)
+	tw.tween_property(l, "position:y", l.position.y + 0.6, 0.9)
 	tw.tween_property(l, "modulate:a", 0.0, 0.9).set_delay(0.3)
 	tw.chain().tween_callback(l.queue_free)
 
