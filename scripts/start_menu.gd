@@ -5,6 +5,7 @@ extends Control
 
 signal play
 signal settings
+signal debug
 
 ## Beta: wohin "Feedback senden" fuehrt.
 const FEEDBACK_URL := "https://github.com/MattrixDev/volleyball_game/issues/new"
@@ -84,6 +85,8 @@ func _ready() -> void:
 	row_b.add_child(_small_tile("ball", "Kurzes Match", "Ein Satz bis 15", _on_play.bind(true)))
 	row_b.add_child(_small_tile("exit", "Beenden", "Zurück zum Desktop", func(): get_tree().quit()))
 	row_b.add_child(_small_tile("chat", "Beta-Feedback", "Fehler melden, Ideen schicken", func(): OS.shell_open(FEEDBACK_URL), true))
+	if DebugMode.ENABLED:
+		row_b.add_child(_small_tile("debug", "Debug", "Übungen, Karten, Aufgaben", func(): debug.emit()))
 
 	col.add_child(_tip_bar())
 	col.add_child(_footer())
@@ -370,6 +373,14 @@ func _club_tile(width: float) -> Control:
 func _update_club_tile() -> void:
 	if _club_sub:
 		_club_sub.text = "%s Münzen" % Club.fmt(Club.data.coins) if Club.exists() else "Neu"
+
+
+## Nach dem Debug-Menue: Verein kann geloescht oder neu sein.
+func refresh_after_debug() -> void:
+	if _pick[0] == Club.ID and not Club.can_play():
+		_pick[0] = Teams.next_id(Club.ID, _pick[1])
+	_update_teams()
+	_update_club_tile()
 
 
 func _open_club() -> void:

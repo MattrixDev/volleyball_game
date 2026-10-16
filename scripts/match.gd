@@ -11,6 +11,9 @@ signal big_hit(strength: float)
 ## Fuer Geraeusche und Effekte: Ballkontakt (serve, bump, set, spike, tip, block, net, floor).
 signal contact(kind: String, pos: Vector3, strength: float)
 signal point_won(winner: int, reason: String, highlight: bool)
+## Jede Ballberuehrung mit Ergebnis (fuer den Debug-Modus): Art, Team, Mensch?, Qualitaet, Timing (s),
+## Ballgeschwindigkeit danach und davor (m/s).
+signal touch_result(kind: String, team: int, human: bool, q: int, e: float, speed: float, speed_in: float)
 
 const G := 9.81
 const R := Ballistics.BALL_R
@@ -179,6 +182,7 @@ var test_score := []  # Test: Startstand des ersten Satzes, z.B. --score=24:10
 var test_rot := -1  # Test: --rot=N dreht das Heimteam N-mal weiter, Gegner schlaegt auf
 var check_rules := false  # Test: prueft bei jedem Aufschlag die Aufstellung
 var autopress := false  # Test: drueckt fuer den Menschen automatisch
+var drill = null  # Debug-Modus: laufende Uebung (DebugDrill), sonst null
 var hud = null
 var cfg := GameSettings.new()
 var rng := RandomNumberGenerator.new()
@@ -735,6 +739,8 @@ var _lines_hint_shown := false
 
 
 func start_rally() -> void:
+	if drill != null:
+		drill.before_rally()  # Debug-Uebung: wer aufschlaegt, Rotation
 	phase = Phase.PRE_SERVE
 	if human_team >= 0 and not _lines_hint_shown and not autoplay:
 		_lines_hint_shown = true
@@ -782,7 +788,7 @@ func start_rally() -> void:
 	_hold_ball_at_server()
 	reset_physics_interpolation()
 	pause_until = clock + (0.15 if autoplay else 0.9)
-	if serving_team == human_team:
+	if human_serves():
 		serve_aim = Vector2(5.5, 0.0)
 	else:
 		serve_aim = Vector2(rng.randf_range(4.0, 7.5), rng.randf_range(-3.2, 3.2))
@@ -799,6 +805,8 @@ func start_rally() -> void:
 			ai_timeout_wanted[t] = false
 			call_timeout(t)
 			break
+	if drill != null:
+		drill.after_rally_setup()  # Debug-Uebung: Aufschlagart, Zuwurf vom Trainer
 
 
 ## Testhilfe (--check): meldet jede Verletzung der Aufstellungsregeln.
@@ -1115,6 +1123,8 @@ func _held_stick(stick: Vector2) -> Vector2:
 
 func _physics_process(delta: float) -> void:
 	clock += delta
+	if drill != null and drill.step(delta):
+		return  # Debug: freies Laufen, die Uebung steuert alles selbst
 	var real_delta := delta / maxf(Engine.time_scale, 0.01)
 	var inp := _empty_input()
 	if human_team >= 0:
@@ -1140,7 +1150,7 @@ func _physics_process(delta: float) -> void:
 				if hud:
 					hud.whistle(false)
 					hud.ref_signal([["serve_" + str(serving_team), "Aufschlag " + TEAM_NAMES[serving_team], 1.6]])
-			if serving_team == human_team:
+			if human_serves():
 				serve_aim = _nudge_aim(serve_aim, inp.mv, delta)
 				serve_contact = rs
 				if inp.kind_prev or inp.kind_next:
@@ -1156,7 +1166,7 @@ func _physics_process(delta: float) -> void:
 			elif whistle_done:
 				_do_toss()
 		Phase.TOSS:
-			if serving_team == human_team:
+			if human_serves():
 				serve_aim = _nudge_aim(serve_aim, inp.mv, delta)
 				serve_contact = rs
 				if not serve_done:
@@ -1169,6 +1179,7 @@ func _physics_process(delta: float) -> void:
 						serve_done = true
 						charging = false
 						popup(server(), "Zu spät", Q_COLOR[Q.MISS])
+						touch_result.emit("serve", serving_team, true, Q.MISS, 1.0, 0.0, 0.0)
 			elif not serve_done and clock >= serve_ideal + ai_serve_e:
 				_serve_hit(ai_serve_e, rng.randf_range(0.7, 0.95), serve_contact, 0.9)
 			_step_ball(delta)
@@ -1346,7 +1357,7 @@ func _auto_input() -> Dictionary:
 			if charging and _due(serve_ideal):
 				d.hit_up = true
 		Phase.RALLY:
-			if opp != null and not opp.done and not opp.pending and opp.team == human_team:
+			if opp != null and not opp.done and not opp.pending and opp.team == human_team and opp.human:
 				if opp.kind == "attack":
 					if not charging and clock >= opp.t - 0.7:
 						_auto_rs = Vector2(rng.randf_range(-0.8, 0.8), rng.randf_range(-0.5, 0.8))
@@ -1433,6 +1444,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	var q := classify(e, "serve", hit_window_scale(power, contact, jump))
 	if q == Q.MISS:
 		popup(srv, "Zu früh" if e < 0.0 else "Zu spät", Q_COLOR[Q.MISS])
+		touch_result.emit("serve", serving_team, human_serves(), Q.MISS, e, 0.0, 0.0)
 		return
 	if c > OVERCHARGE + 0.25 and q < Q.WEAK:
 		q += 1
@@ -1458,7 +1470,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	# Super-Zone beim Aufschlag: perfekt getroffen und genau dort losgelassen.
 	var sup := false
 	if q == Q.PERFECT and style != "short":
-		if serving_team == human_team:
+		if human_serves():
 			sup = c >= SUPER_LO and c <= SUPER_HI
 		else:
 			sup = jump and rng.randf() < 0.12 * (1.0 + pf(srv, "serve") + (0.5 if ptrait(srv, "kanone") else 0.0))
@@ -1499,16 +1511,17 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	touches = 1
 	serve_time = clock
 	phase = Phase.RALLY
-	popup(srv, Q_TEXT[q] + (timing_hint(e, q) if serving_team == human_team else ""), Q_COLOR[q])
+	popup(srv, Q_TEXT[q] + (timing_hint(e, q) if human_serves() else ""), Q_COLOR[q])
 	last_super = sup
 	if sup:
 		mstat[serving_team]["wucht"] = mstat[serving_team].get("wucht", 0) + 1
 	_fx("serve", ball.position, (1.0 if sup else power) * (1.0 if jump else 0.65))
-	if serving_team == human_team and sup:
+	touch_result.emit("serve", serving_team, human_serves(), q, e, ball_vel.length(), 0.0)
+	if human_serves() and sup:
 		big_hit.emit(0.85)
 		_hitstop_left = 0.09
 		_hitstop_scale = 0.05
-	elif serving_team == human_team and q == Q.PERFECT and power > 0.8:
+	elif human_serves() and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
 	plan_next()
 
@@ -1601,7 +1614,7 @@ func _try_team(team: int) -> bool:
 	o.t = clock + tc
 	o.point = p
 	o.speed = Vector3(ball_vel.x, ball_vel.y - ball_g * tc, ball_vel.z).length()
-	o.human = team == human_team
+	o.human = team == human_team and (drill == null or drill.human_does(kind))
 	# Ein Flatterball ist schwer zu lesen: kleineres Timing-Fenster bei der Annahme.
 	if flutter > 0.0 and last_action == "serve":
 		o.win_scale = 0.88
@@ -1721,6 +1734,9 @@ func _nearest(team: int, p: Vector3, excluded: VPlayer, no_libero: bool) -> VPla
 ## Doppelblock dazu. Bei Angriffen ueber die Mitte schliessen beide Aussenblocker (Dreierblock).
 ## Ob die Helfer rechtzeitig ankommen, haengt vom Tempo des Zuspiels ab.
 func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
+	if drill != null and drill.no_block(def):
+		blockers[def] = []
+		return
 	var front: Array = []
 	for pl in players[def]:
 		if is_front_row(pl):
@@ -1789,12 +1805,18 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 	block_err[def] = rng.randf_range(-0.4, 0.4)
 
 
+## Schlaegt der Mensch auf? (Im Debug-Modus kann die KI fuer dein Team aufschlagen.)
+func human_serves() -> bool:
+	return serving_team == human_team and (drill == null or drill.human_does("serve"))
+
+
 func human_player() -> VPlayer:
 	if human_team < 0:
 		return null
-	if opp != null and not opp.done and opp.team == human_team:
+	if opp != null and not opp.done and opp.team == human_team and opp.human:
 		return opp.player
-	if opp != null and opp.team != human_team and opp.kind == "attack" and not blockers[human_team].is_empty():
+	if opp != null and opp.team != human_team and opp.kind == "attack" and not blockers[human_team].is_empty() \
+			and (drill == null or drill.human_does("block")):
 		return blockers[human_team][0]
 	return null
 
@@ -1826,13 +1848,13 @@ func _rally_input(inp: Dictionary) -> void:
 	# Block lesen: Solange der gegnerische Zuspieler den Ball noch bekommt, stellst du den
 	# Mittelblocker mit dem linken Stick am Netz hin. Wo er steht, wenn der Ball gespielt wird,
 	# entscheidet ueber den Block (richtig gelesen = starker Block, falsch = zu spaet).
-	if opp != null and not opp.done and opp.team != human_team and opp.kind == "set":
+	if opp != null and not opp.done and opp.team != human_team and opp.kind == "set" and (drill == null or drill.human_does("block")):
 		var rp := _lane_player(human_team, "mid")
 		if rp != null and is_front_row(rp) and mv.length() > 0.3:
 			rp.manual_dir = Vector3(0, 0, _stick_dir(mv).z)
 			read_z = rp.position.z
 			commit_block[human_team] = true
-	if opp != null and not opp.done and opp.team == human_team:
+	if opp != null and not opp.done and opp.team == human_team and opp.human:
 		match opp.kind:
 			"attack":
 				_attack_input(inp)
@@ -1985,17 +2007,18 @@ func _ai_actions() -> void:
 				execute_touch(opp, opp.press_e, opp.press_choice)
 		elif not opp.human and clock >= opp.t + opp.ai_e:
 			_ai_prepare(opp)
-			_press(opp, opp.ai_e, "auto")
+			_press(opp, opp.ai_e, drill.ai_choice(opp) if drill != null else "auto")
 		elif opp.human and clock > opp.t + windows(opp.kind)[2] * maxf(opp.win_scale, 1.35 if opp.kind == "attack" else 1.0) + 0.01 + lag_game():
 			opp.done = true
 			charging = false
 			popup(opp.player, "Zu spät", Q_COLOR[Q.MISS])
+			touch_result.emit(opp.kind, opp.team, true, Q.MISS, 1.0, 0.0, opp.speed)
 	if opp == null or opp.kind != "attack":
 		return
 	for t in 2:
 		for i in blockers[t].size():
 			var b: VPlayer = blockers[t][i]
-			if t == human_team and i <= 1:
+			if t == human_team and i <= 1 and (drill == null or drill.human_does("block")):
 				continue  # der Mensch steuert beide Blocker im Doppelblock
 			if opp.team != t and not b.has_jumped and clock >= b.block_jump_at:
 				b.jump()
@@ -2101,6 +2124,7 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		if q != Q.MISS:
 			txt = "Nicht erreicht"
 		popup(pl, txt, Q_COLOR[Q.MISS])
+		touch_result.emit(o.kind, o.team, o.human, Q.MISS, e, 0.0, o.speed)
 		return
 	# Pritschen: genau, aber nur bei Baellen, die nicht zu hart kommen.
 	if o.kind != "attack" and o.tech == "over":
@@ -2172,6 +2196,7 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	stats["Technik " + ("Pritschen" if o.tech == "over" else "Baggern")] = stats.get("Technik " + ("Pritschen" if o.tech == "over" else "Baggern"), 0) + (1 if o.kind != "attack" else 0)
 	if trace:
 		print("  T%d %s %s %s q=%s e=%.3f pos=%s vel=%s" % [o.team, pl.role, o.kind, o.tech, Q_TEXT[q], e, before, ball_vel])
+	touch_result.emit(o.kind, o.team, o.human, q, e, ball_vel.length(), o.speed)
 	plan_next()
 
 
@@ -2842,6 +2867,9 @@ func _is_highlight(reason: String) -> bool:
 func _end_rally(winner: int, reason: String) -> void:
 	if phase != Phase.RALLY and phase != Phase.TOSS and phase != Phase.PRE_SERVE:
 		return
+	if drill != null:
+		drill.rally_ended(winner, reason)  # Debug-Uebung: kein Punkt, gleich wiederholen
+		return
 	opp = null
 	blockers = [[], []]
 	_hitter = [null, null]
@@ -3176,7 +3204,7 @@ func _update_time_and_camera(real_delta: float) -> void:
 	cam_mode = ""
 	cam_subject = null
 	if human_team >= 0 and not autoplay:
-		if (phase == Phase.PRE_SERVE or phase == Phase.TOSS) and serving_team == human_team and not serve_done:
+		if (phase == Phase.PRE_SERVE or phase == Phase.TOSS) and human_serves() and not serve_done:
 			cam_mode = "serve"
 			cam_subject = server()
 			if phase == Phase.TOSS and ((serve_kind == 1 and cam_subject.airborne) or (serve_kind == 0 and ball_vel.y < 1.5)):
@@ -3260,7 +3288,7 @@ func _update_visuals() -> void:
 	var aim_vis := false
 	preview_valid = false
 	if human_team >= 0:
-		if (phase == Phase.PRE_SERVE or phase == Phase.TOSS) and serving_team == human_team and not serve_done:
+		if (phase == Phase.PRE_SERVE or phase == Phase.TOSS) and human_serves() and not serve_done:
 			var sa := serve_aim
 			if serve_style(serve_contact) == "short":
 				sa.x = minf(sa.x, 3.2)
@@ -3322,17 +3350,17 @@ func hint() -> String:
 		Phase.REPLAY:
 			return "Wiederholung  ·  A / Leertaste: überspringen"
 		Phase.PRE_SERVE:
-			if serving_team == human_team and whistle_done:
+			if human_serves() and whistle_done:
 				var left := int(ceilf(serve_deadline - clock))
 				var timer := "  ·  Noch %d s!" % left if left <= 5 else ""
 				return "Aufschlag (%s): Ziel linker Stick/WASD · Trefferpunkt rechter Stick/Maus · LB/RB oder 1/2 Stand/Sprung · R2/E halten, loslassen = schlagen%s" % [serve_style_text(serve_kind, serve_contact), timer]
 			if human_team >= 0 and not whistle_done:
 				return "Gleich Anpfiff … Trainerbank (Libero, Wechsel, Auszeit): T / Y"
 		Phase.TOSS:
-			if serving_team == human_team and not serve_done:
+			if human_serves() and not serve_done:
 				return "R2 / E halten zum Aufladen, loslassen, wenn der Ball oben ist"
 		Phase.RALLY:
-			if opp != null and not opp.done and opp.team == human_team:
+			if opp != null and not opp.done and opp.team == human_team and opp.human:
 				match opp.kind:
 					"pass":
 						return "Annahme: A/Leertaste (baggern) oder X/Q (pritschen) halten, loslassen wenn der Ring sich schließt"
@@ -3348,7 +3376,7 @@ func hint() -> String:
 						return "Ball rüberspielen: X/Q oder A/Leertaste halten und rechtzeitig loslassen"
 			if human_player() != null:
 				return "Block: linker Stick = Block, rechter Stick = zweiter Blocker · R2/E springen (beide) · in der Luft Stick = Hände"
-			if opp != null and opp.team != human_team and opp.kind == "set":
+			if opp != null and opp.team != human_team and opp.kind == "set" and (drill == null or drill.human_does("block")):
 				return "Block lesen: linker Stick stellt den Mittelblocker am Netz hin, bevor der Ball zum Angreifer fliegt"
 	return ""
 

@@ -369,6 +369,12 @@ func set_attract(on: bool) -> void:
 	_banner.visible = false
 
 
+## Pfiff zum Anhoeren im Einstellungsmenue (Lautstaerke schon eingerechnet).
+func whistle_preview(vol: float) -> void:
+	_ref.volume = vol
+	_ref.whistle(false)
+
+
 func whistle(long: bool) -> void:
 	_ref.whistle(long)
 	whistled.emit()
@@ -409,10 +415,10 @@ func update_view(m) -> void:
 	_info.text = "Stufe %s  ·  Laufhilfe %s  ·  Zeitlupe %s  ·  Zoom %s" % [
 		GameSettings.PRESET_TEXT[m.cfg.preset], "an" if m.assist else "aus", "an" if m.slowmo_on else "aus", "an" if m.zoom_on else "aus"]
 	_lineup.text = _lineup_text(m)
-	_ref.volume = m.cfg.get_v("whistle")
+	_ref.volume = m.cfg.get_v("whistle") * m.cfg.unit("fx_vol")
 	var show := false
 	if m.human_team >= 0 and not m.autoplay:
-		if (m.phase == m.Phase.PRE_SERVE or m.phase == m.Phase.TOSS) and m.serving_team == m.human_team and not m.serve_done:
+		if (m.phase == m.Phase.PRE_SERVE or m.phase == m.Phase.TOSS) and m.human_serves() and not m.serve_done:
 			show = true
 			_pad.mode = "serve"
 			_pad.title = "Aufschlag: " + m.serve_style_text(m.serve_kind, m.serve_contact)

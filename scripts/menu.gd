@@ -5,14 +5,18 @@ extends Control
 
 signal closed
 signal to_title
+## Seite Kamera: diese Ansicht soll im Spiel dahinter gezeigt werden ("" = keine Vorschau).
+signal camera_preview(mode: String)
+## Ein Regler wurde verstellt (fuer Tonproben).
+signal setting_changed(key: String)
 
-## Welche Regler in welcher Gruppe stehen (linke und rechte Spalte).
+## Welche Regler in welcher Gruppe stehen (Seite "Spiel", linke und rechte Spalte).
 const GROUPS := [
 	["Zeitlupe", ["slow_serve", "slow_receive", "slow_set", "slow_attack", "slow_block"]],
-	["Ton", ["whistle", "sfx", "crowd"]],
-	["Hilfen und Gegner", ["receive_help", "input_lag", "stick_hold", "ai_defense", "ai_block", "faults"]],
 	["Regeln", ["serve_time"]],
+	["Hilfen und Gegner", ["receive_help", "input_lag", "stick_hold", "ai_defense", "ai_block", "faults"]],
 ]
+const TABS := ["Spiel", "Ton", "Kamera"]
 
 var cfg: GameSettings
 var match_node = null
@@ -21,6 +25,7 @@ var _preset_buttons := {}
 var _sliders := {}
 var _value_labels := {}
 var _help: Label
+var _hint: Label
 var _title: Label
 var _score: Label
 var _set_buttons := {}
@@ -28,6 +33,18 @@ var _libero_buttons := {}
 var _replay_buttons := {}
 var _cont: Button
 var _title_btn: Button
+var _shade: ColorRect
+var _panel: PanelContainer
+var _box: VBoxContainer
+var _tab := 0
+var _tab_btn: Array = []
+var _pages: Array = []
+var _adv_btn: Button
+var _adv_box: Control
+var _cam_group := 0
+var _cam_btn: Array = []
+var _cam_grids: Array = []
+var _cam_reset: Button
 
 
 func _ready() -> void:
@@ -35,26 +52,25 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	theme = UiTheme.get_light_theme()
 	visible = false
-	var shade := ColorRect.new()
-	shade.color = Color(0.05, 0.06, 0.09, 0.55)
-	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(shade)
+	_shade = ColorRect.new()
+	_shade.color = Color(0.05, 0.06, 0.09, 0.55)
+	_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_shade)
 
-	var panel := PanelContainer.new()
+	_panel = PanelContainer.new()
 	var sb := UiTheme.box(UiTheme.PAPER, 28)
 	sb.shadow_color = Color(0, 0, 0, 0.35)
 	sb.shadow_size = 24
 	sb.set_content_margin_all(26)
-	panel.add_theme_stylebox_override("panel", sb)
-	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	add_child(panel)
+	_panel.add_theme_stylebox_override("panel", sb)
+	add_child(_panel)
 
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 14)
-	box.custom_minimum_size = Vector2(1360, 0)
-	panel.add_child(box)
+	_box = VBoxContainer.new()
+	_box.add_theme_constant_override("separation", 14)
+	_box.custom_minimum_size = Vector2(1360, 0)
+	_panel.add_child(_box)
+	var box := _box
 
 	# Kopfzeile: Titel, Spielstand, Knoepfe
 	var head := HBoxContainer.new()
@@ -79,10 +95,55 @@ func _ready() -> void:
 	head.add_child(quit)
 	box.add_child(head)
 
+	# Seitenwahl (LB / RB)
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 10)
+	tabs.add_child(_glyph("LB"))
+	for i in TABS.size():
+		var tb := Button.new()
+		tb.text = TABS[i]
+		tb.toggle_mode = true
+		tb.focus_mode = Control.FOCUS_NONE
+		tb.custom_minimum_size = Vector2(170, 44)
+		tb.add_theme_font_size_override("font_size", 20)
+		tb.pressed.connect(_show_tab.bind(i))
+		tabs.add_child(tb)
+		_tab_btn.append(tb)
+	tabs.add_child(_glyph("RB"))
+	box.add_child(tabs)
+
+	_pages = [_game_page(), _sound_page(), _camera_page()]
+	for pg in _pages:
+		box.add_child(pg)
+
+	_help = UiTheme.label("", 18, UiTheme.NAVY)
+	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_help.custom_minimum_size = Vector2(0, 48)
+	box.add_child(_help)
+	_hint = UiTheme.label("Steuerkreuz / linker Stick zum Wählen · A wählt aus · links/rechts verstellt Regler · LB / RB wechselt die Seite · B zurück", 15, UiTheme.INK_MUTED)
+	box.add_child(_hint)
+	_panel.resized.connect(_dock)
+
+
+func _glyph(t: String) -> Control:
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", UiTheme.box(UiTheme.INK, 10))
+	p.custom_minimum_size = Vector2(46, 32)
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var l := UiTheme.label(t, 13, Color.WHITE)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	p.add_child(l)
+	return p
+
+
+## Seite Spiel: Schwierigkeit, Regeln, Zeitlupe, Hilfen und Gegner.
+func _game_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 14)
 	# Schwierigkeit und Spielregeln
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 14)
-	box.add_child(top)
+	page.add_child(top)
 	var diff := UiTheme.card_light()
 	diff.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(diff)
@@ -136,7 +197,7 @@ func _ready() -> void:
 	# Regler in zwei Spalten
 	var cols := HBoxContainer.new()
 	cols.add_theme_constant_override("separation", 14)
-	box.add_child(cols)
+	page.add_child(cols)
 	for c in 2:
 		var cardc := UiTheme.card_light()
 		cardc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -144,8 +205,9 @@ func _ready() -> void:
 		var cbox := VBoxContainer.new()
 		cbox.add_theme_constant_override("separation", 6)
 		cardc.add_child(cbox)
+		var groups: Array = [GROUPS[0], GROUPS[1]] if c == 0 else [GROUPS[2]]
 		var first := true
-		for g in [GROUPS[c * 2], GROUPS[c * 2 + 1]]:
+		for g in groups:
 			if not first:
 				var sp := Control.new()
 				sp.custom_minimum_size = Vector2(0, 12)
@@ -159,16 +221,89 @@ func _ready() -> void:
 			for key in g[1]:
 				_add_slider(grid, _slider_def(key))
 			cbox.add_child(grid)
+	return page
 
-	_help = UiTheme.label("", 18, UiTheme.NAVY)
-	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_help.custom_minimum_size = Vector2(0, 48)
-	box.add_child(_help)
-	box.add_child(UiTheme.label("Steuerkreuz / linker Stick / Pfeiltasten zum Wählen, A / Enter wählt aus, links/rechts verstellt Regler", 15, UiTheme.INK_MUTED))
+
+## Seite Ton: Gesamt-, Effekt- und Musiklautstaerke, dahinter "Erweitert" mit allen Einzelreglern.
+func _sound_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 14)
+	var card := UiTheme.card_light()
+	page.add_child(card)
+	var cbox := VBoxContainer.new()
+	cbox.add_theme_constant_override("separation", 8)
+	card.add_child(cbox)
+	cbox.add_child(UiTheme.heading_light("Lautstärke"))
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 14)
+	grid.add_theme_constant_override("v_separation", 8)
+	for key in GameSettings.AUDIO_SIMPLE:
+		_add_slider(grid, _slider_def(key))
+	cbox.add_child(grid)
+	_adv_btn = _toggle("Erweitert: jedes Geräusch einzeln", 420, "Zeigt die Regler für Pfiff, Ball, Schlag und Aufschlag, Block, Schuhe und Publikum. Sie gelten im Verhältnis zur Effektlautstärke.")
+	_adv_btn.pressed.connect(_on_advanced)
+	cbox.add_child(_adv_btn)
+	var adv := VBoxContainer.new()
+	adv.add_theme_constant_override("separation", 6)
+	var agrid := GridContainer.new()
+	agrid.columns = 3
+	agrid.add_theme_constant_override("h_separation", 14)
+	agrid.add_theme_constant_override("v_separation", 4)
+	for key in GameSettings.AUDIO_ADVANCED:
+		_add_slider(agrid, _slider_def(key))
+	adv.add_child(agrid)
+	_adv_box = adv
+	adv.visible = false
+	cbox.add_child(adv)
+	return page
+
+
+## Seite Kamera: je Spielablauf Entfernung, Hoehe, Neigung und Sichtfeld, dazu Allgemeines.
+## Das Spiel dahinter zeigt dabei die gewaehlte Ansicht.
+func _camera_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 12)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	page.add_child(row)
+	var names: Array = []
+	for m in GameSettings.CAM_MODES:
+		names.append(m[1])
+	names.append("Allgemein")
+	for i in names.size():
+		var b := _toggle(names[i], 190, "Ansicht %s einstellen. Das Spiel dahinter zeigt sie dir." % names[i] if i < GameSettings.CAM_MODES.size() else "Für alle Ansichten: Ball folgen, Reaktion, Kamerawackeln, Heranrücken beim Wuchtschlag.")
+		b.pressed.connect(_on_cam_group.bind(i))
+		row.add_child(b)
+		_cam_btn.append(b)
+	_cam_reset = _button("Zurücksetzen", 210, "Setzt diese Ansicht auf die Standardwerte.")
+	_cam_reset.pressed.connect(_on_cam_reset)
+	var sp := Control.new()
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(sp)
+	row.add_child(_cam_reset)
+	var card := UiTheme.card_light()
+	page.add_child(card)
+	var gbox := VBoxContainer.new()
+	card.add_child(gbox)
+	for i in names.size():
+		var grid := GridContainer.new()
+		grid.columns = 6
+		grid.add_theme_constant_override("h_separation", 14)
+		grid.add_theme_constant_override("v_separation", 6)
+		if i < GameSettings.CAM_MODES.size():
+			for p in GameSettings.CAM_PARAMS:
+				_add_slider(grid, _slider_def("cam_%s_%s" % [GameSettings.CAM_MODES[i][0], p[0]]))
+		else:
+			for g in GameSettings.CAM_GLOBAL:
+				_add_slider(grid, _slider_def(g[0]))
+		gbox.add_child(grid)
+		_cam_grids.append(grid)
+	return page
 
 
 func _slider_def(key: String) -> Array:
-	for s in GameSettings.SLIDERS:
+	for s in GameSettings.all_sliders():
 		if s[0] == key:
 			return s
 	return []
@@ -178,6 +313,7 @@ func _add_slider(grid: GridContainer, s: Array) -> void:
 	var key: String = s[0]
 	var l := UiTheme.label(s[1], 18, UiTheme.INK)
 	l.custom_minimum_size = Vector2(270, 0)
+	l.clip_text = true
 	grid.add_child(l)
 	var sl := HSlider.new()
 	sl.min_value = s[2]
@@ -242,6 +378,22 @@ func _process(_delta: float) -> void:
 			open()
 
 
+## B am Controller schliesst das Menue (Esc und Start macht _process, daher nur Controller hier).
+## LB / RB wechseln die Seite.
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if event is InputEventJoypadButton and event.is_action_pressed("ui_cancel"):
+		close()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("serve_prev") or event.is_action_pressed("serve_next"):
+		_show_tab(posmod(_tab + (1 if event.is_action_pressed("serve_next") else -1), TABS.size()))
+		get_viewport().set_input_as_handled()
+	elif event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_PAGEUP or event.keycode == KEY_PAGEDOWN):
+		_show_tab(posmod(_tab + (1 if event.keycode == KEY_PAGEDOWN else -1), TABS.size()))
+		get_viewport().set_input_as_handled()
+
+
 ## Im Startmenue oeffnet Esc das Menue nicht (dort gibt es den Knopf "Einstellungen").
 func from_title_blocked() -> bool:
 	return match_node != null and match_node.attract
@@ -259,11 +411,12 @@ func open(title_mode := false) -> void:
 		_score.text = "%s %d : %d %s   ·   Satz %d   ·   Sätze %d : %d" % [match_node.TEAM_NAMES[0], match_node.score[0],
 			match_node.score[1], match_node.TEAM_NAMES[1], match_node.set_no, match_node.sets_won[0], match_node.sets_won[1]]
 	_refresh()
-	_cont.grab_focus()
+	_show_tab(0)
 
 
 func close() -> void:
 	visible = false
+	camera_preview.emit("")
 	cfg.save()
 	get_tree().paused = false
 	closed.emit()
@@ -281,11 +434,20 @@ func _refresh() -> void:
 		_libero_buttons[v].set_pressed_no_signal(cfg.libero_auto == v)
 	for v in _replay_buttons:
 		_replay_buttons[v].set_pressed_no_signal(cfg.replays == v)
+	for i in _cam_btn.size():
+		_cam_btn[i].set_pressed_no_signal(i == _cam_group)
+	for i in _cam_grids.size():
+		_cam_grids[i].visible = i == _cam_group
+	for i in _tab_btn.size():
+		_tab_btn[i].set_pressed_no_signal(i == _tab)
+	_adv_box.visible = _adv_btn.button_pressed
 
 
 func _update_value_label(key: String, s: Array) -> void:
 	var v := cfg.get_v(key)
 	var txt := "%d %s" % [int(v), s[5]]
+	if s[5] == "°":
+		txt = "%+d °" % int(v) if int(v) != 0 else "0 °"
 	if key.begins_with("slow_"):
 		txt = "aus" if v <= 0.0 else "%d %% langsamer" % int(v)
 	elif s[5] == "%" and v <= 0.0 and key in GameSettings.AUDIO:
@@ -296,6 +458,7 @@ func _update_value_label(key: String, s: Array) -> void:
 func _on_slider(v: float, key: String) -> void:
 	cfg.set_value(key, v)
 	_refresh()
+	setting_changed.emit(key)
 
 
 func _on_preset(p: String) -> void:
@@ -305,3 +468,57 @@ func _on_preset(p: String) -> void:
 
 func _show_help(t: String) -> void:
 	_help.text = t
+
+
+## Seite wechseln. Auf der Kameraseite sitzt das Menue unten und das Spiel dahinter bleibt sichtbar.
+func _show_tab(i: int) -> void:
+	_tab = i
+	for k in _pages.size():
+		_pages[k].visible = k == i
+	_shade.color.a = 0.0 if i == 2 else 0.55
+	_title.get_parent().visible = i != 2  # Kameraseite: Kopf schmal halten, mehr Spiel im Bild
+	_refresh()
+	camera_preview.emit(GameSettings.CAM_MODES[_cam_group][0] if i == 2 and _cam_group < GameSettings.CAM_MODES.size() else ("view" if i == 2 else ""))
+	_panel.reset_size()
+	_dock.call_deferred()
+	_focus_first.call_deferred()
+
+
+func _focus_first() -> void:
+	if not visible:
+		return
+	if _tab == 2:
+		_cam_btn[_cam_group].grab_focus()
+	elif _tab == 1:
+		_sliders["master"].grab_focus()
+	else:
+		_cont.grab_focus()
+
+
+func _dock() -> void:
+	var vp := get_viewport_rect().size
+	var sz := _panel.size
+	_panel.position = Vector2((vp.x - sz.x) * 0.5, vp.y - sz.y - 18.0 if _tab == 2 else (vp.y - sz.y) * 0.5)
+
+
+func _on_advanced() -> void:
+	_refresh()
+	_panel.reset_size()
+	_dock.call_deferred()
+
+
+func _on_cam_group(i: int) -> void:
+	_cam_group = i
+	_refresh()
+	camera_preview.emit(GameSettings.CAM_MODES[i][0] if i < GameSettings.CAM_MODES.size() else "view")
+	_panel.reset_size()
+	_dock.call_deferred()
+
+
+func _on_cam_reset() -> void:
+	if _cam_group < GameSettings.CAM_MODES.size():
+		cfg.reset_camera("cam_%s_" % GameSettings.CAM_MODES[_cam_group][0])
+	else:
+		for g in GameSettings.CAM_GLOBAL:
+			cfg.values[g[0]] = GameSettings.CAM_DEFAULTS[g[0]]
+	_refresh()

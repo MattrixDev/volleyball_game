@@ -19,9 +19,16 @@ const SLIDERS := [
 	["ai_defense", "Gegner-Abwehr", 0, 100, 5, "", "Wie gut der Gegner deine Angriffe abwehrt"],
 	["ai_block", "Gegner-Block", 0, 100, 5, "", "Wie oft der Gegner dich blockt"],
 	["faults", "Fehler-Strenge", 0, 100, 5, "%", "Wie oft Netzfehler, Doppelberührung und Ball gehalten passieren"],
-	["whistle", "Lautstärke Pfiff", 0, 100, 5, "%", "Wie laut der Schiedsrichter pfeift (0 = aus)"],
-	["sfx", "Lautstärke Ball", 0, 100, 5, "%", "Baggern, Pritschen, Schlag, Block und Aufprall (0 = aus)"],
-	["crowd", "Lautstärke Publikum", 0, 100, 5, "%", "Gemurmel, Jubel und Raunen in der Halle (0 = aus)"],
+	["master", "Gesamtlautstärke", 0, 100, 5, "%", "Alles zusammen: Effekte und später die Musik (0 = stumm)"],
+	["fx_vol", "Effektlautstärke", 0, 100, 5, "%", "Alle Geräusche im Spiel: Ball, Pfiff, Schuhe und Publikum (0 = aus). Einzeln einstellbar unter Erweitert"],
+	["music", "Musiklautstärke", 0, 100, 5, "%", "Noch gibt es keine Musik im Spiel, der Regler ist schon da"],
+	["whistle", "Pfiff", 0, 100, 5, "%", "Wie laut der Schiedsrichter pfeift (0 = aus)"],
+	["sfx", "Ball (Baggern, Pritschen, Netz, Aufprall)", 0, 100, 5, "%", "Lautstärke dieser Ballgeräusche (0 = aus)"],
+	["snd_hit", "Schlag und Aufschlag", 0, 100, 5, "%", "Wie laut Angriff, Aufschlag und Leger knallen (0 = aus)"],
+	["snd_block", "Block", 0, 100, 5, "%", "Wie laut der Ball am Block klingt (0 = aus)"],
+	["snd_shoes", "Schuhquietschen", 0, 100, 5, "%", "Quietschen beim Absprung und Hechten (0 = aus)"],
+	["crowd", "Publikum Grundgeräusch", 0, 100, 5, "%", "Gemurmel in der Halle, das in langen Ballwechseln lauter wird (0 = aus)"],
+	["crowd_fx", "Publikum Jubel und Raunen", 0, 100, 5, "%", "Jubel, Applaus und Raunen nach Punkten (0 = aus)"],
 	["serve_time", "Zeit für den Aufschlag", 8, 30, 1, "s", "So lange hast du nach dem Pfiff Zeit zum Aufschlagen (Regel: 8 Sekunden)"],
 ]
 
@@ -42,8 +49,56 @@ var sets_to_win := 2  # 1 = ein Satz, 2 = Best of 3, 3 = Best of 5
 var libero_auto := false
 var replays := true  # Wiederholung starker Punkte
 
-## Lautstaerken gehoeren zu keiner Stufe.
-const AUDIO := {"whistle": 35, "sfx": 70, "crowd": 60}
+## Lautstaerken gehoeren zu keiner Stufe. Die Einzelregler (Pfiff, Ball, ...) gelten relativ zur
+## Effektlautstaerke, die Effektlautstaerke relativ zur Gesamtlautstaerke.
+const AUDIO := {"master": 100, "fx_vol": 100, "music": 100, "whistle": 35, "sfx": 70, "snd_hit": 100,
+	"snd_block": 100, "snd_shoes": 100, "crowd": 60, "crowd_fx": 100}
+const AUDIO_SIMPLE := ["master", "fx_vol", "music"]
+const AUDIO_ADVANCED := ["whistle", "sfx", "snd_hit", "snd_block", "snd_shoes", "crowd", "crowd_fx"]
+
+## Kamera je Spielablauf. Entfernung und Hoehe in Prozent der Standardansicht, Neigung (Blick hoch
+## oder runter) und Sichtfeld in Grad dazu.
+const CAM_MODES := [["view", "Übersicht"], ["serve", "Aufschlag"], ["attack", "Angriff"], ["block", "Block"], ["replay", "Wiederholung"]]
+const CAM_PARAMS := [
+	["dist", "Entfernung", 50, 160, 5, "%", "Wie weit die Kamera vom Geschehen weg ist (100 = Standard)"],
+	["height", "Höhe", 40, 180, 5, "%", "Wie hoch die Kamera steht (100 = Standard)"],
+	["tilt", "Neigung", -20, 20, 1, "°", "Blick nach oben (+) oder unten (−), 0 = Standard"],
+	["fov", "Sichtfeld", -15, 20, 1, "°", "Weiter Blickwinkel (+) oder näher heranzoomen (−), 0 = Standard"],
+]
+const CAM_GLOBAL := [
+	["cam_follow", "Ball folgen", 0, 200, 10, "%", "Wie stark die Übersichtskamera mit dem Ball mitgeht (0 = steht fest)"],
+	["cam_smooth", "Reaktion", 40, 200, 10, "%", "Wie schnell die Kamera Bewegungen nachzieht (niedrig = weich und träge, hoch = direkt)"],
+	["cam_shake", "Kamerawackeln", 0, 200, 10, "%", "Wie stark die Kamera bei harten Schlägen wackelt (0 = aus)"],
+	["cam_punch", "Heranrücken beim Wuchtschlag", 0, 200, 10, "%", "Wie stark die Kamera bei einem Wuchtschlag kurz heranzoomt (0 = aus)"],
+]
+static var CAM_DEFAULTS := _cam_defaults()
+
+
+static func _cam_defaults() -> Dictionary:
+	var d := {}
+	for m in CAM_MODES:
+		for p in CAM_PARAMS:
+			d["cam_%s_%s" % [m[0], p[0]]] = 0.0 if p[5] == "°" else 100.0
+	for g in CAM_GLOBAL:
+		d[g[0]] = 100.0
+	return d
+
+
+## Alle Regler fuer das Menue, auch die der Kamera (je Ablauf: cam_<ablauf>_<art>).
+static func all_sliders() -> Array:
+	var list: Array = SLIDERS.duplicate()
+	for m in CAM_MODES:
+		for p in CAM_PARAMS:
+			list.append(["cam_%s_%s" % [m[0], p[0]], p[1], p[2], p[3], p[4], p[5], "%s: %s" % [m[1], p[6]]])
+	list.append_array(CAM_GLOBAL)
+	return list
+
+
+## Kamera einer Gruppe auf Standard.
+func reset_camera(prefix: String) -> void:
+	for k in CAM_DEFAULTS:
+		if k.begins_with(prefix):
+			values[k] = CAM_DEFAULTS[k]
 
 
 func _init() -> void:
@@ -55,6 +110,8 @@ func apply_preset(name: String) -> void:
 	var keep := {}
 	for k in AUDIO:
 		keep[k] = float(values.get(k, AUDIO[k]))
+	for k in CAM_DEFAULTS:
+		keep[k] = float(values.get(k, CAM_DEFAULTS[k]))
 	values = (PRESETS[name] as Dictionary).duplicate()
 	values.merge(keep)
 
@@ -77,7 +134,7 @@ func _detect_preset() -> void:
 
 
 func get_v(key: String) -> float:
-	return float(values.get(key, PRESETS["normal"].get(key, AUDIO.get(key, 35))))
+	return float(values.get(key, PRESETS["normal"].get(key, AUDIO.get(key, CAM_DEFAULTS.get(key, 35)))))
 
 
 ## Spieltempo in einer Phase (1 = normal, 0,1 = zehnmal langsamer).
@@ -97,7 +154,7 @@ func save() -> void:
 	cf.set_value("spiel", "libero_auto", libero_auto)
 	cf.set_value("spiel", "wiederholungen", replays)
 	for k in values:
-		cf.set_value("werte", k, values[k])
+		cf.set_value("kamera" if CAM_DEFAULTS.has(k) else "werte", k, values[k])
 	cf.save(PATH)
 
 
@@ -112,6 +169,8 @@ func load_file() -> void:
 	apply_preset(p if PRESETS.has(p) else "normal")
 	for k in AUDIO:
 		values[k] = float(cf.get_value("werte", k, AUDIO[k]))
+	for k in CAM_DEFAULTS:
+		values[k] = float(cf.get_value("kamera", k, CAM_DEFAULTS[k]))
 	if p == "eigene":
 		for s in SLIDERS:
 			values[s[0]] = cf.get_value("werte", s[0], values[s[0]])

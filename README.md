@@ -4,6 +4,26 @@ Hallenvolleyball 6 gegen 6 für den PC, nach den FIVB-Regeln 2025–2028 (Männe
 
 Der Plan mit Spielidee und Phasen steht im [Plan-Dokument](https://claude.ai/code/artifact/7f883522-0f38-4b3f-ad4d-9c40c197b89f).
 
+## Einstellungen: Spiel, Ton, Kamera
+
+Das Einstellungsmenü (Pause oder Startmenü) hat drei Seiten, umschaltbar mit LB / RB (Controller) oder Bild hoch / runter:
+
+- **Spiel**: Schwierigkeit, Regeln, Zeitlupe, Hilfen und Gegner.
+- **Ton**: Gesamt-, Effekt- und Musiklautstärke. Unter „Erweitert“ lässt sich jedes Geräusch einzeln einstellen (Pfiff, Ball, Schlag und Aufschlag, Block, Schuhe, Publikum).
+- **Kamera**: je Spielablauf (Übersicht, Aufschlag, Angriff, Block, Wiederholung) Entfernung, Höhe, Neigung und Sichtfeld, dazu Allgemeines (Ball folgen, Reaktion, Wackeln, Heranrücken). Das Spiel dahinter zeigt die gewählte Ansicht live. Standard sind 100 % und 0 °, „Zurücksetzen“ stellt die Ansicht zurück.
+
+Test: `-- --menu-tab=2:3` öffnet das Menü auf der Kameraseite (Ansicht 3 = Block).
+
+## Debug-Modus
+
+Im Startmenü öffnet die Kachel **Debug** ein Menü zum Testen (für Beta- und Verkaufsversionen in `scripts/debug_mode.gd` `ENABLED = false` setzen, dann ist sie weg).
+
+- **Übungen**: Aufschlag annehmen, Zuspielen, Angreifen, Aufschlagen, Blocken, Abwehren, Ganzer Ballwechsel (ohne Punkte) und Laufen und Bewegungen (frei laufen, Bagger- und Pritschhaltung, Angriffs- und Blocksprung, Hechtsprung, Jubel, Zeitlupe, jeden Spieler steuern). Jede Übung startet sofort und wiederholt sich; oben rechts stehen Wiederholungen, Qualität, Timing in Millisekunden und Ballgeschwindigkeit. Du spielst nur deine Aktion, den Rest macht die KI für dein Team
+- **Einstellungen**: Rotation, Zuspiel auf (Außen, Mitte, Diagonal, Hinterfeld), Tempo, Aufschlagart der KI, Start mit Zuwurf oder echtem Aufschlag, nach deiner Aktion gleich neu oder weiterspielen, eigener Block beim Abwehren
+- **Verein und Karten**: Münzen dazu oder auf 0, alle Karten bekommen oder zurücksetzen, Aufgaben einzeln oder alle erledigen und wieder öffnen, Verein gründen oder löschen
+- Im Spiel öffnet **Y / T** das Debug-Menü (Übung wechseln, zurück ins Hauptmenü)
+- Test über die Kommandozeile: `-- --drill=angriff --drill-opt=lane:mid --drill-opt=start:serve` oder `-- --debug-menu=1`
+
 ## Phase 2j – Zuspiel-Varianten und Block lesen
 
 - Zuspiel (wenn du Zuspieler bist): Steuerkreuz drücken = Zuspiel in diese Richtung (links Außen, rechts Diagonal, oben Mitte, unten Hinterfeld), Pritschen oder Baggern wählt das Spiel. R2 gehalten = schneller Ball (nach Mitte: Schnellangriff), R1 = Setter-Dump, R1 + R2 = Zuspieler schlägt den zweiten Ball selbst (Mittelblocker kann ihn stoppen). Tastatur: Maus = Richtung, Q/Leertaste spielen den Ball, V = R1, E = R2

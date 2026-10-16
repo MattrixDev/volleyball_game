@@ -10,6 +10,9 @@ const VARIANTS := {"bump": 3, "set": 3, "spike": 3, "serve": 3, "tip": 3, "block
 
 var sfx_volume := 70.0  # 0 bis 100, aus den Einstellungen
 var crowd_volume := 60.0
+var cheer_volume := 60.0  # Jubel, Applaus, Raunen
+## Lautstaerke je Geraeuschart relativ zu sfx_volume (0 bis 1), von main.gd aus den Einstellungen gesetzt.
+var kind_gain := {}
 var excitement := 0.0  # 0..1, laesst das Gemurmel in langen Ballwechseln anschwellen
 
 var _sounds := {}  # Art -> Array von Streams
@@ -64,25 +67,26 @@ func _db(vol: float, gain: float) -> float:
 ## Kurzer Ballkontakt; strength 0..1 macht ihn lauter und etwas tiefer.
 func play(name: String, strength := 0.6, pitch := 0.0) -> void:
 	var st := _pick(name)
-	if st == null or sfx_volume <= 0.0:
+	var gain: float = kind_gain.get(name, 1.0)
+	if st == null or sfx_volume <= 0.0 or gain <= 0.0:
 		return
 	var p: AudioStreamPlayer = _pool[_next]
 	_next = (_next + 1) % _pool.size()
 	p.stream = st
-	p.volume_db = _db(sfx_volume, lerpf(0.45, 1.0, clampf(strength, 0.0, 1.0)))
+	p.volume_db = _db(sfx_volume, lerpf(0.45, 1.0, clampf(strength, 0.0, 1.0)) * gain)
 	p.pitch_scale = pitch if pitch > 0.0 else _rng.randf_range(0.96, 1.04)
 	p.play()
 
 
 ## Publikum: "cheer" (Jubel), "groan" (Raunen), "applause" (hoeflicher Applaus).
 func crowd(name: String, strength := 1.0) -> void:
-	if crowd_volume <= 0.0:
+	if cheer_volume <= 0.0:
 		return
 	var st := _pick("crowd_" + name)
 	if st == null:
 		return
 	_crowd.stream = st
-	_crowd.volume_db = _db(crowd_volume, clampf(strength, 0.2, 1.0))
+	_crowd.volume_db = _db(cheer_volume, clampf(strength, 0.2, 1.0))
 	_crowd.pitch_scale = _rng.randf_range(0.96, 1.04)
 	_crowd.play()
 
