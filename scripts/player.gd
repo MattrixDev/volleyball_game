@@ -43,6 +43,10 @@ var look_target := Vector3.ZERO
 var alert := false  # Ballwechsel laeuft: Bereitschaftshaltung
 var anim_kind := ""  # pass, dig, set, attack, free, serve, serve_hold
 var anim_tech := "bump"
+## Technik-Variante (Technique, vom Spiel gesetzt), z. B. sprawl, dive_side, cross; leer = normale Bewegung.
+var anim_style := ""
+## Spielzeit, bis zu der der Spieler am Boden liegt oder aufsteht (vom Spiel gesetzt, laeuft nicht).
+var down_until := -10.0
 var anim_t := -10.0  # Zeitpunkt der Ballberuehrung
 var prep := ""  # gehaltene Taste: bump oder over (Vorbereitungshaltung)
 var celebrate_until := -10.0
@@ -211,6 +215,8 @@ func reset_state() -> void:
 	block_pose = false
 	lean = 0.0
 	anim_kind = ""
+	anim_style = ""
+	down_until = -10.0
 	anim_t = -10.0
 	contact_on = false
 	_reach_off = Vector3.ZERO

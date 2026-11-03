@@ -90,6 +90,12 @@ class Opp:
 	var no_reach := false  # KI-Abwehr kommt nicht mehr rechtzeitig hin
 	var start_pos := Vector3.ZERO
 	var max_run := 0.0
+	var style := ""  # Technik (Technique), z. B. sprawl, dive_side, overhead, cross
+	var style_locked := false  # kurz vor dem Kontakt steht die Technik fest
+	var slack := 0.0  # Zuspiel: so viel Weg (m) hatte der Zuspieler uebrig, als der Ball kam
+	var emergency := false  # Angriff aus schlechter Lage: weniger Kraft
+	var pressure := 0.0  # Annahme/Abwehr: noetiger Weg / moeglicher Weg bei der Planung
+	var move_dir := Vector3.ZERO  # ... und in welche Richtung er dafuer musste
 
 
 var phase := Phase.INTRO
@@ -151,6 +157,7 @@ var read_hit := [false, false]  # Block richtig gelesen: mehr Kill-Chance
 var read_z := 0.0  # Netzposition (z), auf die der Mensch seinen Mittelblocker gestellt hat
 var _stick_lock_until := -1.0  # nach dem Wechsel vom Blocker zum Abwehrspieler: Stick kurz gesperrt
 var _need_neutral := false  # ... bis der linke Stick einmal losgelassen wurde
+var set_q := [Q.GOOD, Q.GOOD]  # Qualitaet des letzten Zuspiels je Team (fuer den Notangriff)
 var set_tempo := ["", ""]  # Tempo des letzten Zuspiels je Team (high, fast, quick)
 var libero_set_front := [false, false]  # Libero hat vor der 3-m-Linie gepritscht
 var trainer_wanted := false
@@ -539,6 +546,17 @@ func server() -> VPlayer:
 
 func flat_dist(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## Timing-Fehler als Richtung: -1 = ganz zu frueh, 0 = genau, +1 = ganz zu spaet (Rand des Fensters).
+## Daraus folgt, wohin ein ungenauer Ball geht: kein Wuerfeln, sondern aus dem eigenen Timing.
+func _err_dir(e: float, kind: String, scale := 1.0) -> float:
+	return clampf(e / (windows(kind)[2] * scale), -1.0, 1.0)
+
+
+## Liegt nach Hecht, Sprawl oder Pancake noch am Boden bzw. steht gerade auf.
+func is_down(pl: VPlayer) -> bool:
+	return pl.down_until > clock
 
 
 func windows(kind: String) -> Array:
@@ -1585,11 +1603,11 @@ func _try_team(team: int) -> bool:
 	var pl: VPlayer = null
 	if kind == "attack":
 		pl = _chosen_hitter(team)
-		if pl == excluded:
+		if pl == excluded or (pl != null and is_down(pl)):
 			pl = null
 	elif kind == "set":
 		var s := player_by_role(team, "S")
-		if s != null and s != excluded and flat_dist(s.position, p) <= s.run_speed * tc + 0.8:
+		if s != null and s != excluded and not is_down(s) and flat_dist(s.position, p) <= s.run_speed * tc + 0.8:
 			pl = s
 	if pl == null and kind == "pass" and last_action == "serve":
 		pl = _receiver(team, p, excluded)
@@ -1607,12 +1625,35 @@ func _try_team(team: int) -> bool:
 				tc = tc2
 				p = Ballistics.pos_at(ball.position, ball_vel, tc, ball_g)
 
+	# Harter Ball auf Kopfhoehe direkt auf den Abwehrspieler: Abwehr ueber dem Kopf (mit den Haenden),
+	# getroffen dort, wo der Ball am Spieler vorbeifliegt, statt erst in Bagger-Hoehe.
+	var force_style := ""
+	if kind == "dig" and ball_vel.length() > 14.0:
+		var head := _overhead_point(pl)
+		if not head.is_empty():
+			tc = head.t
+			p = head.p
+			force_style = "overhead"
+
 	var o := Opp.new()
 	o.team = team
 	o.player = pl
 	o.kind = kind
 	o.t = clock + tc
 	o.point = p
+	if force_style != "":
+		o.style = force_style
+		o.style_locked = true
+	if kind == "set":
+		o.slack = pl.run_speed * tc - flat_dist(pl.position, p)
+	if kind in ["pass", "dig", "free"]:
+		var sp0 := _stand_pos(o, Vector3(p.x, 0.0, p.z))
+		o.pressure = flat_dist(pl.position, sp0) / (pl.run_speed * maxf(tc, 0.05))
+		o.move_dir = Vector3(sp0.x - pl.position.x, 0.0, sp0.z - pl.position.z)
+	if kind == "attack":
+		# Notangriff: schlechtes Zuspiel oder Ball zu weit weg vom Netz -> kein voller Schlag.
+		var far := absf(p.x) > (4.6 if not is_front_row(pl) else 3.2)
+		o.emergency = set_q[team] == Q.WEAK or far
 	o.speed = Vector3(ball_vel.x, ball_vel.y - ball_g * tc, ball_vel.z).length()
 	o.human = team == human_team and (drill == null or drill.human_does(kind))
 	# Ein Flatterball ist schwer zu lesen: kleineres Timing-Fenster bei der Annahme.
@@ -1642,6 +1683,7 @@ func _try_team(team: int) -> bool:
 	if kind == "attack":
 		pl.has_jumped = false
 		pl.lean = 0.0
+		_block_att = pl
 		_assign_block(1 - team, p, o.t)
 	else:
 		blockers[1 - team] = []
@@ -1694,10 +1736,48 @@ func _ai_dig_limits(o: Opp, tc: float) -> void:
 
 
 var _hitter := [null, null]
+var _block_att: VPlayer = null  # Angreifer, gegen den gerade der Block gestellt wird
 
 
 func _chosen_hitter(team: int) -> VPlayer:
 	return _hitter[team]
+
+
+## Fliegt der Ball auf Kopf- bis Reichhoehe dicht am Spieler vorbei? Dann {t, p}, sonst leer.
+func _overhead_point(pl: VPlayer) -> Dictionary:
+	var t := 0.05
+	var best := {}
+	var bd := 0.45
+	while t < 1.2:
+		var q := Ballistics.pos_at(ball.position, ball_vel, t, ball_g)
+		if q.y < 1.2:
+			break
+		var d := flat_dist(q, pl.position)
+		if d < bd and q.y >= 1.35 and q.y <= 2.3 and signf(q.x) == signf(pl.position.x):
+			bd = d
+			best = {"t": t, "p": q}
+		t += 0.02
+	return best
+
+
+## Annahme, Abwehr, freier Ball: Technik aus der Lage (siehe Technique.defense_style).
+func _defense_style(o: Opp) -> String:
+	var pl := o.player
+	var goal := _stand_pos(o, Vector3(o.point.x, 0.0, o.point.z))
+	var dv := Vector3(goal.x - pl.position.x, 0.0, goal.z - pl.position.z)
+	var t_left := maxf(0.0, o.t - clock)
+	var short := dv.length() - pl.run_speed * maxf(0.0, t_left - 0.05)
+	var to_net := -side_of(o.team)
+	var dir := o.move_dir if o.move_dir.length() > 0.2 else dv  # Richtung, in die er los musste
+	var hard := hard_ball(o.speed)
+	return Technique.defense_style(short, dir.x * to_net, dir.z, t_left, hard, o.kind == "dig", o.pressure)
+
+
+## Angriff: Technik aus Schlag, Zuspiel-Tempo, Bahn und Lage.
+func _attack_style(o: Opp) -> String:
+	var info := attack_shot(o.team, o.point, o.rs, o.power)
+	var lateral: float = (info.target as Vector3).z - o.point.z
+	return Technique.attack_style(info.style, o.power, lateral, set_tempo[o.team], o.player.lane, o.emergency)
 
 
 ## Annahme nach dem Aufschlag: Naehe zaehlt, aber der Libero nimmt bevorzugt an,
@@ -1706,7 +1786,7 @@ func _receiver(team: int, p: Vector3, excluded: VPlayer) -> VPlayer:
 	var best: VPlayer = null
 	var bs := 1e9
 	for pl in players[team]:
-		if pl == excluded:
+		if pl == excluded or is_down(pl):
 			continue
 		var sc := flat_dist(pl.position, p) * _receiver_weight(pl)
 		if sc < bs:
@@ -1719,7 +1799,7 @@ func _nearest(team: int, p: Vector3, excluded: VPlayer, no_libero: bool) -> VPla
 	var best: VPlayer = null
 	var bd := 1e9
 	for pl in players[team]:
-		if pl == excluded:
+		if pl == excluded or is_down(pl):
 			continue
 		if no_libero and pl.role == "L":
 			continue
@@ -1739,10 +1819,13 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 		return
 	var front: Array = []
 	for pl in players[def]:
-		if is_front_row(pl):
+		if is_front_row(pl) and not is_down(pl):
 			front.append(pl)
+	if front.is_empty():
+		blockers[def] = []
+		return
 	var mb := _lane_player(def, "mid")
-	if mb == null:
+	if mb == null or is_down(mb):
 		mb = front[0]
 	var list: Array = []
 	var dirs: Array = []
@@ -1803,6 +1886,17 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 	blockers[def] = list
 	block_dirs[def] = dirs
 	block_err[def] = rng.randf_range(-0.4, 0.4)
+	# Block-Technik je Blocker: kommt er rechtzeitig hin, reicht er ueber den Ball?
+	var att: VPlayer = _block_att
+	var att_top := (att.jump_v0 * att.jump_v0 / (2.0 * G) + VPlayer.SPIKE_REACH + att.reach_add) if att != null else 3.3
+	for i in list.size():
+		var b: VPlayer = list[i]
+		var goal_z := p.z if i == 0 else p.z + float(dirs[i]) * 0.85
+		var t_go := maxf(0.05, b.block_jump_at - clock)
+		var late: bool = commit_miss[def] or absf(b.position.z - goal_z) > 4.5 * _speed_k(b) * t_go + 0.3
+		var top := b.jump_v0 * b.jump_v0 / (2.0 * G) + VPlayer.BLOCK_REACH + b.reach_add
+		b.anim_style = Technique.block_style(committed and b == mb, late, att_top - top)
+		stats["Block " + b.anim_style] = stats.get("Block " + b.anim_style, 0) + 1
 
 
 ## Schlaegt der Mensch auf? (Im Debug-Modus kann die KI fuer dein Team aufschlagen.)
@@ -2115,6 +2209,17 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		"attack":
 			reach = 1.0
 	var horiz := flat_dist(pl.position, o.point)
+	var defense := o.kind in ["pass", "dig", "free"]
+	if defense:
+		# Die Technik bestimmt die Reichweite: wer zu weit weg ist, muss sich strecken oder hechten.
+		if not o.style_locked or horiz > Technique.reach(o.style):
+			var st := _defense_style(o)
+			if Technique.reach(st) > Technique.reach(o.style):
+				o.style = st
+		var cap := {"pass": 1.25, "free": 1.4, "dig": 2.0}[o.kind] as float
+		reach = minf(Technique.reach(o.style), cap) if o.style != "" else 0.75
+		reach = maxf(reach, 0.75)
+		pl.anim_style = o.style
 	if o.no_reach:
 		pl.dive()
 	if q == Q.MISS or horiz > reach or o.no_reach:
@@ -2128,15 +2233,19 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		return
 	# Pritschen: genau, aber nur bei Baellen, die nicht zu hart kommen.
 	if o.kind != "attack" and o.tech == "over":
+		# Fehler nur aus dem eigenen Spiel: einen sehr harten Ball pritschen und nicht genau treffen
+		# = gehalten; einen Ball weit neben dem Timing pritschen = Doppelberuehrung. Baggern ist sicher.
+		var fk := cfg.unit("faults")
 		if o.speed > OVER_RISKY:
-			if rng.randf() < 0.35 * cfg.unit("faults"):
-				_fault(o, "Ball gehalten")
+			if fk > 0.0 and q != Q.PERFECT and o.speed > OVER_RISKY + 6.0 * (1.0 - fk):
+				_fault(o, "Ball gehalten (zu hart zum Pritschen)")
 				return
 			q = mini(q + 2, Q.WEAK)
 		elif o.speed > OVER_OK:
 			q = mini(q + 1, Q.WEAK)
-		if o.kind == "set" and q == Q.WEAK and rng.randf() < 0.12 * cfg.unit("faults"):
-			_fault(o, "Doppelberührung")
+		var w := windows(o.kind)
+		if o.kind == "set" and q == Q.WEAK and fk > 0.0 and absf(e) > lerpf(w[1], w[2], 0.75 + 0.25 * (1.0 - fk)) * o.win_scale:
+			_fault(o, "Doppelberührung (Timing)")
 			return
 	# Regeln: Hinterspieler duerfen nicht aus der Vorderzone angreifen, und nach einem Libero-
 	# Zuspiel (Pritschen vor der 3-m-Linie) darf nicht ueber Netzhoehe angegriffen werden.
@@ -2151,8 +2260,17 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 			return
 	elif o.kind == "set" and pl.role == "L" and o.tech == "over" and absf(o.point.x) < 3.0:
 		libero_set_front[o.team] = true
-	if (o.kind == "pass" or o.kind == "dig" or o.kind == "free") and horiz > 0.8:
-		pl.dive()
+	if defense:
+		# Folgen der Technik: nach Hecht oder Sprawl liegt der Spieler kurz, der Ball wird ungenauer.
+		if Technique.goes_down(o.style):
+			pl.dive()
+		pl.down_until = clock + Technique.recovery(o.style)
+		q = maxi(q, Technique.best_quality(o.style))
+		if o.style != "":
+			stats["Technik " + o.style] = stats.get("Technik " + o.style, 0) + 1
+		if trace or autoplay:
+			var bk := "Druck %s %.1f" % [o.kind, minf(floorf(o.pressure * 10.0) / 10.0, 1.2)]
+			stats[bk] = stats.get(bk, 0) + 1
 	if o.kind == "dig" and last_touch_team != o.team:
 		var dk: String = "Abgewehrt nach " + ("Block" if last_action == "block" else ("Angriff" if last_action == "attack" else last_action))
 		stats[dk] = stats.get(dk, 0) + 1
@@ -2225,7 +2343,11 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	if o.tech == "over" and o.speed <= OVER_OK:
 		spread *= 0.6
 	spread *= clampf(1.0 - 0.25 * _touch_skill(o.player, o.kind), 0.6, 1.4)
-	var off := Vector2.from_angle(rng.randf() * TAU) * rng.randf() * spread
+	# Ungenau, aber nicht zufaellig: zu frueh = Ball naeher ans Netz, zu spaet = weiter weg; seitlich
+	# dorthin, wohin die Arme gekippt waren (Ball neben dem Koerper getroffen).
+	var ed := _err_dir(e, o.kind, o.win_scale)
+	var side := clampf(team_local(o.team, o.point).y - team_local(o.team, o.player.position).y, -0.6, 0.6) / 0.6
+	var off := Vector2(ed * spread * 0.6, side * spread * 0.8)
 	var target := court_pos(o.team, Vector2(d + off.x, l + off.y))
 	target.y = H_SET
 	var dist := flat_dist(target, ball.position)
@@ -2251,6 +2373,20 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 		if o.human:
 			popup(setter, "Nur hoher Ball" if bump_set else "Ball zu schlecht", Q_COLOR[Q.WEAK])
 		tempo = "high"
+	# Folgen der Annahme: Wer nicht der Zuspieler ist oder erst im letzten Moment ankommt, spielt
+	# nur einen hohen Ball nach aussen; wer gerade noch angekommen ist, schafft keinen Schnellangriff.
+	var out_of_system := setter.role != "S" or o.slack < 0.2
+	if out_of_system and tempo in ["fast", "quick"]:
+		if o.human:
+			popup(setter, "Keine Zeit: hoher Ball", Q_COLOR[Q.WEAK])
+		tempo = "high"
+	elif o.slack < 0.6 and tempo == "quick":
+		if o.human:
+			popup(setter, "Zu spät für Schnellangriff", Q_COLOR[Q.WEAK])
+		tempo = "fast"
+	if out_of_system and lane_choice == "mid":
+		lane_choice = "left"
+	set_q[o.team] = q
 	if (tempo == "dump" or tempo == "attack") and not _can_dump(o):
 		if o.human:
 			popup(setter, "Dump nicht möglich" if tempo == "dump" else "Schlag nicht möglich", Q_COLOR[Q.WEAK])
@@ -2304,15 +2440,63 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	spread *= clampf(1.0 - 0.3 * pf(o.player, "setting"), 0.6, 1.45) * (0.75 if ptrait(o.player, "spielmacher") else 1.0)
 	if bump_set:
 		spread = spread * 1.8 + 0.2
-	l += rng.randf_range(-spread, spread)
-	d += rng.randf_range(-spread * 0.5, spread)
+	# Ungenau aus dem Timing: zu frueh = enger ans Netz und kuerzer, zu spaet = weiter weg und laenger.
+	var sed := _err_dir(e, "set", o.win_scale)
+	l += sed * spread * signf(l if absf(l) > 0.1 else 1.0)
+	d += sed * spread * 0.75
 	if q != Q.WEAK:
 		l = clampf(l, -4.1, 4.1)
+	if d < 0.45 and _joust(o, hitter, l):
+		return
 	var target := court_pos(o.team, Vector2(maxf(d, 0.3), l))
 	target.y = H_ATTACK + 0.1
 	ball_vel = Ballistics.launch_with_time(ball.position, target, T)
 	_hitter[o.team] = hitter
 	last_action = "set"
+	# Rueckwaerts-Zuspiel: Ziel liegt hinter dem Zuspieler (er schaut zur linken Seite).
+	var behind_setter := team_local(o.team, target).y > sl.y + 1.0
+	var sst := "bump" if bump_set else ("back" if behind_setter else o.style)
+	setter.anim_style = sst
+	stats["Zuspiel-Technik " + (sst if sst != "" else "stand")] = stats.get("Zuspiel-Technik " + (sst if sst != "" else "stand"), 0) + 1
+
+
+## Zuspiel zu eng ans Netz: Angreifer und gegnerischer Blocker springen gleichzeitig zum Ball
+## (Netzkampf). Wer hoeher hinkommt, drueckt ihn auf die andere Seite. Kein Wuerfeln: Sprungkraft,
+## Groesse und Reichweite entscheiden, bei Gleichstand der Blocker (er steht schon am Netz).
+func _joust(o: Opp, hitter: VPlayer, l: float) -> bool:
+	if hitter == null or not is_front_row(hitter):
+		return false
+	var z := court_pos(o.team, Vector2(0.4, l)).z
+	var rival: VPlayer = null
+	for pl in players[1 - o.team]:
+		if is_front_row(pl) and not is_down(pl) and (rival == null or absf(pl.position.z - z) < absf(rival.position.z - z)):
+			rival = pl
+	if rival == null or absf(rival.position.z - z) > 2.5:
+		return false
+	var reach_h := hitter.jump_v0 * hitter.jump_v0 / (2.0 * G) + VPlayer.SPIKE_REACH + hitter.reach_add + 0.04 * pf(hitter, "power")
+	var reach_r := rival.jump_v0 * rival.jump_v0 / (2.0 * G) + VPlayer.BLOCK_REACH + rival.reach_add + 0.04 * pf(rival, "block")
+	var winner := hitter if reach_h > reach_r + 0.02 else rival
+	var loser_team := 1 - winner.team
+	hitter.jump()
+	rival.jump()
+	hitter.anim_style = "joust"
+	rival.anim_style = "joust"
+	popup(winner, "Netzkampf gewonnen!", Q_COLOR[Q.GOOD])
+	stats["Netzkampf"] = stats.get("Netzkampf", 0) + 1
+	var from := Vector3(side_of(o.team) * 0.15, NET_H + 0.35, z)
+	var target := court_pos(loser_team, Vector2(1.6, 0.0))
+	target.z = clampf(z, -HALF_W + 0.5, HALF_W - 0.5)
+	target.y = R
+	ball.position = from
+	ball_vel = Ballistics.launch_with_time(from, target, 0.75)
+	possession = loser_team
+	touches = 0
+	last_touch_team = winner.team
+	last_toucher = null
+	last_action = "joust"
+	_hitter[o.team] = null
+	set_q[o.team] = Q.WEAK
+	return true
 
 
 ## Dump nur vom Zuspieler selbst: vorn am Netz, kein Libero, Ball nicht schlecht.
@@ -2434,10 +2618,10 @@ func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VP
 	var h := _lane_player(team, lane)
 	if h == null and lane == "right":
 		h = _lane_player(team, "back")  # kein Diagonalangreifer vorn: Hinterfeldangriff
-	if h == null or h == setter:
+	if h == null or h == setter or is_down(h):
 		for alt in ["left", "right", "mid", "back"]:
 			var c := _lane_player(team, alt)
-			if c != null and c != setter:
+			if c != null and c != setter and not is_down(c):
 				return c
 	return h
 
@@ -2507,10 +2691,16 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	var d: float = info.d
 	var l: float = info.l
 	var u: float = info.u
+	if o.emergency:
+		# Notangriff: Ball zu weit weg oder schlecht zugespielt, der Angreifer kommt nicht voll durch.
+		u *= 0.72
+		stats["Notangriff"] = stats.get("Notangriff", 0) + 1
+		if o.human:
+			popup(o.player, "Notangriff", Q_COLOR[Q.WEAK])
 	# Super-Zone: perfekt getimt und genau im schmalen Bereich losgelassen. Die KI schafft
 	# das bei guten Zuspielen gelegentlich auch.
 	var sup := false
-	if q == Q.PERFECT and (info.style == "spike" or info.style == "topspin"):
+	if q == Q.PERFECT and not o.emergency and (info.style == "spike" or info.style == "topspin"):
 		var wide := 0.03 if ptrait(o.player, "kraftpaket") else 0.0
 		if o.human:
 			sup = o.over >= SUPER_LO - wide and o.over <= SUPER_HI + wide
@@ -2529,22 +2719,27 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 		d += -x * 45.0
 	else:
 		d -= x * 25.0
+	# Ungenau aus dem Timing: zu frueh zieht der Ball diagonal, zu spaet geht er die Linie entlang.
+	var aed := _err_dir(e, "attack", o.win_scale)
+	var hl0 := team_local(o.team, bp).y
+	var line_dir := signf(hl0) if absf(hl0) > 0.5 else 1.0
 	if q == Q.GOOD:
 		u *= 0.88
-		l += rng.randf_range(-0.8, 0.8)
+		l += aed * 0.8 * line_dir
 	elif q == Q.WEAK:
 		u *= 0.62
-		l += rng.randf_range(-1.5, 1.5)
-		d += rng.randf_range(-1.0, 1.0)
+		l += aed * 1.5 * line_dir
+		d -= aed * 1.0
 	if o.over > OVERCHARGE:
+		# Ueberzogen: der Ball geht lang und nach aussen.
 		var k := (o.over - OVERCHARGE) * 4.0
-		l += rng.randf_range(-k, k)
-		d += rng.randf_range(0.0, k)
-	l += rng.randf_range(-0.3, 0.3) * o.rs.length()
+		l += k * 0.6 * line_dir
+		d += k
 	var target := court_pos(o.team, Vector2(-d, l))
 	target.y = R
 	var vel := Ballistics.launch_with_speed(bp, target, u, g)
-	if q != Q.WEAK or rng.randf() < 1.0 - 0.4 * cfg.unit("faults"):
+	# Ein schwacher, zu spaeter Schlag geht ins Netz; sonst passt der Angreifer die Flugbahn an.
+	if not (q == Q.WEAK and e > 0.0 and cfg.unit("faults") > 0.0):
 		# Gute Angreifer passen die Flugbahn an, damit der Ball ueber das Netz geht.
 		while _net_cross_y(bp, vel) < NET_H + 0.15 and d < 8.6:
 			d += 0.5
@@ -2568,6 +2763,9 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	last_super = sup
 	_slow_tail_until = clock + 0.12
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
+	var ast := _attack_style(o)
+	o.player.anim_style = ast
+	stats["Angriff " + ast] = stats.get("Angriff " + ast, 0) + 1
 	if sup:
 		stats["Wuchtschlag"] = stats.get("Wuchtschlag", 0) + 1
 		mstat[o.team]["wucht"] = mstat[o.team].get("wucht", 0) + 1
@@ -2719,7 +2917,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	var pl := hit_pl
 	var top2: float = pl.block_top()
 	# Ueber das Netz greifen ist stark, aber riskant.
-	if pl.hand_reach > 0.0 and rng.randf() < 0.1 * cfg.unit("faults"):
+	# Ueber das Netz gegriffen und schon auf dem Weg nach unten (zu frueh gesprungen): Netzberuehrung.
+	if pl.hand_reach > 0.0 and pl.jump_v < -1.5 and cfg.unit("faults") > 0.0:
 		popup(pl, "Netz!", Q_COLOR[Q.MISS])
 		last_touch_team = def
 		_end_rally(1 - def, "Netzberührung beim Block")
@@ -2744,6 +2943,10 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		stuff_p *= 0.6
 	if pl.jump_h < 0.6:
 		stuff_p *= 0.4
+	if pl.anim_style == "soft":
+		stuff_p *= 0.5  # Haende schraeg nach hinten: bremst den Ball, drueckt ihn aber selten zurueck
+	elif pl.anim_style == "late":
+		stuff_p *= 0.6
 	var out_p := 0.85 if last_shot_style == "blockout" else 0.4
 	if absf(hit_dz) > 0.32 and rng.randf() < out_p:
 		# Ball streift die Aussenhand: springt seitlich weg, oft ins Aus (Block-Aus).
@@ -2824,6 +3027,8 @@ func _on_ball_landed() -> void:
 					reason = "Gelegt!"
 				"block":
 					reason = "Block-Punkt!"
+				"joust":
+					reason = "Netzkampf!"
 				_:
 					reason = "Ball im Feld"
 	elif last_action == "toss":
@@ -3133,6 +3338,18 @@ func _update_players(delta: float) -> void:
 	if opp != null and not opp.done:
 		opp.player.anim_kind = opp.kind
 		opp.player.anim_tech = opp.tech
+		# Technik aus der Lage; kurz vor dem Kontakt steht sie fest (die Bewegung laeuft schon).
+		if not opp.style_locked:
+			if opp.kind in ["pass", "dig", "free"]:
+				opp.style = _defense_style(opp)
+			elif opp.kind == "attack":
+				opp.style = _attack_style(opp)
+			elif opp.kind == "set":
+				var over_ok := opp.speed <= OVER_OK and not (opp.pending and opp.tech != "over")
+				opp.style = Technique.set_style(opp.player.role == "S", pass_quality, opp.slack, over_ok)
+			if opp.t - clock < 0.3 and opp.kind != "attack":
+				opp.style_locked = true
+		opp.player.anim_style = opp.style
 		# Zuspiel, bevor gedrueckt ist: der Zuspieler geht schon in die Pritschhaltung, wenn der
 		# Ball pritschbar ist (wie im Spiel: die Haende sind frueh oben). Gebaggert wird nur, wenn es so gedrueckt wird.
 		# (Auch kurz nach dem geplanten Treffpunkt noch, sonst springen die Haende fuer ein, zwei Takte in
@@ -3156,6 +3373,8 @@ func _update_players(delta: float) -> void:
 		sv.contact_on = phase == Phase.TOSS
 	for t in 2:
 		for pl in players[t]:
+			if is_down(pl):
+				pl.target = pl.position  # liegt noch am Boden oder steht gerade auf
 			pl.urgent = opp != null and not opp.done and pl == opp.player
 			if not blockers[t].is_empty() and pl in blockers[t]:
 				pl.urgent = true
