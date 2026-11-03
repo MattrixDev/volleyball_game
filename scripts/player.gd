@@ -393,10 +393,14 @@ func _animate(delta: float) -> void:
 
 	_stiff = 20.0
 	if _was_dive and dive_timer <= 0.0:
-		_getup = GETUP_T
+		# Das Spiel kann den Spieler laenger am Boden halten (down_until): solange liegt er,
+		# dann steht er in der ueblichen Zeit auf.
+		_getup_len = maxf(GETUP_T, _down_until() - now)
+		_getup = _getup_len
 	_was_dive = dive_timer > 0.0
 	if _getup > 0.0:
-		_getup = maxf(_getup - delta * (1.0 + 0.8 * _run_amt), 0.0)
+		var hold := _down_until() > now + GETUP_T
+		_getup = maxf(_getup - delta * (1.0 if hold else 1.0 + 0.8 * _run_amt), 0.0)
 	_dt_pose = delta
 	var p := _target_pose()
 	if dive_timer <= 0.0 and _getup <= 0.0:
@@ -876,6 +880,18 @@ func _contact_ik() -> void:
 		# Haende ineinander: Finger zeigen nach vorn unten, Handflaechen zueinander, Daumen parallel.
 		var fd := f * 0.75 - up * 0.65
 		hands = {"l": [fd, r + up * 0.3], "r": [fd, -r + up * 0.3]}
+		match _astyle():
+			"overhead":
+				# Abwehr ueber dem Kopf: beide Haende offen hinter dem Ball, Handflaechen zum Ball
+				var at := b - f * 0.11
+				tg = {"l": at - r * 0.09, "r": at + r * 0.09}
+				hands = {"l": [up + f * 0.25 - r * 0.2, f], "r": [up + f * 0.25 + r * 0.2, f]}
+			"one_arm":
+				# Einarmig: nur der Arm zur Ballseite, der Ball springt vom Unterarm
+				var sd1 := "r" if _ball_side() > 0.0 else "l"
+				var out := r if sd1 == "r" else -r
+				tg = {sd1: b - up * 0.08}
+				hands = {sd1: [f * 0.5 + out * 0.6 - up * 0.2, up]}
 	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
 		# Pritschen nach Lehrbild und Sportwissenschaft: frueh die Pritschhaltung (Handgelenke etwa
 		# 20 cm vor und 10 cm ueber der Stirn, Ellbogen gebeugt und leicht ausserhalb der Schultern,
@@ -1468,6 +1484,73 @@ func _apply_mocap(p: Dictionary, mj: Array, chest_w: float) -> void:
 		p["chest"] = _qlerp(p.get("chest", Vector3.ZERO), m["chest"], w * chest_w)
 
 
+## Technik-Variante, die das Spiel fuer diesen Ballkontakt gewaehlt hat (siehe
+## playtester-feedback/varianz-plan.md). Fehlt das Feld oder ist es leer, bleibt die bisherige
+## Bewegung. Gelesen ueber get(), damit dieser Zweig auch ohne die Spiellogik laeuft.
+func _astyle() -> String:
+	var st = get("anim_style")
+	return st if st is String else ""
+
+
+## Bis zu dieser Spielzeit liegt der Spieler am Boden oder steht gerade auf (0 = nicht).
+func _down_until() -> float:
+	var d = get("down_until")
+	return float(d) if d is float or d is int else 0.0
+
+
+## Liegt der Ball rechts (+1) oder links (-1) vom Koerper?
+func _ball_side() -> float:
+	var off := (contact_pt - position).rotated(Vector3.UP, -_yaw)
+	return 1.0 if off.x >= 0.0 else -1.0
+
+
+## Bagger-Varianten (V1): veraendern die Grundhaltung je nach Lage des Balls.
+func _style_dig(p: Dictionary, st: String, rel: float) -> void:
+	var s := _ball_side()
+	var lead := "r" if s > 0.0 else "l"
+	var trail := "l" if lead == "r" else "r"
+	var add := func(k: String, v: Vector3) -> void:
+		p[k] = (p.get(k, Vector3.ZERO) as Vector3) + v
+	var drive := smoothstep(-0.05, 0.2, rel)
+	match st:
+		"low":
+			# Ganz tief: ein Knie fast am Boden, das andere Bein weit vorn, Oberkoerper ueber dem Ball
+			p["hips"] = Vector3(-0.55, 0.0, 0.0)
+			p["chest"] = Vector3(-0.5 + 0.15 * drive, 0.0, 0.0)
+			_leg(p, lead, 1.6, 1.85, 0.25)
+			_leg(p, trail, 0.25, 2.05, 0.12)
+			p["an_" + trail] = Vector3(0.9, 0.0, 0.0)  # Zehen aufgestellt
+		"side":
+			# Ball neben dem Koerper: Schulter zur Ballseite tiefer, Rumpf dreht zum Ball, damit die
+			# Plattform trotzdem zum Ziel zeigt
+			add.call("chest", Vector3(0.0, -0.3 * s, -0.32 * s))
+			add.call("hips", Vector3(0.0, -0.15 * s, 0.0))
+		"one_arm":
+			_arm(p, lead, 1.25, 0.85, 0.05, 0.0)
+			_arm(p, trail, 0.35, 0.3, 0.6)
+			add.call("chest", Vector3(-0.2, -0.25 * s, -0.4 * s))
+			add.call("hips", Vector3(-0.1, 0.0, -0.1 * s))
+		"overhead":
+			# Harter Ball auf Kopfhoehe: aufrecht, Haende vor und ueber dem Kopf
+			p["hips"] = Vector3(-0.1, 0.0, 0.0)
+			p["chest"] = Vector3(0.05, 0.0, 0.0)
+			p["head"] = Vector3(-0.25, 0.0, 0.0)
+			_arm(p, "l", 2.55, 0.35, 0.55, -0.4)
+			_arm(p, "r", 2.55, 0.35, 0.55, -0.4)
+			_leg(p, "l", 0.55, 0.85, 0.18)
+			_leg(p, "r", 0.45, 0.75, 0.18)
+		"chase_back":
+			# Ball hinter sich in der Freizone: im Laufen mit gestreckten Armen ueber die Schulter
+			# zurueckspielen, Oberkoerper lehnt nach hinten, Blick nach oben
+			p["hips"] = Vector3(0.05, 0.0, 0.0)
+			p["chest"] = Vector3(0.25 + 0.15 * drive, 0.0, 0.0)
+			p["head"] = Vector3(-0.45, 0.0, 0.0)
+			_arm(p, "l", lerpf(1.3, 2.7, drive), -0.15, 0.0)
+			_arm(p, "r", lerpf(1.3, 2.7, drive), -0.15, 0.0)
+			_leg(p, lead, 0.9, 1.0, 0.1)
+			_leg(p, trail, -0.25, 0.5, 0.05)
+
+
 func style_key() -> String:
 	return movement_style if movement_style != "" else "%d-%d" % [team, number]
 
@@ -1494,6 +1577,7 @@ func _p_dive() -> Dictionary:
 	var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
 	var clip := HumanFigure.clip_pose("vb_hechtbagger", 0.08 + kd * 0.42, false)
 	if not clip.is_empty():
+		_style_dive(clip, kd)
 		return clip
 	var flat := smoothstep(0.1, 0.4, kd) * (1.0 - smoothstep(0.7, 0.95, kd))
 	var p := {"chest": Vector3(0.1 * flat, 0, 0), "head": Vector3(0.7 + 0.3 * flat, 0, 0)}
@@ -1503,6 +1587,45 @@ func _p_dive() -> Dictionary:
 	_leg(p, "l", lerpf(0.9, -0.15, flat), lerpf(1.2, 0.25, flat))
 	_leg(p, "r", lerpf(0.1, -0.05, flat), lerpf(0.4, 0.4, flat))
 	return p
+
+
+## Hecht-Varianten (V1). sprawl: flach nach vorn (der Meshy-Hechtbagger). dive_side: zur Seite,
+## der Koerper rollt auf die Seite (siehe _dive_roll), der Arm zur Ballseite greift weit hinaus.
+## pancake: ein Arm flach am Boden, Handruecken oben, der Ball springt vom Handruecken.
+func _style_dive(p: Dictionary, kd: float) -> void:
+	var st := _astyle()
+	if st != "dive_side" and st != "pancake":
+		return
+	var s := _ball_side()
+	var lead := "r" if s > 0.0 else "l"
+	var trail := "l" if lead == "r" else "r"
+	var reach := smoothstep(0.05, 0.3, kd) * (1.0 - smoothstep(0.75, 1.0, kd))
+	var arm := {}
+	if st == "pancake":
+		_arm(arm, lead, 2.75, 0.15, 0.0, -0.9)  # Hand flach, Handruecken nach oben
+		_arm(arm, trail, 0.1, 0.25, 0.3)        # liegt seitlich am Koerper
+	else:
+		_arm(arm, lead, 2.2, 1.0, 0.05)
+		_arm(arm, trail, 1.0, 0.5, 1.1)
+		var s2 := -1.0 if lead == "l" else 1.0
+		p["chest"] = _qlerp(p.get("chest", Vector3.ZERO), Vector3(-0.1, -0.25 * s2, 0.0), reach)
+		# Drehung um die Laengsachse des Koerpers: er landet auf der Seite zum Ball
+		p["hips"] = (p.get("hips", Vector3.ZERO) as Vector3) + Vector3(0.0, _dive_roll(), 0.0)
+	for k in arm:
+		p[k] = _qlerp(p.get(k, Vector3.ZERO), arm[k], reach)
+
+
+## dive_side: Rollwinkel des ganzen Koerpers (auf die Seite zum Ball)
+func _dive_roll() -> float:
+	if _astyle() != "dive_side":
+		return 0.0
+	if dive_timer > 0.0:
+		var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+		return -_ball_side() * 0.95 * smoothstep(0.05, 0.35, kd)
+	if _getup > 0.0:  # liegt auf der Seite, dreht sich beim Aufstehen zurueck auf den Bauch
+		var k := clampf(1.0 - _getup / GETUP_T, 0.0, 1.0)
+		return -_ball_side() * 0.95 * (1.0 - smoothstep(0.0, 0.45, k))
+	return 0.0
 
 
 func _p_serve(rel: float, jump_serve: bool) -> Dictionary:
@@ -1604,14 +1727,18 @@ static func _mix(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
 const GETUP_T := 0.7
 var _getup := 0.0
 var _was_dive := false
+var _getup_len := GETUP_T
 
 
 func _target_pose() -> Dictionary:
 	var p := _target_pose_main()
 	if _getup > 0.0 and dive_timer <= 0.0:
-		var k := 1.0 - _getup / GETUP_T
+		var k := clampf(1.0 - _getup / GETUP_T, 0.0, 1.0)  # die letzten GETUP_T s: Aufstehen
 		var clip := HumanFigure.clip_pose("vb_hechtbagger", 0.5 + 0.48 * k, false)
 		if not clip.is_empty():
+			var roll := _dive_roll()
+			if roll != 0.0:
+				clip["hips"] = (clip.get("hips", Vector3.ZERO) as Vector3) + Vector3(0.0, roll, 0.0)
 			p = _mix(clip, p, smoothstep(0.55, 1.0, k))
 			_stiff = 24.0
 	return p
@@ -1675,11 +1802,13 @@ func _target_pose_main() -> Dictionary:
 		base = _mix(base, _p_over(-0.45) if prep == "over" else _p_under(-0.45), 0.8)
 	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.9 and rel < 0.6:
 		var tech := _p_over(rel) if anim_tech == "over" else _p_under(rel)
+		if anim_tech != "over" and _astyle() != "":
+			_style_dig(tech, _astyle(), rel)
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
 		base = _mix(base, tech, w)
 		_stiff = 20.0
 	_crouch_drop = lerpf(_crouch_drop, crouch_want, clampf(_dt_pose * 14.0, 0.0, 1.0))
-	if _crouch_drop > 0.005:
+	if _crouch_drop > 0.005 and _astyle() != "low":
 		# Hocke: Oberschenkel nach vorn, Knie doppelt gebeugt, Fuss bleibt flach; Oberkoerper neigt sich
 		var a := acos(clampf(1.0 - _crouch_drop / 0.9, -1.0, 1.0))
 		for sd in ["l", "r"]:
