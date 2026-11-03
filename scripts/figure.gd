@@ -499,6 +499,43 @@ static func clip_pose(clip: String, u: float, loop := true) -> Dictionary:
 	return out
 
 
+## ------------------------------------------------------------------ Echte Bewegungsdaten
+## Spruenge aus der CMU-Motion-Capture-Datenbank (tools/mocap/cmu_to_clips.py): je Clip 60 Bilder/s
+## und die Zeitpunkte crouch (tiefster Punkt), takeoff, peak, land (Bildnummern).
+static var _mocap := {}
+
+
+static func mocap_jumps() -> Array:
+	if _mocap.is_empty():
+		var f := FileAccess.open("res://assets/models/mocap_jumps.json", FileAccess.READ)
+		_mocap = JSON.parse_string(f.get_as_text()) if f else {"_": {}}
+		_mocap.erase("_")
+	var names := _mocap.keys()
+	names.sort()
+	return names
+
+
+static func mocap_ev(clip: String) -> Dictionary:
+	mocap_jumps()
+	return _mocap.get(clip, {}).get("ev", {})
+
+
+## Pose (Euler je Gelenk wie clip_pose) bei Bild frame (Kommazahl, wird geklemmt).
+static func mocap_pose(clip: String, frame: float) -> Dictionary:
+	mocap_jumps()
+	if not _mocap.has(clip):
+		return {}
+	var frames: Array = _mocap[clip].frames
+	var t := clampf(frame, 0.0, frames.size() - 1.0)
+	var i0 := int(t)
+	var i1 := mini(i0 + 1, frames.size() - 1)
+	var w := t - i0
+	var out := {}
+	for name in JOINTS:
+		out[name] = Basis(_clip_quat(frames[i0], name).slerp(_clip_quat(frames[i1], name), w)).get_euler()
+	return out
+
+
 static func _clip_quat(fr: Dictionary, name: String) -> Quaternion:
 	var a: Array = fr[name]
 	return Quaternion(a[0], a[1], a[2], a[3]).normalized()

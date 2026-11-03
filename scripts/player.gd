@@ -78,6 +78,10 @@ var _move_fwd := 1.0
 var _move_side := 0.0
 var _was_air := false
 var _takeoff_t := -10.0
+var _jv0 := JUMP_V  # Absprunggeschwindigkeit des aktuellen Sprungs (fuer den Fortschritt im Flug)
+var _mj := ""  # gewaehlter echter Sprung (CMU-Mocap) fuer den aktuellen bzw. letzten Sprung
+var _mj_key := -100.0  # wofuer er gewaehlt wurde (geplanter Absprung oder Absprungzeit)
+var _mj_count := 0  # Spruenge bisher: jeder Sprung bekommt eine andere Variante
 var _land_t := -10.0
 var _stiff := 20.0
 var _stiff_s := 0.0  # geglaettete Muskelspannung
@@ -358,6 +362,7 @@ func _animate(delta: float) -> void:
 	_v_prev = v
 	if airborne and not _was_air:
 		_takeoff_t = now
+		_jv0 = maxf(jump_v, 0.5)
 	if _was_air and not airborne:
 		_land_t = now
 		impact("land", clampf(-_vy_last / 4.0, 0.3, 1.2), Vector3.DOWN)
@@ -1386,7 +1391,85 @@ func _p_block() -> Dictionary:
 	for k in ["hips", "hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
 		if clip.has(k):
 			p[k] = clip[k]
+	# Echter Blocksprung (Ausholen, Absprung, Flug, Landung), wenn es ihn gibt
+	var mj := _mocap_jump()
+	if not mj.is_empty():
+		_apply_mocap(p, mj, 0.0 if airborne else 0.4)
 	return p
+
+
+## Echte Spruenge aus Motion-Capture-Daten (CMU, 29 Blockspruenge verschiedener Menschen): Becken und
+## Beine fuer Ausholen, Absprung, Flug und Landung. Jeder Spieler hat vier Lieblingsvarianten und
+## springt jedes Mal mit einer anderen davon, so sieht kein Sprung wie der andere aus.
+## Rueckgabe: [Clip, Bild, Gewicht] oder leer.
+func _mocap_jump() -> Array:
+	if "mocap" in _off:
+		return []
+	var names := HumanFigure.mocap_jumps()
+	if names.is_empty():
+		return []
+	var key := -100.0
+	var phase := ""
+	if airborne:
+		key = _takeoff_t
+		phase = "air"
+	elif now - _land_t < 0.75 and _land_t > _takeoff_t:
+		key = _takeoff_t
+		phase = "land"
+	elif block_pose and not has_jumped and block_jump_at > 0.0 and block_jump_at - now < 0.75:
+		key = block_jump_at
+		phase = "pre"
+	else:
+		return []
+	# Variante waehlen: neu fuer jeden Sprung; der geplante Blocksprung behaelt sie beim Absprung
+	if absf(key - _mj_key) > 0.2 or _mj == "":
+		var h := hash(style_key())
+		var k := hash("%d-%d" % [h, _mj_count]) % 4
+		_mj = names[posmod(h + k * 7, names.size())]
+		_mj_count += 1
+	_mj_key = key
+	var ev := HumanFigure.mocap_ev(_mj)
+	if ev.is_empty():
+		return []
+	var to: float = ev.takeoff
+	var la: float = ev.land
+	match phase:
+		"air":
+			var u := clampf((_jv0 - jump_v) / (2.0 * _jv0), 0.0, 1.0)
+			return [_mj, lerpf(to, la, u), 1.0]
+		"land":
+			var tl := now - _land_t
+			# Unser Sprung ist hoeher als die Aufnahme (bis 0.8 m statt 0.2-0.3 m): die Beine muessen
+			# beim Landen mehr abfedern. Tiefe waechst etwa mit der Wurzel der Fallhoehe.
+			var rise := _jv0 * _jv0 / (2.0 * G)
+			var amp := clampf(sqrt(rise / maxf(float(ev.get("rise", 0.25)), 0.1)), 1.0, 1.45)
+			return [_mj, la + tl * 60.0, 1.0 - smoothstep(0.45, 0.75, tl), amp]
+		_:
+			var dt := block_jump_at - now
+			return [_mj, to - dt * 60.0, smoothstep(0.75, 0.45, dt)]
+
+
+## Becken und Beine (und etwas Rumpf) aus dem echten Sprung in die Pose mischen.
+func _apply_mocap(p: Dictionary, mj: Array, chest_w: float) -> void:
+	var m := HumanFigure.mocap_pose(mj[0], mj[1])
+	var w: float = mj[2]
+	if m.is_empty() or w <= 0.001:
+		return
+	var hp: Vector3 = m["hips"]
+	m["hips"] = Vector3(hp.x, 0.0, hp.z)  # Blickrichtung bestimmt das Spiel
+	if mj.size() > 3:  # Landung tiefer abfedern: Beugung in Huefte, Knie und Sprunggelenk verstaerken
+		var amp: float = mj[3]
+		for k in ["hips", "hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+			var v: Vector3 = m[k]
+			m[k] = Vector3(v.x * amp, v.y, v.z)
+	for k in ["hips", "hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+		p[k] = _qlerp(p.get(k, Vector3.ZERO), m[k], w)
+	if chest_w > 0.0:
+		p["chest"] = _qlerp(p.get("chest", Vector3.ZERO), m["chest"], w * chest_w)
+
+
+func style_key() -> String:
+	return movement_style if movement_style != "" else "%d-%d" % [team, number]
 
 
 func _p_block_code() -> Dictionary:
@@ -1581,9 +1664,12 @@ func _target_pose_main() -> Dictionary:
 		base = _mix(base, _mirror(_p_spike(-0.5)), 0.6)
 	# Landung: kurz in die Knie federn.
 	var land := 1.0 - clampf((now - _land_t) / 0.35, 0.0, 1.0)
+	var mj := _mocap_jump() if (land > 0.0 or airborne) and not block_pose else []
 	if land > 0.0:
-		base = _mix(base, _p_land(), sin(land * PI * 0.5) * 0.8)
+		base = _mix(base, _p_land(), sin(land * PI * 0.5) * 0.8 * (0.0 if not mj.is_empty() else 1.0))
 		_stiff = 30.0
+	if not mj.is_empty() and not airborne:
+		_apply_mocap(base, mj, 0.5)
 	# Taste gehalten: schon vorher in die Grundhaltung fuer Baggern oder Pritschen.
 	if prep != "" and not airborne:
 		base = _mix(base, _p_over(-0.45) if prep == "over" else _p_under(-0.45), 0.8)
