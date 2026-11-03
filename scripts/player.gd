@@ -380,7 +380,8 @@ func _animate(delta: float) -> void:
 	# Beim Zuspiel dreht sich der Koerper zum Ziel (Schultern quer zur Spielrichtung).
 	var turn := 7.0
 	var crel := now - anim_t
-	if contact_on and anim_kind in ["pass", "dig", "set", "free"] and crel > -0.45 and crel < 0.25 and dive_timer <= 0.0:
+	if contact_on and anim_kind in ["pass", "dig", "set", "free"] and crel > -0.45 and crel < 0.25 and dive_timer <= 0.0 \
+			and _astyle() != "back" and _astyle() != "chase_back":
 		var av := contact_aim - position
 		av.y = 0.0
 		if av.length() > 0.3:
@@ -857,11 +858,20 @@ func _contact_ik() -> void:
 	if block_pose and airborne:
 		# Haende ueber das Netz gedrueckt, Handflaechen zeigen zum Gegner, Finger gespreizt nach oben.
 		var net_side := -side
-		var base := Vector3(net_x + net_side * (0.06 + hand_reach * 0.9), block_top() - 0.1, hands_z())
+		var bst := _astyle()
+		var over := 0.06 + hand_reach * 0.9
+		var top := block_top() - 0.1
+		if bst == "soft":
+			over = -0.04  # Weicher Block: Haende bleiben ueber der eigenen Seite, nach hinten gekippt
+		elif bst == "late":
+			over *= 0.4   # Zu spaet: Arme kommen nicht mehr ganz ueber das Netz
+			top -= 0.12
+		var base := Vector3(net_x + net_side * over, top, hands_z())
 		tg = {"l": base - r * 0.11, "r": base + r * 0.11}
-		w = smoothstep(0.05, 0.3, jump_h)
+		w = smoothstep(0.05, 0.3, jump_h) if bst != "late" else smoothstep(0.15, 0.5, jump_h)
 		var opp_dir := Vector3(net_side, 0.0, 0.0)
-		hands = {"l": [up - r * 0.25 + opp_dir * 0.2, opp_dir], "r": [up + r * 0.25 + opp_dir * 0.2, opp_dir]}
+		var palm := opp_dir if bst != "soft" else (opp_dir + up * 0.9).normalized()
+		hands = {"l": [up - r * 0.25 + opp_dir * 0.2, palm], "r": [up + r * 0.25 + opp_dir * 0.2, palm]}
 	elif not contact_on and anim_kind != "serve":
 		return
 	elif anim_kind in ["pass", "dig", "free", "set"] and anim_tech != "over":
@@ -1551,6 +1561,38 @@ func _style_dig(p: Dictionary, st: String, rel: float) -> void:
 			_leg(p, trail, -0.25, 0.5, 0.05)
 
 
+## Angriffs-Varianten (V8/V3): Rumpf und Arme des (rechtshaendigen) Clips je nach Schlagart.
+func _style_attack(p: Dictionary, rel: float) -> Dictionary:
+	var st := _astyle()
+	if p.is_empty() or st == "":
+		return p
+	var add := func(k: String, v: Vector3) -> void:
+		p[k] = (p.get(k, Vector3.ZERO) as Vector3) + v
+	var hitk := smoothstep(-0.15, 0.05, rel) * (1.0 - smoothstep(0.2, 0.45, rel))
+	match st:
+		"cross":  # Diagonal: Rumpf dreht weit durch
+			add.call("chest", Vector3(0.0, 0.28 * hitk, 0.0))
+			add.call("hips", Vector3(0.0, 0.12 * hitk, 0.0))
+		"line":   # Linie: Schultern bleiben eher quer, Hand dreht nach aussen
+			add.call("chest", Vector3(0.0, -0.18 * hitk, 0.0))
+			add.call("wr_r", Vector3(0.0, 0.0, 0.35 * hitk))
+		"roll":   # Halber Schlag mit Topspin: Ellbogen bleibt gebeugt, Handgelenk klappt ab
+			add.call("el_r", Vector3(0.45 * hitk, 0.0, 0.0))
+			add.call("wr_r", Vector3(0.5 * smoothstep(0.0, 0.12, rel) * (1.0 - smoothstep(0.25, 0.45, rel)), 0.0, 0.0))
+		"emergency":  # Notangriff: weniger Bogenspannung, Rumpf faellt nach vorn
+			var pre := smoothstep(-0.5, -0.2, rel) * (1.0 - smoothstep(0.1, 0.4, rel))
+			add.call("chest", Vector3(-0.25 * pre, 0.0, 0.0))
+			add.call("sh_r", Vector3(-0.35 * pre, 0.0, 0.0))
+		"quick":  # Schnellangriff: kurzer Anlauf, Schlagarm frueh oben
+			var early := smoothstep(-0.9, -0.6, rel) * (1.0 - smoothstep(-0.3, -0.12, rel))
+			var up := {}
+			_arm(up, "r", 2.5, 0.35, 1.5)
+			_arm(up, "l", 2.3, 0.15, 0.4)
+			for k in up:
+				p[k] = _qlerp(p.get(k, Vector3.ZERO), up[k], early)
+	return p
+
+
 func style_key() -> String:
 	return movement_style if movement_style != "" else "%d-%d" % [team, number]
 
@@ -1566,8 +1608,10 @@ func _p_block_code() -> Dictionary:
 		_leg(p, "l", 0.2, 0.35, 0.08, 0.9)
 		_leg(p, "r", 0.1, 0.3, 0.08, 0.9)
 	else:
-		_arm(p, "l", 2.3, 0.25, 1.3, -0.3)
-		_arm(p, "r", 2.3, 0.25, 1.3, -0.3)
+		# read: Haende auf Schulterhoehe, wartet ab; commit: Arme schon hoch, sprungbereit
+		var arm_up := 1.75 if _astyle() == "read" else (2.55 if _astyle() == "commit" else 2.3)
+		_arm(p, "l", arm_up, 0.25, 1.3, -0.3)
+		_arm(p, "r", arm_up, 0.25, 1.3, -0.3)
 		_leg(p, "l", 0.45, 0.8, 0.15)
 		_leg(p, "r", 0.45, 0.8, 0.15)
 	return p
@@ -1761,7 +1805,7 @@ func _target_pose_main() -> Dictionary:
 		_stiff = 30.0
 		return _p_block()
 	if anim_kind == "attack" and rel < 0.5:
-		var clip := _mirror(_clip_at("kern_angriff", rel, SPIKE_KEYS))
+		var clip := _mirror(_style_attack(_clip_at("kern_angriff", rel, SPIKE_KEYS), rel))
 		if not clip.is_empty() and rel > -1.1:
 			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
 			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
@@ -1802,6 +1846,12 @@ func _target_pose_main() -> Dictionary:
 		base = _mix(base, _p_over(-0.45) if prep == "over" else _p_under(-0.45), 0.8)
 	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.9 and rel < 0.6:
 		var tech := _p_over(rel) if anim_tech == "over" else _p_under(rel)
+		if anim_tech == "over" and _astyle() == "back":
+			# Rueckwaertszuspiel: Blick bleibt nach vorn, im Kontakt Hohlkreuz und Haende nach hinten oben
+			var ext := smoothstep(-0.08, 0.2, rel)
+			tech["hips"] = (tech.get("hips", Vector3.ZERO) as Vector3) + Vector3(-0.12 * ext, 0, 0)
+			tech["chest"] = (tech.get("chest", Vector3.ZERO) as Vector3) + Vector3(0.35 * ext, 0, 0)
+			tech["head"] = (tech.get("head", Vector3.ZERO) as Vector3) + Vector3(-0.35 * ext, 0, 0)
 		if anim_tech != "over" and _astyle() != "":
 			_style_dig(tech, _astyle(), rel)
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
