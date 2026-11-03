@@ -457,7 +457,7 @@ func _animate(delta: float) -> void:
 		_toe = TOE_RISE * smoothstep(-0.22, -0.03, rs) * (1.0 - smoothstep(0.06, 0.28, rs))
 		fig.root_node.position.y += _toe
 		fig._sync()
-	elif anim_kind in ["set", "pass", "free"] and anim_tech == "over" and contact_on and not airborne:
+	elif anim_kind in ["set", "pass", "free"] and _tech() == "over" and contact_on and not airborne:
 		# Pritschen: nach dem Kontakt streckt sich der ganze Koerper bis auf die Zehenspitzen
 		var rs := now - anim_t
 		_toe = 0.05 * smoothstep(-0.02, 0.14, rs) * (1.0 - smoothstep(0.32, 0.55, rs))
@@ -637,7 +637,7 @@ var _lunge := Vector3.ZERO  # Ausfallschritt: Richtung (Figur-Raum, x rechts, z 
 func _reach_ball(delta: float) -> void:
 	var want := Vector3.ZERO
 	var lunge_want := Vector3.ZERO
-	if contact_on and anim_kind in ["pass", "dig", "free", "set"] and anim_tech != "over" and not airborne and dive_timer <= 0.0:
+	if contact_on and anim_kind in ["pass", "dig", "free", "set"] and _tech() != "over" and not airborne and dive_timer <= 0.0:
 		var rel := now - anim_t
 		var w := smoothstep(-0.32, -0.06, rel) * (1.0 - smoothstep(0.1, 0.3, rel))
 		var off: Vector3 = contact_pt - (fig.j["hips"] as Node3D).global_position
@@ -652,7 +652,7 @@ func _reach_ball(delta: float) -> void:
 		# siehe _target_pose_main, damit die Fuesse am Boden bleiben)
 		var sh_y := (fig.j["sh_r"] as Node3D).global_position.y + _crouch_drop
 		crouch_want = clampf((sh_y - 0.62) - (contact_pt.y - 0.17), 0.0, 0.35) * w
-	elif contact_on and anim_kind in ["set", "pass", "free"] and anim_tech == "over" and not airborne:
+	elif contact_on and anim_kind in ["set", "pass", "free"] and _tech() == "over" and not airborne:
 		# Pritschen: unter dem Ball in die Knie gehen, im Kontakt aus den Beinen strecken
 		var rel2 := now - anim_t
 		# Ball vor und ueber der Stirn nehmen (Ballmitte gut 30 cm schraeg vor-oben, nicht genau
@@ -874,7 +874,7 @@ func _contact_ik() -> void:
 		hands = {"l": [up - r * 0.25 + opp_dir * 0.2, palm], "r": [up + r * 0.25 + opp_dir * 0.2, palm]}
 	elif not contact_on and anim_kind != "serve":
 		return
-	elif anim_kind in ["pass", "dig", "free", "set"] and anim_tech != "over":
+	elif anim_kind in ["pass", "dig", "free", "set"] and _tech() != "over":
 		# Baggern: gestreckte Arme, Plattform aus beiden Unterarmen unter dem Ball.
 		w = smoothstep(-0.32, -0.06, rel) * (1.0 - smoothstep(0.1, 0.3, rel))
 		var plat := b - up * 0.17 + f * 0.07
@@ -902,7 +902,7 @@ func _contact_ik() -> void:
 				var out := r if sd1 == "r" else -r
 				tg = {sd1: b - up * 0.08}
 				hands = {sd1: [f * 0.5 + out * 0.6 - up * 0.2, up]}
-	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
+	elif anim_kind in ["set", "pass", "dig", "free"] and _tech() == "over":
 		# Pritschen nach Lehrbild und Sportwissenschaft: frueh die Pritschhaltung (Handgelenke etwa
 		# 20 cm vor und 10 cm ueber der Stirn, Ellbogen gebeugt und leicht ausserhalb der Schultern,
 		# Handflaechen zum Ball, Daumen zu den Augen). Kurz vor dem Kontakt gehen die Haende unter den
@@ -1041,7 +1041,7 @@ func _contact_ik() -> void:
 	if w <= 0.001 or tg.is_empty():
 		return
 	# Beim Pritschen bleiben die Ellbogen aussen (staerkere Daempfung haelt die Haltung).
-	var over_set := anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over"
+	var over_set := anim_kind in ["set", "pass", "dig", "free"] and _tech() == "over"
 	var miss := 0.0
 	var whip := (anim_kind == "attack" or anim_kind == "serve")
 	for sd in ["l", "r"]:
@@ -1123,7 +1123,7 @@ func _hand_shape() -> void:
 		shape = {"curl": 0.1, "spread": 0.4, "thumb": 0.6, "grip": 0.0}
 	elif not contact_on and anim_kind != "serve":
 		pass
-	elif anim_kind in ["set", "pass", "dig", "free"] and anim_tech == "over":
+	elif anim_kind in ["set", "pass", "dig", "free"] and _tech() == "over":
 		# Pritschen: Korb aus gespreizten, leicht gebeugten Fingern; im Kontakt greifen die Finger
 		# um den Ball (Fingerkuppen, Daumen und Zeigefinger tragen), danach weit geoeffnet.
 		var k := smoothstep(-0.95, -0.5, rel) * (1.0 - smoothstep(0.35, 0.6, rel))
@@ -1508,6 +1508,12 @@ func _down_until() -> float:
 	return float(d) if d is float or d is int else 0.0
 
 
+## Technik fuer Haltung und Haende: Abwehr ueber dem Kopf fuehrt immer mit offenen Haenden
+## (siehe _style_dig/_contact_ik), auch wenn der Spieler die Pritsch-Taste gedrueckt hat.
+func _tech() -> String:
+	return "bump" if _astyle() == "overhead" else anim_tech
+
+
 ## Liegt der Ball rechts (+1) oder links (-1) vom Koerper?
 func _ball_side() -> float:
 	var off := (contact_pt - position).rotated(Vector3.UP, -_yaw)
@@ -1845,14 +1851,14 @@ func _target_pose_main() -> Dictionary:
 	if prep != "" and not airborne:
 		base = _mix(base, _p_over(-0.45) if prep == "over" else _p_under(-0.45), 0.8)
 	if anim_kind in ["pass", "dig", "set", "free"] and rel > -0.9 and rel < 0.6:
-		var tech := _p_over(rel) if anim_tech == "over" else _p_under(rel)
-		if anim_tech == "over" and _astyle() == "back":
+		var tech := _p_over(rel) if _tech() == "over" else _p_under(rel)
+		if _tech() == "over" and _astyle() == "back":
 			# Rueckwaertszuspiel: Blick bleibt nach vorn, im Kontakt Hohlkreuz und Haende nach hinten oben
 			var ext := smoothstep(-0.08, 0.2, rel)
 			tech["hips"] = (tech.get("hips", Vector3.ZERO) as Vector3) + Vector3(-0.12 * ext, 0, 0)
 			tech["chest"] = (tech.get("chest", Vector3.ZERO) as Vector3) + Vector3(0.35 * ext, 0, 0)
 			tech["head"] = (tech.get("head", Vector3.ZERO) as Vector3) + Vector3(-0.35 * ext, 0, 0)
-		if anim_tech != "over" and _astyle() != "":
+		if _tech() != "over" and _astyle() != "":
 			_style_dig(tech, _astyle(), rel)
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
 		base = _mix(base, tech, w)
