@@ -1111,7 +1111,7 @@ func _contact_ik() -> void:
 			var ang := minf(dq.get_angle(), 0.3) * 0.8 * smoothstep(0.02, 0.12, miss)
 			if ang > 0.001:
 				var pr := ((ch.get_parent() as Node3D).global_basis.orthonormalized()).get_rotation_quaternion()
-				ch.quaternion = (pr.inverse() * Quaternion(dq.get_axis(), ang) * pr * ch.quaternion).normalized()
+				ch.quaternion = (pr.inverse() * Quaternion(dq.get_axis().normalized(), ang) * pr * ch.quaternion).normalized()
 				fig.pin["chest"] = maxf(fig.pin.get("chest", 0.0), w)
 		fig._sync()
 		var rest: float = (tg[_hit_tg] as Vector3).y - (fig.j["wr_" + _hit_tg] as Node3D).global_position.y
