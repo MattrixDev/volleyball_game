@@ -376,6 +376,14 @@ func _animate(delta: float) -> void:
 		face = Vector3(-side, 0.0, 0.0)
 	if not alert and celebrate_until < now:
 		face = Vector3(-side, 0.0, 0.0)
+	# Anlauf von aussen (wide): Koerper zum Feld gedreht; von innen nach aussen (tight): zur
+	# Seitenlinie. Kurz vor dem Absprung dreht er wieder zum Netz.
+	if anim_kind == "attack" and not airborne and _approach() in ["wide", "tight"]:
+		var ra := now - anim_t
+		var ka := smoothstep(-1.4, -1.0, ra) * (1.0 - smoothstep(-0.45, -0.2, ra))
+		var inward := -signf(position.z) if absf(position.z) > 0.3 else 1.0
+		var turn_a := 0.5 * ka * (inward if _approach() == "wide" else -inward)
+		face = face.rotated(Vector3.UP, turn_a * side)
 	face.y = 0.0
 	# Beim Zuspiel dreht sich der Koerper zum Ziel (Schultern quer zur Spielrichtung).
 	var turn := 7.0
@@ -1589,6 +1597,14 @@ func _style_attack(p: Dictionary, rel: float) -> Dictionary:
 			var pre := smoothstep(-0.5, -0.2, rel) * (1.0 - smoothstep(0.1, 0.4, rel))
 			add.call("chest", Vector3(-0.25 * pre, 0.0, 0.0))
 			add.call("sh_r", Vector3(-0.35 * pre, 0.0, 0.0))
+		"corner":  # Kontrollierter Schlag mit offener Hand: kleiner Armzug, Handgelenk ueber dem Ball
+			add.call("el_r", Vector3(0.3 * hitk, 0.0, 0.0))
+			add.call("sh_r", Vector3(0.25 * hitk, 0.0, 0.0))
+			add.call("wr_r", Vector3(0.6 * smoothstep(-0.02, 0.1, rel) * (1.0 - smoothstep(0.25, 0.45, rel)), 0.0, 0.0))
+			add.call("chest", Vector3(0.0, -0.1 * hitk, 0.0))
+		"seam":  # Hart in die Luecke: Schulter dreht weit durch, Rumpf klappt kraeftig nach vorn
+			add.call("chest", Vector3(-0.15 * hitk, 0.32 * hitk, 0.0))
+			add.call("hips", Vector3(0.0, 0.14 * hitk, 0.0))
 		"quick":  # Schnellangriff: kurzer Anlauf, Schlagarm frueh oben
 			var early := smoothstep(-0.9, -0.6, rel) * (1.0 - smoothstep(-0.3, -0.12, rel))
 			var up := {}
@@ -1597,6 +1613,20 @@ func _style_attack(p: Dictionary, rel: float) -> Dictionary:
 			for k in up:
 				p[k] = _qlerp(p.get(k, Vector3.ZERO), up[k], early)
 	return p
+
+
+## Anlauf-Variante (vom Spiel gesetzt): wide, tight, delay, slide; leer = normaler Anlauf.
+func _approach() -> String:
+	var a = get("approach_style")
+	return a if a is String else ""
+
+
+## delay: Zoegerschritt. Der Clip bleibt im letzten Schritt kurz stehen (der Absprung kommt
+## 0,06 bis 0,14 s spaeter) und holt bis zum Schlag wieder auf.
+func _approach_rel(rel: float) -> float:
+	if _approach() != "delay":
+		return rel
+	return rel - 0.12 * smoothstep(-0.95, -0.65, rel) * (1.0 - smoothstep(-0.4, -0.2, rel))
 
 
 func style_key() -> String:
@@ -1811,7 +1841,7 @@ func _target_pose_main() -> Dictionary:
 		_stiff = 30.0
 		return _p_block()
 	if anim_kind == "attack" and rel < 0.5:
-		var clip := _mirror(_style_attack(_clip_at("kern_angriff", rel, SPIKE_KEYS), rel))
+		var clip := _mirror(_style_attack(_clip_at("kern_angriff", _approach_rel(rel), SPIKE_KEYS), rel))
 		if not clip.is_empty() and rel > -1.1:
 			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
 			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
