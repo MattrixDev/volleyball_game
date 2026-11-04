@@ -36,6 +36,7 @@ static var ball_node: Node3D  # der Spielball (fuer die Finger), setzt das Match
 const BALL_VIS_R := 0.14  # so gross wird der Ball gezeichnet (match.gd)
 ## Blickrichtung beim Angriff (Welt-z der Schulter), damit der Gegner lesen kann.
 var lean := 0.0
+var approach_style := ""  # Anlauf zum Angriff: "", wide, tight, delay, slide (S4)
 
 ## Fuer die Posen, vom Match jedes Bild gesetzt.
 var now := 0.0
@@ -214,6 +215,7 @@ func reset_state() -> void:
 	block_jump_at = -1.0
 	block_pose = false
 	lean = 0.0
+	approach_style = ""
 	anim_kind = ""
 	anim_style = ""
 	down_until = -10.0

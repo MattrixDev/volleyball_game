@@ -14,6 +14,12 @@ signal point_won(winner: int, reason: String, highlight: bool)
 ## Jede Ballberuehrung mit Ergebnis (fuer den Debug-Modus): Art, Team, Mensch?, Qualitaet, Timing (s),
 ## Ballgeschwindigkeit danach und davor (m/s).
 signal touch_result(kind: String, team: int, human: bool, q: int, e: float, speed: float, speed_in: float)
+## Skill-Gap (Arbeitsplan): erkannte Technik nach einem Kontakt (Schluessel wie in TechNames),
+## Technik ist in dieser Lage gerade moeglich (fuer den einmaligen Tastenhinweis) und
+## jeder Kontakt mit kind, key, lane, target, tempo, quality (fuer die KI, die mitzaehlt).
+signal technique_done(player: VPlayer, key: String)
+signal technique_available(key: String)
+signal touch_logged(team: int, info: Dictionary)
 
 const G := 9.81
 const R := Ballistics.BALL_R
@@ -96,6 +102,12 @@ class Opp:
 	var emergency := false  # Angriff aus schlechter Lage: weniger Kraft
 	var pressure := 0.0  # Annahme/Abwehr: noetiger Weg / moeglicher Weg bei der Planung
 	var move_dir := Vector3.ZERO  # ... und in welche Richtung er dafuer musste
+	var tech_key := ""  # erkannte Technik dieses Kontakts (TechNames), "" = keine
+	var finesse := false  # Angriff: L2 gehalten = Gefuehlsschlag (Roll-Shot, tiefe Ecke, Luecke)
+	var approach := ""  # Angriff: Anlauf wide, tight, delay ("" = automatisch wie bisher)
+	var approach_z := 0.0  # seitlicher Versatz des Anlaufstarts (Welt-z)
+	var delayed := false  # Anlauf schon verzoegert
+	var offered := false  # Tastenhinweise fuer diesen Kontakt schon angeboten
 
 
 var phase := Phase.INTRO
@@ -189,6 +201,9 @@ var test_score := []  # Test: Startstand des ersten Satzes, z.B. --score=24:10
 var test_rot := -1  # Test: --rot=N dreht das Heimteam N-mal weiter, Gegner schlaegt auf
 var check_rules := false  # Test: prueft bei jedem Aufschlag die Aufstellung
 var autopress := false  # Test: drueckt fuer den Menschen automatisch
+var skilled := false  # Test (mit --autopress): Koenner statt Einsteiger
+var _auto_fin := false
+var _auto_mv := Vector2.ZERO
 var drill = null  # Debug-Modus: laufende Uebung (DebugDrill), sonst null
 var hud = null
 var cfg := GameSettings.new()
@@ -249,6 +264,8 @@ func _ready() -> void:
 		elif a == "--autopress":
 			autopress = true
 			autoplay = true
+		elif a == "--skilled":
+			skilled = true  # Test (mit --autopress): simulierter Koenner (genaues Timing, Anlauf, Gefuehlsschlaege)
 		elif a == "--botplay":
 			autopress = true  # wie --autopress, aber mit Kamera, Zeitlupe und Anzeigen
 		elif a == "--trace":
@@ -1073,7 +1090,7 @@ func _hold_ball_at_server() -> void:
 func _empty_input() -> Dictionary:
 	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "dpad_down": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_held": false,
 		"bump_held": false, "over_held": false, "bump_up": false, "over_up": false, "dpad_up": Vector2.ZERO,
-		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false}
+		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false, "finesse_held": false}
 
 
 func _read_input() -> Dictionary:
@@ -1105,6 +1122,7 @@ func _read_input() -> Dictionary:
 	d.hit_down = Input.is_action_just_pressed("hit")
 	d.hit_up = Input.is_action_just_released("hit")
 	d.hit_held = Input.is_action_pressed("hit")
+	d.finesse_held = Input.is_action_pressed("finesse")
 	d.kind_prev = Input.is_action_just_pressed("serve_prev")
 	d.kind_next = Input.is_action_just_pressed("serve_next")
 	if Input.is_action_just_pressed("toggle_assist"):
@@ -1377,8 +1395,11 @@ func _auto_input() -> Dictionary:
 		Phase.RALLY:
 			if opp != null and not opp.done and not opp.pending and opp.team == human_team and opp.human:
 				if opp.kind == "attack":
+					if skilled:
+						_skilled_attack(d)
 					if not charging and clock >= opp.t - 0.7:
-						_auto_rs = Vector2(rng.randf_range(-0.8, 0.8), rng.randf_range(-0.5, 0.8))
+						if not skilled:
+							_auto_rs = Vector2(rng.randf_range(-0.8, 0.8), rng.randf_range(-0.5, 0.8))
 						d.rs = _auto_rs
 						d.hit_down = true
 					elif charging and _due(opp.t):
@@ -1405,9 +1426,34 @@ func _auto_input() -> Dictionary:
 	return d
 
 
+## Test-Koenner: waehlt den Anlauf in die offene Richtung, zielt in die scharfen Winkel und
+## spielt einen Gefuehlsschlag, wenn der Block im Weg steht.
+func _skilled_attack(d: Dictionary) -> void:
+	if not opp.offered:
+		var hl := team_local(opp.team, opp.point).y
+		_auto_mv = Vector2.ZERO
+		_auto_fin = false
+		if absf(hl) > 1.5:
+			# Diagonale: Trefferpunkt an der Seite, die vom Feld weg zeigt; Anlauf von aussen.
+			_auto_rs = Vector2(0.85 * signf(hl), 0.35) if rng.randf() < 0.6 else Vector2(0.0, 0.4)
+			var away_z := signf(opp.point.z)
+			_auto_mv = Vector2(-away_z * side_of(human_team), 0.0) if _auto_rs.x != 0.0 else Vector2.ZERO
+		else:
+			_auto_rs = Vector2(rng.randf_range(-0.6, 0.6), 0.4)
+	d.mv = _auto_mv
+	if clock >= opp.t - 0.25:
+		_auto_fin = _shot_blocked(opp, _auto_rs) and not opp.emergency
+		if _auto_fin:
+			_auto_rs = Vector2(0.0, 0.2) if rng.randf() < 0.5 else Vector2(0.9 * (1.0 if rng.randf() < 0.5 else -1.0), 0.0)
+	d.rs = _auto_rs
+	rs = _auto_rs
+	d.finesse_held = _auto_fin
+
+
 func _due(ideal: float) -> bool:
 	if _auto_t < 0.0:
-		_auto_t = ideal + rng.randf_range(-0.07, 0.07)
+		var jit := 0.03 if skilled else 0.07
+		_auto_t = ideal + rng.randf_range(-jit, jit)
 	if clock >= _auto_t:
 		_auto_t = -1.0
 		return true
@@ -1775,7 +1821,7 @@ func _defense_style(o: Opp) -> String:
 
 ## Angriff: Technik aus Schlag, Zuspiel-Tempo, Bahn und Lage.
 func _attack_style(o: Opp) -> String:
-	var info := attack_shot(o.team, o.point, o.rs, o.power)
+	var info := attack_shot(o.team, o.point, o.rs, o.power, o.finesse)
 	var lateral: float = (info.target as Vector3).z - o.point.z
 	return Technique.attack_style(info.style, o.power, lateral, set_tempo[o.team], o.player.lane, o.emergency)
 
@@ -2058,6 +2104,10 @@ func _rally_input(inp: Dictionary) -> void:
 
 func _attack_input(inp: Dictionary) -> void:
 	opp.rs = rs
+	_offer_attack_hints()
+	_approach_input(inp.mv)
+	if not opp.pending:
+		opp.finesse = inp.finesse_held  # vorher schon, damit Schulter und Block den Schlag lesen
 	# R2 noch vom schnellen Zuspiel gedrueckt: zaehlt direkt als Aufladen, sonst muesste man
 	# erst loslassen und neu druecken, und der Schlag kaeme immer zu spaet.
 	if (inp.hit_down or inp.hit_held) and not charging and not opp.pending:
@@ -2070,7 +2120,9 @@ func _attack_input(inp: Dictionary) -> void:
 		var c := _release_charge()
 		opp.power = clampf(c, 0.15, 1.0)
 		opp.over = c
-		opp.win_scale = hit_window_scale(opp.power, rs, false)
+		opp.finesse = inp.finesse_held
+		# Gefuehlsschlag: weniger Kraft, daher etwas mehr Zeit; die Genauigkeit haengt am Timing.
+		opp.win_scale = hit_window_scale(0.45 if opp.finesse else opp.power, rs, false) * (0.92 if opp.delayed else 1.0)
 		_press(opp, e, "spike")
 
 
@@ -2127,7 +2179,7 @@ func _ai_block_hands(t: int, b: VPlayer) -> void:
 	var read := rng.randf() < read_p
 	var shift := rng.randf_range(-0.3, 0.3)
 	if read:
-		var info := attack_shot(opp.team, opp.point, opp.rs, opp.power)
+		var info := attack_shot(opp.team, opp.point, opp.rs, opp.power, opp.finesse)
 		var tgt: Vector3 = info.target
 		# Wo kreuzt die Linie Ball -> Ziel das Netz?
 		var f := absf(opp.point.x) / maxf(absf(opp.point.x - tgt.x), 0.01)
@@ -2171,6 +2223,7 @@ func _ai_attack_choice(o: Opp) -> void:
 	else:
 		var first: Vector2 = options[rng.randi() % options.size()]
 		options.push_front(first)
+	o.finesse = false
 	o.power = rng.randf_range(0.6, 1.0)
 	o.over = o.power
 	o.rs = options[0]
@@ -2179,10 +2232,14 @@ func _ai_attack_choice(o: Opp) -> void:
 			if not _shot_blocked(o, cand):
 				o.rs = cand
 				break
+	# Steht der Block trotzdem im Weg, spielt die KI manchmal einen Gefuehlsschlag darueber.
+	if not o.emergency and _shot_blocked(o, o.rs) and rng.randf() < 0.25:
+		o.finesse = true
+		o.rs = Vector2(0.0, 0.8) if rng.randf() < 0.4 else Vector2(0.0, 0.2)
 
 
 func _shot_blocked(o: Opp, contact: Vector2) -> bool:
-	var info := attack_shot(o.team, o.point, contact, o.power)
+	var info := attack_shot(o.team, o.point, contact, o.power, o.finesse)
 	var tgt: Vector3 = info.target
 	var f := absf(o.point.x) / maxf(absf(o.point.x - tgt.x), 0.01)
 	var zc := lerpf(o.point.z, tgt.z, f)
@@ -2314,8 +2371,19 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	stats["Technik " + ("Pritschen" if o.tech == "over" else "Baggern")] = stats.get("Technik " + ("Pritschen" if o.tech == "over" else "Baggern"), 0) + (1 if o.kind != "attack" else 0)
 	if trace:
 		print("  T%d %s %s %s q=%s e=%.3f pos=%s vel=%s" % [o.team, pl.role, o.kind, o.tech, Q_TEXT[q], e, before, ball_vel])
+	_log_touch(o, q)
 	touch_result.emit(o.kind, o.team, o.human, q, e, ball_vel.length(), o.speed)
 	plan_next()
+
+
+## Nach jedem Kontakt: Technik melden (Name in der Anzeige) und den Kontakt fuer die KI loggen.
+func _log_touch(o: Opp, q: int) -> void:
+	if o.tech_key != "":
+		technique_done.emit(o.player, o.tech_key)
+	var lt := Ballistics.time_to_height(ball.position, ball_vel, R, ball_g)
+	var tgt := Ballistics.pos_at(ball.position, ball_vel, lt, ball_g) if lt > 0.0 else ball.position
+	touch_logged.emit(o.team, {"kind": o.kind, "key": o.tech_key, "lane": o.player.lane, "target": tgt,
+		"tempo": set_tempo[o.team], "quality": q, "approach": o.approach, "human": o.human})
 
 
 func _fault(o: Opp, reason: String) -> void:
@@ -2629,8 +2697,10 @@ func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VP
 ## Was ein Schlag mit diesem Trefferpunkt machen wuerde (ohne Timing-Fehler und Zufall).
 ## Rechter Stick: oben Topspin, Mitte flach und hart, unten Leger. Wer den Ball rechts
 ## trifft, schlaegt ihn nach links. Ganz aussen: Cut Shot (kurz diagonal) oder Block-Out.
-func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float) -> Dictionary:
+func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float, finesse := false) -> Dictionary:
 	var hl := team_local(team, bp).y
+	if finesse and contact.y >= -0.35:
+		return _finesse_shot(team, bp, contact, power, hl)
 	var res := {"style": "spike", "g": G, "u": lerpf(16.0, 30.0, clampf(power, 0.0, 1.0)), "clear": 0.0}
 	var d := 7.8
 	var l := hl
@@ -2677,16 +2747,236 @@ func _aim_lateral(hl: float, x: float, out_edge: float) -> float:
 	return lerpf(base, extreme, clampf(absf(x) / 0.85, 0.0, 1.0))
 
 
+# ---------------------------------------------------------------- Angriff mit Gefuehl (S1, S4, S5)
+
+var seam_half := 0.5  # Schlag in die Luecke: so nah (m) muss eine Blockhand am Ball sein, um ihn zu beruehren
+
+
+## S1: Gefuehlsschlag mit L2. Rechter Stick: Mitte = Roll-Shot mit halber Kraft und Topspin hinter
+## den Block, oben = platziert in die tiefe Ecke, zur Seite = in die Luecke zwischen zwei Blockern.
+## (Stick unten bleibt der Leger.) Wie beim normalen Schlag gilt: Trefferpunkt rechts = Ball nach links.
+func _finesse_shot(team: int, bp: Vector3, contact: Vector2, power: float, hl: float) -> Dictionary:
+	var res := {"style": "roll", "g": G * 1.35, "u": 12.0, "clear": 3.8, "finesse": true}
+	var d := 4.8
+	var l := _aim_lateral(hl, contact.x * 0.7, 3.8)
+	if absf(contact.x) > 0.5 and absf(contact.y) < 0.5:
+		res.style = "seam"
+		res.g = G * 1.15
+		res.u = lerpf(19.0, 25.0, clampf(power, 0.0, 1.0))
+		res.clear = 0.0
+		var zc := _seam_z(team, bp, -signf(contact.x))
+		d = 6.5
+		var tx := court_pos(team, Vector2(-d, 0.0)).x
+		var k := (tx - bp.x) / -bp.x if absf(bp.x) > 0.05 else 30.0
+		var tz := clampf(bp.z + (zc - bp.z) * k, -4.1, 4.1)
+		l = team_local(team, Vector3(tx, 0.0, tz)).y
+	elif contact.y > 0.5:
+		res.style = "corner"
+		res.g = G * 1.12
+		res.u = 17.0
+		res.clear = 3.7
+		d = 8.2
+		var toward := -signf(contact.x) if absf(contact.x) > 0.15 else (-signf(hl) if absf(hl) > 0.5 else 1.0)
+		l = toward * 3.8
+	var target := court_pos(team, Vector2(-d, l))
+	target.y = R
+	res.target = target
+	res.d = d
+	res.l = l
+	return res
+
+
+## Netzposition (Welt-z) der Luecke im gegnerischen Block, die auf der Seite dir_local liegt.
+## Ohne zweiten Blocker: neben den einen Blocker, ohne Block: einfach etwas zur Seite.
+func _seam_z(team: int, bp: Vector3, dir_local: float) -> float:
+	var dirw := -side_of(team) * dir_local
+	var zs: Array = []
+	for b in blockers[1 - team]:
+		if b != null:
+			zs.append(b.hands_z() if b.airborne else b.target.z)
+	if zs.is_empty():
+		return bp.z + dirw * 1.0
+	zs.sort()
+	if zs.size() == 1:
+		return zs[0] + dirw * 0.8
+	var best := 0.0
+	var best_score := 1e9
+	for i in zs.size() - 1:
+		var mid: float = (zs[i] + zs[i + 1]) * 0.5
+		var score := absf(mid - bp.z) + (0.0 if signf(mid - bp.z) == dirw else 3.0)
+		if score < best_score:
+			best_score = score
+			best = mid
+	return best
+
+
+## Laeuft der Schlag in Richtung des Anlaufs (+1), dagegen (-1) oder ist er neutral (0)?
+func _along_run(o: Opp, l: float) -> int:
+	if o.approach != "wide" and o.approach != "tight":
+		return 0
+	var run := -signf(o.approach_z)
+	var heading := -side_of(o.team) * l - o.point.z
+	if absf(heading) < 0.8 or run == 0.0:
+		return 0
+	return 1 if signf(heading) == run else -1
+
+
+## S5: Sauber getroffen (perfektes Timing) erreicht die Linie entlang der Seitenlinie und die
+## scharfe Diagonale. Mit gutem Timing geht das nur in Richtung des Anlaufs (S4). Assistiert
+## bleibt alles andere wie bisher; manuell zieht ein nicht sauber getroffener Ball zur Mitte.
+func _angle_shape(o: Opp, q: int, hl: float, d: float, l: float, manual: bool) -> Dictionary:
+	var res := {"d": d, "l": l, "key": "clean" if q == Q.PERFECT else ""}
+	var along := _along_run(o, l)
+	var open := q == Q.PERFECT or (q == Q.GOOD and along > 0)
+	var sx := absf(o.rs.x)
+	var cross := absf(hl) <= 1.5 or signf(l) != signf(hl)
+	if open:
+		if not cross and absf(hl) > 2.5 and sx < 0.25:
+			res.l = signf(hl) * (4.35 if manual else 4.25)  # Linie entlang der Seitenlinie
+		elif cross and sx > 0.7 and absf(l) > 2.0:
+			res.l = signf(l) * maxf(absf(l), 4.2)  # scharfe Diagonale, kurz hinter dem Block
+			res.d = minf(d, 4.7 if manual else 5.2)
+	elif manual and absf(l) > 2.6:
+		var f := (0.6 if q == Q.GOOD else 0.35) + 0.12 * _touch_skill(o.player, "attack")
+		if along > 0:
+			f += 0.25
+		elif along < 0:
+			f -= 0.1
+		f = clampf(f, 0.15, 1.0)
+		res.l = signf(l) * (2.6 + (absf(l) - 2.6) * f)
+	return res
+
+
+## Gefuehlsschlag ausfuehren: genau bei sauberem Timing, sonst ungenauer (zu frueh = zu lang,
+## zu spaet = zu kurz). Gute Angreifer streuen weniger.
+func _do_finesse(o: Opp, q: int, e: float, info: Dictionary, bp: Vector3) -> void:
+	var style: String = info.style
+	var sk := _touch_skill(o.player, "attack")
+	var err := 0.0
+	if q == Q.GOOD:
+		err = 0.6
+	elif q == Q.WEAK:
+		err = 1.4
+	err *= clampf(1.0 - 0.3 * sk, 0.6, 1.45)
+	var aed := _err_dir(e, "attack", o.win_scale)
+	var hl0 := team_local(o.team, bp).y
+	var line_dir := signf(hl0) if absf(hl0) > 0.5 else 1.0
+	var d: float = info.d
+	var l: float = info.l
+	var u: float = info.u
+	var g: float = info.g
+	if o.emergency:
+		u *= 0.85
+		err += 0.4
+		stats["Notangriff"] = stats.get("Notangriff", 0) + 1
+	if style == "seam":
+		l += aed * err * 0.45 * line_dir
+		seam_half = [0.22, 0.3, 0.5, 0.5][q]
+	else:
+		d += aed * err * 1.3
+		l += aed * err * 0.7 * line_dir
+	if q == Q.WEAK:
+		u *= 0.85
+	d = clampf(d, 2.0, 9.6)
+	var target := court_pos(o.team, Vector2(-d, l))
+	target.y = R
+	ball_g = g
+	var vel: Vector3
+	if style == "seam":
+		vel = Ballistics.launch_with_speed(bp, target, u, g)
+		var tries := 0
+		while _net_cross_y(bp, vel) < NET_H + 0.15 and tries < 8:
+			tries += 1
+			d += 0.4
+			target = court_pos(o.team, Vector2(-d, l))
+			target.y = R
+			vel = Ballistics.launch_with_speed(bp, target, u, g)
+	else:
+		vel = Ballistics.launch_over_net(bp, target, info.clear, u * 0.55, u, g)
+	ball_vel = vel
+	last_action = "attack"
+	last_attack_speed = vel.length()
+	last_super = false
+	_slow_tail_until = clock + 0.12
+	o.tech_key = style
+	o.player.anim_style = style  # roll, corner, seam (Visual Overhaul; unbekannt = normale Bewegung)
+	stats["Schlag " + style] = stats.get("Schlag " + style, 0) + 1
+	if o.human:
+		big_hit.emit(0.3)
+
+
+## S4: Anlauf mit dem linken Stick, solange der Angreifer noch nicht abgesprungen ist.
+## Zur Seitenlinie = Anlauf von aussen (Diagonale offen), zur Feldmitte = enger Anlauf
+## (Linie offen), vom Netz weg = verzoegern (der Block springt zu frueh). Assistiert rastet der
+## Stick auf diese drei Arten ein, manuell bestimmt der Ausschlag, wie stark.
+func _approach_input(mv: Vector2) -> void:
+	var pl := opp.player
+	if pl == null or pl.airborne or pl.has_jumped:
+		return
+	if clock > opp.t - rise(pl) - 0.18:
+		return  # Absprung steht schon
+	if mv.length() < 0.35:
+		return
+	var manual := not cfg.assisted("approach")
+	var d := _stick_dir(mv)
+	var away := d.x * side_of(opp.team)  # > 0: vom Netz weg
+	if away > 0.6 and absf(d.z) < 0.6:
+		_approach_delay(lerpf(0.06, 0.14, clampf((away - 0.6) / 0.4, 0.0, 1.0)) if manual else 0.1)
+		return
+	if absf(d.z) > 0.4 and not opp.delayed:
+		var zs := signf(opp.point.z) if absf(opp.point.z) > 1.2 else 0.0
+		opp.approach = "wide" if (zs == 0.0 or signf(d.z) == zs) else "tight"
+		var amount := clampf(absf(d.z), 0.4, 1.0) if manual else 1.0
+		opp.approach_z = signf(d.z) * 1.7 * amount
+
+
+func _approach_delay(dt: float) -> void:
+	if opp.delayed:
+		return
+	var t2 := opp.t + dt
+	var p2 := Ballistics.pos_at(ball.position, ball_vel, t2 - clock, ball_g)
+	if p2.y < NET_H + 0.55:
+		return  # Ball waere zu tief: kein Verzoegern moeglich
+	opp.delayed = true
+	opp.approach = "delay"
+	opp.approach_z = 0.0
+	opp.t = t2
+	opp.point = p2
+	# Die KI-Blocker haben auf den alten Zeitpunkt geplant; nur wer gut liest, wartet mit.
+	for b in blockers[1 - opp.team]:
+		if b == null or b.team == human_team or b.has_jumped:
+			continue
+		if rng.randf() < lerpf(0.15, 0.45, cfg.unit("ai_block")) * (1.0 + 0.3 * pf(b, "block")):
+			b.block_jump_at += dt
+
+
+## Einmal pro Angriff: welche Techniken jetzt gehen (fuer den Tastenhinweis beim ersten Mal).
+func _offer_attack_hints() -> void:
+	if opp.offered:
+		return
+	opp.offered = true
+	technique_available.emit("clean")
+	if not opp.emergency:
+		for k in ["roll", "corner", "seam"]:
+			technique_available.emit(k)
+	if clock < opp.t - rise(opp.player) - 0.45:
+		for k in ["approach_wide", "approach_tight", "approach_delay"]:
+			technique_available.emit(k)
+
+
 func _do_attack(o: Opp, q: int, e: float) -> void:
 	var bp := ball.position
 	_hitter[o.team] = null
-	var info := attack_shot(o.team, bp, o.rs, o.power)
+	var info := attack_shot(o.team, bp, o.rs, o.power, o.finesse)
 	last_shot_style = info.style
 	var g: float = info.g
 	ball_g = g
 	if info.style == "tip":
 		ball_vel = Ballistics.launch_over_net(bp, info.target, info.clear, 4.0, 10.0, g)
 		last_action = "tip"
+		return
+	if info.get("finesse", false):
+		_do_finesse(o, q, e, info, bp)
 		return
 	var d: float = info.d
 	var l: float = info.l
@@ -2723,9 +3013,18 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	var aed := _err_dir(e, "attack", o.win_scale)
 	var hl0 := team_local(o.team, bp).y
 	var line_dir := signf(hl0) if absf(hl0) > 0.5 else 1.0
+	# S5: sauber getroffen (perfektes Timing) oeffnet die scharfen Winkel; der Anlauf bestimmt,
+	# welcher Winkel auch mit nur gutem Timing offen ist.
+	var manual_aim := o.human and not cfg.assisted("attack_aim")
+	if not o.emergency and (info.style == "spike" or info.style == "topspin"):
+		var sh := _angle_shape(o, q, hl0, d, l, manual_aim)
+		d = sh.d
+		l = sh.l
+		o.tech_key = sh.key
 	if q == Q.GOOD:
 		u *= 0.88
-		l += aed * 0.8 * line_dir
+		if not manual_aim:
+			l += aed * 0.8 * line_dir  # manuell gezielt: kein Abdriften, dafuer bleiben die Winkel zu
 	elif q == Q.WEAK:
 		u *= 0.62
 		l += aed * 1.5 * line_dir
@@ -2907,8 +3206,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		var dz: float = c.z - pl.hands_z()
 		if absf(dz) < 1.4:
 			in_block += 1
-		if absf(dz) > 0.5 + R:
-			continue
+		if absf(dz) > (seam_half if last_shot_style == "seam" else 0.5) + R:
+			continue  # Schlag in die Luecke: nur eine Hand genau am Ball beruehrt ihn
 		if hit_pl == null or absf(dz) < absf(hit_dz):
 			hit_pl = pl
 			hit_dz = dz
@@ -3070,6 +3369,10 @@ func _is_highlight(reason: String) -> bool:
 
 
 func _end_rally(winner: int, reason: String) -> void:
+	if autoplay:
+		stats["Punkte Team %d" % winner] = stats.get("Punkte Team %d" % winner, 0) + 1
+		if last_action == "attack" or last_action == "tip":
+			stats["Angriffsende Team %d: %s" % [last_touch_team, "Punkt" if winner == last_touch_team else "Fehler/Block"]] = stats.get("Angriffsende Team %d: %s" % [last_touch_team, "Punkt" if winner == last_touch_team else "Fehler/Block"], 0) + 1
 	if phase != Phase.RALLY and phase != Phase.TOSS and phase != Phase.PRE_SERVE:
 		return
 	if drill != null:
@@ -3311,15 +3614,21 @@ func _update_players(delta: float) -> void:
 		if opp.kind == "attack":
 			var t_jump := opp.t - rise(pl)
 			var t_go := t_jump - flat_dist(pl.position, p) / pl.run_speed - 0.25  # Zeit zum Beschleunigen
-			pl.target = p if clock >= t_go else p + Vector3(side_of(opp.team) * 2.2, 0.0, 0.0)
+			# Anlauf (S4): von aussen oder eng startet der Angreifer seitlich versetzt und laeuft schraeg an.
+			var start := p + Vector3(side_of(opp.team) * 2.2, 0.0, opp.approach_z)
+			start.z = clampf(start.z, -HALF_W - 0.8, HALF_W + 0.8)
+			pl.target = p if clock >= t_go else start
+			pl.approach_style = opp.approach
 			if clock >= t_jump and not pl.has_jumped:
 				pl.jump()
 				pl.block_pose = false
+				if opp.human and opp.approach != "":
+					technique_done.emit(pl, "approach_" + opp.approach)
 				if not opp.human:
 					_ai_attack_choice(opp)  # Entscheidung faellt im Absprung
 			# Schulter zeigt die Schlagrichtung an, damit der Blocker lesen kann.
 			if pl.airborne:
-				var info := attack_shot(opp.team, opp.point, opp.rs, opp.power)
+				var info := attack_shot(opp.team, opp.point, opp.rs, opp.power, opp.finesse)
 				var tz: float = (info.target as Vector3).z
 				pl.lean = clampf((tz - pl.position.z) / 4.0, -1.0, 1.0)
 		elif opp.human and not assist and not (_need_neutral and clock < _stick_lock_until + 0.5):
@@ -3398,7 +3707,7 @@ func _contact_aim(o: Opp) -> Vector3:
 				return Vector3(h.position.x, 0.0, h.position.z)
 			return Vector3(sd * 0.5, 0.0, o.point.z)
 		"attack":
-			var info := attack_shot(o.team, o.point, o.rs, o.power)
+			var info := attack_shot(o.team, o.point, o.rs, o.power, o.finesse)
 			return info.target
 	return Vector3(-sd * 4.0, 0.0, 0.0)
 
@@ -3515,7 +3824,7 @@ func _update_visuals() -> void:
 			_aim_marker.position = court_pos(human_team, Vector2(-sa.x, sa.y)) + Vector3(0, 0.03, 0)
 			aim_vis = true
 		elif show_ring and opp.kind == "attack":
-			var info := attack_shot(opp.team, opp.point, rs, clampf(charge if charging else 0.8, 0.15, 1.0))
+			var info := attack_shot(opp.team, opp.point, rs, clampf(charge if charging else 0.8, 0.15, 1.0), opp.finesse)
 			preview_target = info.target
 			preview_valid = true
 			_aim_marker.position = Vector3(preview_target.x, 0.03, preview_target.z)
@@ -3590,7 +3899,7 @@ func hint() -> String:
 							return "Libero vor der 3-m-Linie: nur baggern (A / Leertaste), Pritschen wäre ein Fehler!"
 						return "Zuspiel: Steuerkreuz halten, loslassen = Zuspiel (links Außen · rechts Diagonal · oben Mitte · unten Hinterfeld) · R2 halten = schneller Ball · R1 = Dump · R1+R2 = Zuspieler schlägt"
 					"attack":
-						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger)"
+						return "Angriff: R2/E halten und beim Treffpunkt loslassen · Trefferpunkt rechter Stick/Maus (oben Topspin, unten Leger) · L2/Umschalt dazu = Gefühlsschlag · linker Stick = Anlauf"
 					"free":
 						return "Ball rüberspielen: X/Q oder A/Leertaste halten und rechtzeitig loslassen"
 			if human_player() != null:

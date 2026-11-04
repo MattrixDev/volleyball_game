@@ -79,6 +79,10 @@ func _ready() -> void:
 			lab.main_cam = camera
 			add_child(lab)
 			break
+	# Technikname nach dem Kontakt und Tastenhinweise beim ersten Mal (Skill-Gap)
+	var tech_hints := preload("res://scripts/tech_hints.gd").new()
+	tech_hints.match_node = match_node
+	hud.add_child(tech_hints)
 	var trainer := preload("res://scripts/trainer.gd").new()
 	trainer.match_node = match_node
 	hud.add_child(trainer)
@@ -536,6 +540,8 @@ func _setup_input() -> void:
 	_action("set_fast", [KEY_R], [JOY_BUTTON_B])
 	_action("set_quick", [KEY_F], [JOY_BUTTON_Y])
 	_action("hit", [KEY_E], [], [[JOY_AXIS_TRIGGER_RIGHT, 1.0]])
+	# L2 = Gefuehlstaste (Roll-Shot, tiefe Ecke, Luecke), Tastatur: Umschalt
+	_action("finesse", [KEY_SHIFT], [], [[JOY_AXIS_TRIGGER_LEFT, 1.0]])
 	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])
 	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])
 	_action("toggle_assist", [KEY_F1], [JOY_BUTTON_BACK])
