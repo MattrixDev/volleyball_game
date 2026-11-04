@@ -46,6 +46,8 @@ var anim_kind := ""  # pass, dig, set, attack, free, serve, serve_hold
 var anim_tech := "bump"
 ## Technik-Variante (Technique, vom Spiel gesetzt), z. B. sprawl, dive_side, cross; leer = normale Bewegung.
 var anim_style := ""
+## Annahme gelenkt (A1): so sind die Arme gekippt (rechter Stick: x seitlich, y Richtung Netz; 0 = gerade).
+var platform_tilt := Vector2.ZERO
 ## Spielzeit, bis zu der der Spieler am Boden liegt oder aufsteht (vom Spiel gesetzt, laeuft nicht).
 var down_until := -10.0
 var anim_t := -10.0  # Zeitpunkt der Ballberuehrung
@@ -218,6 +220,7 @@ func reset_state() -> void:
 	approach_style = ""
 	anim_kind = ""
 	anim_style = ""
+	platform_tilt = Vector2.ZERO
 	down_until = -10.0
 	anim_t = -10.0
 	contact_on = false

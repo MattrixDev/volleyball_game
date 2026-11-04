@@ -46,8 +46,8 @@ const PRESET_TEXT := {"leicht": "Leicht", "normal": "Normal", "profi": "Profi", 
 ## (du steuerst selbst: genauer, aber fehleranfaelliger). [Schluessel, Anzeige, Erklaerung]
 const ASSIST_AREAS := [
 	["run", "Laufen zur Annahme", "Assistiert: dein Spieler läuft von selbst zum Ball. Manuell: du läufst mit dem linken Stick und kannst dich genau hinter den Ball stellen."],
-	["pass_aim", "Annahme zielen", "Assistiert: die Annahme geht zum Zuspieler. Manuell: der rechte Stick lenkt die Annahme (flach ans Netz, hoch und sicher)."],
-	["dive", "Hechten", "Assistiert: das Spiel entscheidet, wann du dich wirfst. Manuell: du hechtest selbst mit B."],
+	["pass_aim", "Annahme zielen", "Ohne Stick geht die Annahme immer zum Zuspieler. Assistiert: der rechte Stick wählt grob (vorn flach ans Netz, hinten hoch und sicher, Seite gleicht aus). Manuell: der Stick zielt stufenlos und auch seitlich, falsch gegengehalten fliegt der Ball weg."],
+	["dive", "Hechten", "Assistiert: das Spiel hechtet von selbst, wenn du sonst nicht hinkommst, B hechtet zusätzlich von Hand. Manuell: nur B hechtet, ohne B bleibst du stehen und bist schneller wieder im Spiel."],
 	["attack_aim", "Angriff zielen", "Assistiert: wer nur gut trifft, schlägt trotzdem in die Ecken, die der Stick zeigt. Manuell: nur ein sauber getroffener Ball (R2 genau am höchsten Punkt) erreicht die scharfen Winkel, dafür sind Linie und scharfe Diagonale noch etwas schärfer."],
 	["approach", "Anlauf", "Assistiert: der Angreifer läuft von selbst an. Manuell: der linke Stick steuert den Anlauf (außen, eng, verzögern)."],
 	["set_aim", "Zuspiel-Feinsteuerung", "Assistiert: das Zuspiel geht an die übliche Stelle. Manuell: der rechte Stick schiebt den Ball näher ans Netz oder weiter weg."],

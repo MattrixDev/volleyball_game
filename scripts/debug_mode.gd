@@ -14,6 +14,8 @@ const ENABLED := true
 const DRILLS := [
 	{"id": "annahme", "title": "Aufschlag annehmen", "desc": "Der Gegner schlägt auf, du nimmst an.",
 		"does": ["pass"], "start": "serve_opp"},
+	{"id": "annahme_technik", "title": "Annahme lenken und hechten", "desc": "Rechter Stick lenkt die Annahme, B hechtet, frontal hinter dem Ball nimmst du genauer an.",
+		"does": ["pass", "dig", "free"], "start": "serve_opp"},
 	{"id": "zuspiel", "title": "Zuspielen", "desc": "Die Annahme kommt, du spielst zu.",
 		"does": ["set"], "start": "pass_own"},
 	{"id": "angriff", "title": "Angreifen", "desc": "Die KI spielt dir zu, du schlägst.",
