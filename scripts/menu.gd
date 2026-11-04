@@ -16,7 +16,7 @@ const GROUPS := [
 	["Regeln", ["serve_time"]],
 	["Hilfen und Gegner", ["receive_help", "input_lag", "stick_hold", "ai_defense", "ai_block", "faults"]],
 ]
-const TABS := ["Spiel", "Ton", "Kamera"]
+const TABS := ["Spiel", "Ton", "Kamera", "Hilfen"]
 
 var cfg: GameSettings
 var match_node = null
@@ -31,6 +31,7 @@ var _score: Label
 var _set_buttons := {}
 var _libero_buttons := {}
 var _replay_buttons := {}
+var _assist_buttons := {}  # Bereich -> {true: Knopf assistiert, false: Knopf manuell}
 var _cont: Button
 var _title_btn: Button
 var _shade: ColorRect
@@ -112,7 +113,7 @@ func _ready() -> void:
 	tabs.add_child(_glyph("RB"))
 	box.add_child(tabs)
 
-	_pages = [_game_page(), _sound_page(), _camera_page()]
+	_pages = [_game_page(), _sound_page(), _camera_page(), _assist_page()]
 	for pg in _pages:
 		box.add_child(pg)
 
@@ -257,6 +258,41 @@ func _sound_page() -> Control:
 	adv.visible = false
 	cbox.add_child(adv)
 	return page
+
+
+## Seite Hilfen: je Bereich assistiert oder manuell. Assistiert spielt wie bisher, manuell
+## gibt dir mehr Kontrolle, verlangt aber mehr Koennen.
+func _assist_page() -> Control:
+	var page := VBoxContainer.new()
+	page.add_theme_constant_override("separation", 14)
+	var card := UiTheme.card_light()
+	page.add_child(card)
+	var cbox := VBoxContainer.new()
+	cbox.add_theme_constant_override("separation", 8)
+	card.add_child(cbox)
+	cbox.add_child(UiTheme.heading_light("Hilfe je Bereich"))
+	cbox.add_child(UiTheme.label("Assistiert: das Spiel hilft wie bisher. Manuell: du steuerst selbst, genauer, aber fehleranfälliger.", 16, UiTheme.INK_MUTED))
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 14)
+	grid.add_theme_constant_override("v_separation", 8)
+	for a in GameSettings.ASSIST_AREAS:
+		var l := UiTheme.label(a[1], 19, UiTheme.INK)
+		l.custom_minimum_size = Vector2(320, 0)
+		grid.add_child(l)
+		_assist_buttons[a[0]] = {}
+		for v in [true, false]:
+			var b := _toggle("assistiert" if v else "manuell", 200, a[2])
+			b.pressed.connect(_on_assist.bind(a[0], v))
+			grid.add_child(b)
+			_assist_buttons[a[0]][v] = b
+	cbox.add_child(grid)
+	return page
+
+
+func _on_assist(area: String, v: bool) -> void:
+	cfg.set_assisted(area, v)
+	_refresh()
 
 
 ## Seite Kamera: je Spielablauf Entfernung, Hoehe, Neigung und Sichtfeld, dazu Allgemeines.
@@ -434,6 +470,9 @@ func _refresh() -> void:
 		_libero_buttons[v].set_pressed_no_signal(cfg.libero_auto == v)
 	for v in _replay_buttons:
 		_replay_buttons[v].set_pressed_no_signal(cfg.replays == v)
+	for area in _assist_buttons:
+		for v in _assist_buttons[area]:
+			_assist_buttons[area][v].set_pressed_no_signal(cfg.assisted(area) == v)
 	for i in _cam_btn.size():
 		_cam_btn[i].set_pressed_no_signal(i == _cam_group)
 	for i in _cam_grids.size():
@@ -491,6 +530,8 @@ func _focus_first() -> void:
 		_cam_btn[_cam_group].grab_focus()
 	elif _tab == 1:
 		_sliders["master"].grab_focus()
+	elif _tab == 3:
+		_assist_buttons[GameSettings.ASSIST_AREAS[0][0]][true].grab_focus()
 	else:
 		_cont.grab_focus()
 

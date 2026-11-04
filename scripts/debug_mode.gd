@@ -18,6 +18,8 @@ const DRILLS := [
 		"does": ["set"], "start": "pass_own"},
 	{"id": "angriff", "title": "Angreifen", "desc": "Die KI spielt dir zu, du schlägst.",
 		"does": ["attack"], "start": "pass_own"},
+	{"id": "angriff_technik", "title": "Angriffstechniken", "desc": "Sauber treffen, L2-Gefühlsschläge und Anlauf mit dem linken Stick.",
+		"does": ["attack"], "start": "pass_own"},
 	{"id": "aufschlag", "title": "Aufschlagen", "desc": "Du schlägst auf, immer wieder.",
 		"does": ["serve"], "start": "serve_own"},
 	{"id": "block", "title": "Blocken", "desc": "Der Gegner greift an, du blockst.",

@@ -426,8 +426,8 @@ func update_view(m) -> void:
 			show = true
 			_pad.mode = "attack"
 			var names := {"spike": "Angriff", "topspin": "Topspin", "tip": "Leger", "cut": "Cut Shot", "blockout": "Block-Out"}
-			var info: Dictionary = m.attack_shot(m.opp.team, m.opp.point, m.rs, 0.8)
-			_pad.title = "Angriff: " + names.get(info.style, "Angriff")
+			var info: Dictionary = m.attack_shot(m.opp.team, m.opp.point, m.rs, 0.8, m.opp.finesse)
+			_pad.title = "Angriff: " + names.get(info.style, TechNames.text(info.style) if TechNames.text(info.style) != "" else "Angriff")
 	_pad.visible = show
 	if show:
 		_pad.contact = m.rs
