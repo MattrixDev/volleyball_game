@@ -64,6 +64,7 @@ func _start_dive(o) -> bool:
 	o.tech = "bump"
 	o.win_scale *= 1.3  # der Hecht ueberbrueckt Raum: das Timing ist etwas gnaediger
 	if pl.dive_timer <= 0.0:
+		pl.anim_t = o.t  # die Figur plant den Hecht so, dass sie im Kontakt voll gestreckt ist
 		pl.dive()
 	m._press(o, e, "")
 	return true
