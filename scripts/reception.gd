@@ -154,6 +154,8 @@ func pass_mods(o, v: Dictionary) -> Dictionary:
 ## Folge fuer das Zuspiel: flache Annahme erlaubt den Schnellangriff auch knapp, hohe Annahme nicht.
 func set_tempo_after_pass(o, tempo: String) -> String:
 	var k: String = m.pass_kind[o.team]
+	if k == "pass_flat":
+		o.slack += 0.4  # der Ball ist schnell am Netz: der Zuspieler steht rechtzeitig, Schnellangriff geht
 	if k == "pass_high" and tempo == "quick":
 		if o.human:
 			m.popup(o.player, "Annahme zu hoch für Schnellangriff", m.Q_COLOR[m.Q.WEAK])
