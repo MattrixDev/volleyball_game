@@ -233,6 +233,7 @@ func jump() -> void:
 
 func dive() -> void:
 	dive_timer = 0.7
+	_dive_t0 = now
 
 
 func spike_hand() -> float:
@@ -433,7 +434,7 @@ func _animate(delta: float) -> void:
 		pass  # Meshy-Hechtbagger kippt den Koerper selbst
 	elif dive_timer > 0.0:
 		# Ablauf: nach vorn abdruecken, flach auf den Bauch rutschen, wieder aufstehen.
-		var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+		var kd := _dive_k()
 		tilt = -1.45 * smoothstep(0.0, 0.35, kd) * (1.0 - smoothstep(0.7, 1.0, kd))
 	# Laufen: beim Antreten nach vorn, beim Bremsen nach hinten, in Kurven nach innen neigen.
 	var acc_loc := _acc.rotated(Vector3.UP, -_yaw)
@@ -897,6 +898,13 @@ func _contact_ik() -> void:
 		tg = {"l": plat - r * 0.065, "r": plat + r * 0.065}
 		# Haende ineinander: Finger zeigen nach vorn unten, Handflaechen zueinander, Daumen parallel.
 		var fd := f * 0.75 - up * 0.65
+		# Gelenkte Annahme: zur Zielseite liegt das Handgelenk tiefer (die Plattform zeigt dorthin),
+		# Richtung Netz zeigen die Unterarme steiler nach unten, weg vom Netz flacher.
+		var pt := _ptilt()
+		if pt.length() > 0.05:
+			tg["l"] += up * 0.07 * pt.x
+			tg["r"] -= up * 0.07 * pt.x
+			fd = (f * (0.75 - 0.25 * pt.y) - up * (0.65 + 0.25 * pt.y)).normalized()
 		hands = {"l": [fd, r + up * 0.3], "r": [fd, -r + up * 0.3]}
 		match _astyle():
 			"overhead":
@@ -1522,6 +1530,12 @@ func _tech() -> String:
 	return "bump" if _astyle() == "overhead" else anim_tech
 
 
+## Gelenkte Annahme (rechter Stick, vom Spiel gesetzt): x seitlich (+ = rechts), y Richtung Netz.
+func _ptilt() -> Vector2:
+	var v = get("platform_tilt")
+	return v if v is Vector2 else Vector2.ZERO
+
+
 ## Liegt der Ball rechts (+1) oder links (-1) vom Koerper?
 func _ball_side() -> float:
 	var off := (contact_pt - position).rotated(Vector3.UP, -_yaw)
@@ -1654,7 +1668,7 @@ func _p_block_code() -> Dictionary:
 
 
 func _p_dive() -> Dictionary:
-	var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+	var kd := _dive_k()
 	var clip := HumanFigure.clip_pose("vb_hechtbagger", 0.08 + kd * 0.42, false)
 	if not clip.is_empty():
 		_style_dive(clip, kd)
@@ -1695,12 +1709,30 @@ func _style_dive(p: Dictionary, kd: float) -> void:
 		p[k] = _qlerp(p.get(k, Vector3.ZERO), arm[k], reach)
 
 
+var _dive_t0 := -10.0
+
+
+## Fortschritt des Hechtsprungs 0..1. Springt der Spieler frueh ab (Taste vor dem Ballkontakt,
+## bis 0,6 s), liegt der Ballkontakt in der Flugphase mit gestreckten Armen (k ~ 0,45), nicht erst
+## am Boden; danach rutscht und steht er in der restlichen Zeit auf.
+func _dive_k() -> float:
+	var k := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+	var lead := anim_t - _dive_t0
+	if lead <= 0.05 or lead > 0.69 or anim_kind not in ["pass", "dig", "free", "set"]:
+		return k
+	var kc := 0.45 * smoothstep(0.05, 0.35, lead)
+	var t := now - _dive_t0
+	if t < lead:
+		return kc * t / lead
+	return clampf(kc + (1.0 - kc) * (t - lead) / (0.7 - lead), 0.0, 1.0)
+
+
 ## dive_side: Rollwinkel des ganzen Koerpers (auf die Seite zum Ball)
 func _dive_roll() -> float:
 	if _astyle() != "dive_side":
 		return 0.0
 	if dive_timer > 0.0:
-		var kd := 1.0 - clampf(dive_timer / 0.7, 0.0, 1.0)
+		var kd := _dive_k()
 		return -_ball_side() * 0.95 * smoothstep(0.05, 0.35, kd)
 	if _getup > 0.0:  # liegt auf der Seite, dreht sich beim Aufstehen zurueck auf den Bauch
 		var k := clampf(1.0 - _getup / GETUP_T, 0.0, 1.0)
@@ -1888,6 +1920,9 @@ func _target_pose_main() -> Dictionary:
 			tech["hips"] = (tech.get("hips", Vector3.ZERO) as Vector3) + Vector3(-0.12 * ext, 0, 0)
 			tech["chest"] = (tech.get("chest", Vector3.ZERO) as Vector3) + Vector3(0.35 * ext, 0, 0)
 			tech["head"] = (tech.get("head", Vector3.ZERO) as Vector3) + Vector3(-0.35 * ext, 0, 0)
+		if _tech() != "over" and _ptilt().length() > 0.05:
+			var pt := _ptilt()
+			tech["chest"] = (tech.get("chest", Vector3.ZERO) as Vector3) + Vector3(-0.1 * pt.y, 0.0, -0.2 * pt.x)
 		if _tech() != "over" and _astyle() != "":
 			_style_dig(tech, _astyle(), rel)
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
