@@ -125,3 +125,13 @@ static func block_style(committed: bool, late: bool, reach_gap: float) -> String
 	if reach_gap > 0.25:
 		return "soft"
 	return "commit" if committed else "read"
+
+
+## Hechten von Hand (B): seitlich = Hecht zur Seite, sonst nach vorn (Sprawl); sehr weit bei
+## einer Abwehr = Pancake. fwd/lat = Richtung zum Treffpunkt, dist = Abstand (m).
+static func manual_dive(fwd: float, lat: float, dist: float, dig: bool) -> String:
+	if dig and dist > 1.9:
+		return "pancake"
+	if absf(lat) > absf(fwd) and dist > 0.3:
+		return "dive_side"
+	return "sprawl"

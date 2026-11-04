@@ -108,6 +108,13 @@ class Opp:
 	var approach_z := 0.0  # seitlicher Versatz des Anlaufstarts (Welt-z)
 	var delayed := false  # Anlauf schon verzoegert
 	var offered := false  # Tastenhinweise fuer diesen Kontakt schon angeboten
+	# Annahme steuerbar (Reception): rechter Stick, frontal, Hecht von Hand
+	var aim := Vector2.ZERO  # rechter Stick bei der Annahme (x seitlich, y Richtung Netz)
+	var dove := false  # mit B gehechtet
+	var dive_e := 0.0  # Timing des Hechts (s, < 0 = frueh)
+	var square := false  # frontal hinter dem Ball
+	var recv_keys: Array = []  # erkannte Annahme-Techniken (pass_flat, square, dive, ...)
+	var hinted := false  # Tastenhinweis fuer diese Annahme schon gemeldet
 
 
 var phase := Phase.INTRO
@@ -143,7 +150,12 @@ var serve_kind := 1  # 0 Stand, 1 Sprung
 var serve_contact := Vector2.ZERO
 var ai_serve_e := 0.0
 var serve_aim := Vector2(5.5, 0.0)
-var assist := true
+## Laufhilfe (Hilfe-Bereich "run"): an = der Spieler laeuft von selbst zum Ball.
+var assist: bool:
+	get:
+		return cfg.assisted("run")
+	set(v):
+		cfg.set_assisted("run", v)
 var slowmo_on := true
 var zoom_on := true
 var human_team := 0
@@ -205,6 +217,9 @@ var skilled := false  # Test (mit --autopress): Koenner statt Einsteiger
 var _auto_fin := false
 var _auto_mv := Vector2.ZERO
 var drill = null  # Debug-Modus: laufende Uebung (DebugDrill), sonst null
+var recv: Reception  # Annahme steuerbar (A1, A2, A4), siehe reception.gd
+var pass_kind := ["", ""]  # wie die letzte Annahme je Team gespielt wurde (pass_flat, pass_high, ...)
+var pro_bot := false  # Test: --pro, der simulierte Spieler nutzt die neuen Annahme-Techniken
 var hud = null
 var cfg := GameSettings.new()
 var rng := RandomNumberGenerator.new()
@@ -243,6 +258,7 @@ var touch_total := 0
 
 func _ready() -> void:
 	rng.randomize()
+	recv = Reception.new(self)
 	if not OS.get_cmdline_user_args().has("--autoplay"):
 		cfg.load_file()
 	for a in OS.get_cmdline_user_args():
@@ -270,6 +286,8 @@ func _ready() -> void:
 			autopress = true  # wie --autopress, aber mit Kamera, Zeitlupe und Anzeigen
 		elif a == "--trace":
 			trace = true
+		elif a == "--pro":
+			pro_bot = true
 		elif a.begins_with("--rot="):
 			test_rot = int(a.get_slice("=", 1))
 		elif a == "--check":
@@ -1090,7 +1108,7 @@ func _hold_ball_at_server() -> void:
 func _empty_input() -> Dictionary:
 	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "dpad_down": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_held": false,
 		"bump_held": false, "over_held": false, "bump_up": false, "over_up": false, "dpad_up": Vector2.ZERO,
-		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false, "finesse_held": false}
+		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false, "finesse_held": false, "rs_pad": Vector2.ZERO}
 
 
 func _read_input() -> Dictionary:
@@ -1098,6 +1116,7 @@ func _read_input() -> Dictionary:
 	d.mv = Input.get_vector("move_left", "move_right", "move_down", "move_up")
 	var stick := _held_stick(Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up"))
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
+	d.rs_pad = stick if stick.length() > 0.15 else Vector2.ZERO  # nur Stick / IJKL, ohne Maus
 	d.mouse_rs = mouse_rs
 	d.dump_held = Input.is_action_pressed("set_dump")
 	d.bump = Input.is_action_just_pressed("bump")
@@ -1411,6 +1430,8 @@ func _auto_input() -> Dictionary:
 						var r := rng.randf()
 						d.dump_held = r >= 0.75 and r < 0.9  # R1 (mit R2 zusammen: Zuspieler schlaegt)
 						d.hit_held = (r >= 0.5 and r < 0.75) or r >= 0.85  # R2
+					elif (pro_bot or skilled) and opp.kind != "free" and _pro_reception(d):
+						pass
 					elif opp.speed <= OVER_OK:
 						d.over_up = true
 					else:
@@ -1448,6 +1469,24 @@ func _skilled_attack(d: Dictionary) -> void:
 	d.rs = _auto_rs
 	rs = _auto_rs
 	d.finesse_held = _auto_fin
+
+
+## Test (--pro): ein simulierter Koenner nutzt die neuen Annahme-Techniken. Er hechtet von Hand,
+## wenn der Ball weit weg ist, gleicht seitliche Baelle aus und spielt bei guter Lage flach ans Netz.
+func _pro_reception(d: Dictionary) -> bool:
+	var o := opp
+	var side: float = team_local(o.team, o.point).y - team_local(o.team, o.player.position).y
+	var sp := _stand_pos(o, Vector3(o.point.x, 0.0, o.point.z))
+	if flat_dist(o.player.position, sp) > Technique.reach(_defense_style(o)) - 0.2 and Technique.goes_down(_defense_style(o)):
+		d.fast = true  # B: Hecht
+		_auto_t = -1.0
+		return true
+	if absf(side) > 0.3:
+		d.rs_pad = Vector2(-signf(side), 0.0)
+	elif o.kind == "pass" and o.speed < 20.0:
+		d.rs_pad = Vector2(0.0, 1.0)
+	d.bump_up = true
+	return true
 
 
 func _due(ideal: float) -> bool:
@@ -2049,7 +2088,10 @@ func _rally_input(inp: Dictionary) -> void:
 				else:
 					hp.manual_dir = _stick_dir(mv)
 				hp.prep = "bump" if inp.bump_held else ("over" if inp.over_held else "")
-				if inp.bump_up:
+				_reception_hints(opp)
+				if recv.input(opp, inp):
+					pass  # B: Hecht von Hand, der Druck ist der Kontakt
+				elif inp.bump_up:
 					_human_touch("bump", "")
 				elif inp.over_up:
 					_human_touch("over", "")
@@ -2256,6 +2298,8 @@ func _shot_blocked(o: Opp, contact: Vector2) -> bool:
 func execute_touch(o: Opp, e: float, choice: String) -> void:
 	o.done = true
 	var pl := o.player
+	if o.human and o.kind in ["pass", "dig", "free"]:
+		recv.before_touch(o)
 	var q := classify(e, o.kind, o.win_scale)
 	var reach := 1.25
 	match o.kind:
@@ -2270,12 +2314,12 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	if defense:
 		# Die Technik bestimmt die Reichweite: wer zu weit weg ist, muss sich strecken oder hechten.
 		if not o.style_locked or horiz > Technique.reach(o.style):
-			var st := _defense_style(o)
+			var st := recv.filter_style(o, _defense_style(o))
 			if Technique.reach(st) > Technique.reach(o.style):
 				o.style = st
 		var cap := {"pass": 1.25, "free": 1.4, "dig": 2.0}[o.kind] as float
 		reach = minf(Technique.reach(o.style), cap) if o.style != "" else 0.75
-		reach = maxf(reach, 0.75)
+		reach = recv.reach(o, maxf(reach, 0.75))
 		pl.anim_style = o.style
 	if o.no_reach:
 		pl.dive()
@@ -2319,7 +2363,7 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		libero_set_front[o.team] = true
 	if defense:
 		# Folgen der Technik: nach Hecht oder Sprawl liegt der Spieler kurz, der Ball wird ungenauer.
-		if Technique.goes_down(o.style):
+		if Technique.goes_down(o.style) and not (o.dove and pl.dive_timer > 0.0):
 			pl.dive()
 		pl.down_until = clock + Technique.recovery(o.style)
 		q = maxi(q, Technique.best_quality(o.style))
@@ -2342,6 +2386,10 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 	var label: String = Q_TEXT[q]
 	if o.human and o.kind != "attack":
 		label = ("Pritschen · " if o.tech == "over" else "Baggern · ") + label
+	if defense:
+		pass_kind[o.team] = ""
+	if defense and o.human:
+		recv.done(o, q)
 	if o.human:
 		label += timing_hint(e, q)
 	popup(pl, label, Q_COLOR[q])
@@ -2386,6 +2434,15 @@ func _log_touch(o: Opp, q: int) -> void:
 		"tempo": set_tempo[o.team], "quality": q, "approach": o.approach, "human": o.human})
 
 
+## Tastenhinweis: einmal pro Annahme melden, welche neuen Techniken gerade gehen.
+func _reception_hints(o: Opp) -> void:
+	if o.hinted or o.t - clock > 1.2:
+		return
+	o.hinted = true
+	for k in recv.available(o):
+		technique_available.emit(k)
+
+
 func _fault(o: Opp, reason: String) -> void:
 	popup(o.player, reason, Q_COLOR[Q.MISS])
 	last_touch_team = o.team
@@ -2415,11 +2472,17 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	# dorthin, wohin die Arme gekippt waren (Ball neben dem Koerper getroffen).
 	var ed := _err_dir(e, o.kind, o.win_scale)
 	var side := clampf(team_local(o.team, o.point).y - team_local(o.team, o.player.position).y, -0.6, 0.6) / 0.6
+	# Annahme gelenkt (A1) oder frontal (A2): Ziel, Hoehe und Streuung anpassen.
+	var mods := recv.pass_mods(o, {"d": d, "l": l, "spread": spread, "side": side, "T_mul": 1.0, "h": H_SET, "ex_mul": 1.0})
+	d = mods.d + excess(e, o.kind, o.win_scale) * 8.0 * (mods.ex_mul - 1.0)
+	l = mods.l
+	spread = mods.spread
+	side = mods.side
 	var off := Vector2(ed * spread * 0.6, side * spread * 0.8)
 	var target := court_pos(o.team, Vector2(d + off.x, l + off.y))
-	target.y = H_SET
+	target.y = mods.h
 	var dist := flat_dist(target, ball.position)
-	var T := clampf(0.9 + dist / 7.0, 1.0, 1.8)
+	var T: float = clampf(0.9 + dist / 7.0, 1.0, 1.8) * float(mods.T_mul)
 	if q == Q.WEAK:
 		T *= 0.85
 	ball_vel = Ballistics.launch_with_time(ball.position, target, T)
@@ -2436,6 +2499,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	var tempo: String = parts[1] if parts.size() > 1 else "auto"
 	if tempo == "auto":
 		tempo = _ai_set_tempo(o, q)
+	tempo = recv.set_tempo_after_pass(o, tempo)
 	var bump_set := o.tech != "over"
 	if tempo != "high" and (bump_set or q == Q.WEAK):
 		if o.human:
@@ -3650,7 +3714,7 @@ func _update_players(delta: float) -> void:
 		# Technik aus der Lage; kurz vor dem Kontakt steht sie fest (die Bewegung laeuft schon).
 		if not opp.style_locked:
 			if opp.kind in ["pass", "dig", "free"]:
-				opp.style = _defense_style(opp)
+				opp.style = recv.filter_style(opp, _defense_style(opp))
 			elif opp.kind == "attack":
 				opp.style = _attack_style(opp)
 			elif opp.kind == "set":
@@ -3822,6 +3886,9 @@ func _update_visuals() -> void:
 				sa.x = minf(sa.x, 3.2)
 			sa.y -= serve_contact.x * 1.5
 			_aim_marker.position = court_pos(human_team, Vector2(-sa.x, sa.y)) + Vector3(0, 0.03, 0)
+			aim_vis = true
+		elif show_ring and opp.kind in ["pass", "dig"] and opp.aim.length() >= Reception.STICK_MIN:
+			_aim_marker.position = recv.preview(opp) + Vector3(0, 0.03, 0)  # wohin die gelenkte Annahme geht
 			aim_vis = true
 		elif show_ring and opp.kind == "attack":
 			var info := attack_shot(opp.team, opp.point, rs, clampf(charge if charging else 0.8, 0.15, 1.0), opp.finesse)
