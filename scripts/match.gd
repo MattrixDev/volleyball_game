@@ -171,6 +171,10 @@ var quick := false  # Schnellspiel: ein Satz bis 15
 var side_change_pending := false
 var side_changed_deciding := false
 var streak := [0, 0]  # Punkte in Folge
+## K1/K2: Spielplan und Gedaechtnis je Team (siehe ai_plan.gd); wird zu Spielbeginn gebaut.
+var plans: Array = [null, null]
+var _last_attack := {}  # letzter Angriff fuer das Gedaechtnis: team, lane, dir
+var _rally_pattern: Array = []  # Ablauf des Ballwechsels (nur Messung im Autoplay)
 var timeout_team := -1
 var ai_timeout_wanted := [false, false]
 var whistle_done := false
@@ -726,7 +730,9 @@ func new_match() -> void:
 	mstat = [{}, {}]
 	sides = [-1.0, 1.0]
 	match_first_server = rng.randi() % 2  # Auslosung
+	plans = [null, null]
 	_start_set()
+	_scouting_banner()
 
 
 ## Aus dem Startmenue: neues Spiel mit dir als Team 0, frische Kader.
@@ -844,13 +850,7 @@ func start_rally() -> void:
 	if human_serves():
 		serve_aim = Vector2(5.5, 0.0)
 	else:
-		serve_aim = Vector2(rng.randf_range(4.0, 7.5), rng.randf_range(-3.2, 3.2))
-		serve_kind = 1 if rng.randf() < 0.55 else 0
-		var r := rng.randf()
-		if serve_kind == 1:
-			serve_contact = Vector2(rng.randf_range(-0.3, 0.3), 0.7) if r < 0.6 else Vector2(rng.randf_range(-0.2, 0.2), 0.0)
-		else:
-			serve_contact = Vector2(rng.randf_range(-0.2, 0.2), 0.0) if r < 0.85 else Vector2(0.0, -0.7)
+		_ai_serve_choice()
 	if hud:
 		hud.clear_message()
 	for t in 2:
@@ -1236,7 +1236,7 @@ func _physics_process(delta: float) -> void:
 						popup(server(), "Zu spät", Q_COLOR[Q.MISS])
 						touch_result.emit("serve", serving_team, true, Q.MISS, 1.0, 0.0, 0.0)
 			elif not serve_done and clock >= serve_ideal + ai_serve_e:
-				_serve_hit(ai_serve_e, rng.randf_range(0.7, 0.95), serve_contact, 0.9)
+				_serve_hit(ai_serve_e, rng.randf_range(plan(serving_team).serve_power.x, plan(serving_team).serve_power.y), serve_contact, 0.9)
 			_step_ball(delta)
 		Phase.RALLY:
 			_rally_input(inp)
@@ -1971,6 +1971,9 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 	blockers[def] = list
 	block_dirs[def] = dirs
 	block_err[def] = rng.randf_range(-0.4, 0.4)
+	var pz = _predicted_cross_z(def, _block_att, p)
+	if pz != null:
+		block_err[def] = clampf(float(pz) - p.z, -0.6, 0.6)  # Block stellt die Lieblingsrichtung zu
 	# Block-Technik je Blocker: kommt er rechtzeitig hin, reicht er ueber den Ball?
 	var att: VPlayer = _block_att
 	var att_top := (att.jump_v0 * att.jump_v0 / (2.0 * G) + VPlayer.SPIKE_REACH + att.reach_add) if att != null else 3.3
@@ -2190,10 +2193,14 @@ func _press(o: Opp, e: float, choice: String) -> void:
 
 func _ai_actions() -> void:
 	if opp != null and not opp.done:
+		# Die Flugbahn weicht etwas von der Vorausberechnung ab (Flatterball, Bildrate): ist der Ball
+		# schon fast am Boden, kommt der Kontakt jetzt (mit dem geplanten Timing-Fehler), statt dass
+		# der Ball unberuehrt aufkommt. Vorher landeten so viele gute Annahmen als Ass.
+		var floor_now := clock >= opp.t - 0.25 and ball.position.y < R + 0.3 and ball_vel.y < 0.0 and opp.kind in ["pass", "dig", "free"]
 		if opp.pending:
-			if clock >= opp.t:
+			if clock >= opp.t or floor_now:
 				execute_touch(opp, opp.press_e, opp.press_choice)
-		elif not opp.human and clock >= opp.t + opp.ai_e:
+		elif not opp.human and (clock >= opp.t + opp.ai_e or floor_now):
 			_ai_prepare(opp)
 			_press(opp, opp.ai_e, drill.ai_choice(opp) if drill != null else "auto")
 		elif opp.human and clock > opp.t + windows(opp.kind)[2] * maxf(opp.win_scale, 1.35 if opp.kind == "attack" else 1.0) + 0.01 + lag_game():
@@ -2220,7 +2227,10 @@ func _ai_block_hands(t: int, b: VPlayer) -> void:
 	var read_p := 0.3 if t == human_team else lerpf(0.1, 0.5, cfg.unit("ai_block"))
 	var read := rng.randf() < read_p
 	var shift := rng.randf_range(-0.3, 0.3)
-	if read:
+	var pz = _predicted_cross_z(t)  # K2: Lieblingsrichtung des Angreifers
+	if not read and pz != null:
+		shift = clampf(float(pz) - b.position.z, -0.45, 0.45)
+	elif read:
 		var info := attack_shot(opp.team, opp.point, opp.rs, opp.power, opp.finesse)
 		var tgt: Vector3 = info.target
 		# Wo kreuzt die Linie Ball -> Ziel das Netz?
@@ -2255,29 +2265,232 @@ func _ai_attack_choice(o: Opp) -> void:
 	if absf(hl) < 1.5:
 		cross = 0.45 if rng.randf() < 0.5 else -0.45
 	var options := [Vector2(0.0, 0.3), Vector2(cross, 0.4), Vector2(cross * 0.6, 0.8), Vector2(cross * 0.25, 0.5)]
+	var pp: AiPlan = plan(o.team)
+	# K2: Richtungen, die zuletzt geblockt oder abgewehrt wurden, kommen nach hinten.
+	var lane: String = o.player.lane
+	options.sort_custom(func(a, b): return pp.avoid(lane, _shot_dir(o, a)) < pp.avoid(lane, _shot_dir(o, b)))
 	var r := rng.randf()
-	if r < 0.1:
+	if r < pp.tip:
 		options.push_front(Vector2(rng.randf_range(-0.5, 0.5), -0.7))  # Leger
-	elif r < 0.16:
+	elif r < pp.tip + 0.06:
 		options.push_front(Vector2(signf(cross) * 0.95, 0.0))  # Cut Shot
-	elif r < 0.2 and absf(hl) > 1.5:
+	elif r < pp.tip + 0.1 and absf(hl) > 1.5:
 		options.push_front(Vector2(-signf(cross) * 0.95, 0.5))  # Block-Out
 	else:
-		var first: Vector2 = options[rng.randi() % options.size()]
+		var first: Vector2 = options[0]
+		for cand in options:
+			if rng.randf() >= pp.avoid(lane, _shot_dir(o, cand)):
+				first = cand
+				break
+		if rng.randf() < 0.35:
+			first = options[rng.randi() % options.size()]
 		options.push_front(first)
 	o.finesse = false
-	o.power = rng.randf_range(0.6, 1.0)
+	o.power = rng.randf_range(pp.attack_power.x, pp.attack_power.y)
 	o.over = o.power
 	o.rs = options[0]
-	if rng.randf() < 0.65:
+	if rng.randf() < pp.block_read:
 		for cand in options:
 			if not _shot_blocked(o, cand):
 				o.rs = cand
 				break
 	# Steht der Block trotzdem im Weg, spielt die KI manchmal einen Gefuehlsschlag darueber.
-	if not o.emergency and _shot_blocked(o, o.rs) and rng.randf() < 0.25:
+	if not o.emergency and _shot_blocked(o, o.rs) and rng.randf() < pp.finesse:
 		o.finesse = true
 		o.rs = Vector2(0.0, 0.8) if rng.randf() < 0.4 else Vector2(0.0, 0.2)
+
+
+# ---------------------------------------------------------------- K1/K2: Spielplan und Gedaechtnis
+
+## Spielplan eines Teams (beim ersten Gebrauch im Spiel aus den Spielerwerten gebaut).
+func plan(t: int) -> AiPlan:
+	if plans[t] == null:
+		var pp := AiPlan.new()
+		var datas: Array = []
+		for pl in players[t]:
+			var d := pdata(pl)
+			if d != null:
+				datas.append(d)
+		pp.build(datas, absi(hash(str(TEAM_NAMES[t]))))
+		pp.adapt = lerpf(0.3, 1.0, cfg.unit("ai_block"))  # leichter Gegner passt sich weniger an
+		plans[t] = pp
+		if autoplay or trace:
+			print("Spielplan T%d %s: %s (+%s) Sprung %.2f Kraft %s schwach %.2f Tempo %.2f" % [t, TEAM_NAMES[t], pp.archetype, pp.second, pp.serve_jump, pp.serve_power, pp.serve_weak, pp.tempo_fast])
+	return plans[t]
+
+
+## Vor dem Spiel: was fuer ein Gegner wartet (K1, Scouting).
+func _scouting_banner() -> void:
+	if hud == null or human_team < 0 or attract or autoplay:
+		return
+	var op := 1 - human_team
+	var pp := plan(op)
+	hud.show_banner("Gegner: %s  ·  %s" % [TEAM_NAMES[op], pp.title], pp.desc)
+
+
+## Kurzer Text fuer die Anzeige "Gegner" im Pausenmenue oder in Hinweisen.
+func scouting_text(t: int) -> String:
+	var pp := plan(t)
+	return "%s: %s" % [pp.title, pp.desc]
+
+
+## KI-Aufschlag nach Spielplan: Art, Risiko und Ziel (oft der schwaechste Annahmespieler).
+func _ai_serve_choice() -> void:
+	var pp := plan(serving_team)
+	var rt := 1 - serving_team
+	serve_kind = 1 if rng.randf() < pp.serve_jump else 0
+	var r := rng.randf()
+	if serve_kind == 1:
+		serve_contact = Vector2(rng.randf_range(-0.3, 0.3), 0.7) if r < 0.6 else Vector2(rng.randf_range(-0.2, 0.2), 0.0)
+	else:
+		serve_contact = Vector2(rng.randf_range(-0.2, 0.2), 0.0)
+		if rng.randf() < pp.serve_short:
+			serve_contact = Vector2(0.0, -0.7)
+	serve_aim = Vector2(rng.randf_range(4.0, 7.5), rng.randf_range(-3.2, 3.2))
+	if rng.randf() < pp.serve_weak:
+		var wk := _weak_receiver(rt, pp)
+		if wk != null:
+			var tl := team_local(serving_team, wk.target)
+			serve_aim = Vector2(clampf(-tl.x + rng.randf_range(-0.7, 0.7), 3.5, 8.2), clampf(tl.y + rng.randf_range(-0.6, 0.6), -3.9, 3.9))
+			stats["KI-Aufschlag auf Schwaechsten"] = stats.get("KI-Aufschlag auf Schwaechsten", 0) + 1
+
+
+## Schwaechster Annahmespieler (kein Libero, kein Zuspieler): Annahmewert, und wer in diesem
+## Spiel schon oft schlecht angenommen hat (Gedaechtnis), zaehlt doppelt.
+func _weak_receiver(rt: int, pp: AiPlan) -> VPlayer:
+	var bad := pp.weakest_receiver()
+	var best: VPlayer = null
+	var bs := 1e9
+	for pl in players[rt]:
+		if pl.role in ["L", "S"]:
+			continue
+		if not _rcv_cache[rt].get("passers", []).has(pl.slot):
+			continue
+		var s := pf(pl, "receive")
+		if bad == str(pl.get_instance_id()):
+			s -= 1.0
+		if s < bs:
+			bs = s
+			best = pl
+	return best
+
+
+## Richtung eines moeglichen Angriffs (line / cross / soft) aus Sicht des Angreifers.
+func _shot_dir(o: Opp, contact: Vector2) -> String:
+	var info := attack_shot(o.team, o.point, contact, o.power, o.finesse)
+	return AiPlan.attack_dir(info.style, team_local(o.team, o.point).y, team_local(o.team, info.target).y)
+
+
+var _k2_att: VPlayer = null
+var _k2_time := -10.0
+var _k2_pred = null  # Weltkoordinate z, wo der Block die Lieblingsrichtung zustellt, oder null
+var _k2_soft := 0.0  # wie stark die Abwehr den Leger erwartet
+
+
+## K2: Liest der Block die Lieblingsrichtung des Angreifers? Einmal je Angriff entschieden
+## (Block und Haende sind sich einig), nur fuer KI-Teams.
+func _predicted_cross_z(def: int, att: VPlayer = null, point = null):
+	if def == human_team:
+		return null
+	if att == null and opp != null and opp.kind == "attack" and opp.team != def:
+		att = opp.player
+		point = opp.point
+	if att == null or point == null:
+		return null
+	if att == _k2_att and clock - _k2_time < 2.5:
+		return _k2_pred
+	_k2_att = att
+	_k2_time = clock
+	_k2_pred = null
+	_k2_soft = 0.0
+	var pp := plan(def)
+	var lane: String = att.lane
+	var tend := pp.tendency(lane)
+	var s := pp.read_strength(lane)
+	for d in ["line", "cross", "soft"]:
+		if d != tend[0] or s < 0.35:
+			pp.should_show(lane + "|" + d, false)
+	if s <= 0.0 or rng.randf() >= s:
+		return null
+	var dir: String = tend[0]
+	var mb := _lane_player(def, "mid")
+	if pp.should_show(lane + "|" + dir, s >= 0.35) and mb != null:
+		popup(mb, ("Abwehr erwartet Leger" if dir == "soft" else "Block stellt %s zu" % AiPlan.dir_text(dir)), Color(0.85, 0.85, 1.0))
+	stats["KI liest " + dir] = stats.get("KI liest " + dir, 0) + 1
+	if dir == "soft":
+		_k2_soft = 1.0
+		return null
+	var p3: Vector3 = point
+	var hl := team_local(att.team, p3).y
+	var side := signf(hl) if absf(hl) > 0.5 else 1.0
+	var l := side * 3.6 if dir == "line" else -side * 3.0
+	if absf(hl) < 1.5:
+		l = hl if dir == "line" else -side * 3.4
+	var tgt := court_pos(att.team, Vector2(-7.0, l))
+	var f := absf(p3.x) / maxf(absf(p3.x - tgt.x), 0.01)
+	_k2_pred = lerpf(p3.z, tgt.z, f)
+	return _k2_pred
+
+
+## K2 in der Abwehr: Hinterspieler ruecken zur erwarteten Richtung, beim erwarteten Leger kommt
+## ein Spieler nach vorn. Vor dem gegnerischen Zuspiel lauert der Mittelblocker auf der
+## Lieblingsbahn des Gegners.
+func _k2_defense(t: int) -> void:
+	if t == human_team or opp == null or opp.team == t:
+		return
+	if opp.kind == "set":
+		var lean := plan(t).lane_lean()
+		if lean[1] > 0.0 and lean[0] in ["left", "right"]:
+			var mb := _lane_player(t, "mid")
+			if mb != null and not mb.airborne:
+				var lz := court_pos(opp.team, Vector2(1.0, -3.6 if lean[0] == "left" else 3.6)).z
+				mb.target.z = lerpf(mb.target.z, lz, 0.4 * float(lean[1]))
+				if plan(t).should_show("lane|" + str(lean[0]), float(lean[1]) > 0.5):
+					popup(mb, "Block erwartet " + ("Außen" if lean[0] == "left" else "Diagonal"), Color(0.85, 0.85, 1.0))
+					stats["KI lauert Bahn"] = stats.get("KI lauert Bahn", 0) + 1
+		return
+	if opp.kind != "attack":
+		return
+	var pz = _predicted_cross_z(t)
+	for pl in players[t]:
+		if pl in blockers[t] or is_front_row(pl) or is_down(pl):
+			continue
+		if pz != null:
+			# Die Lieblingsrichtung geht hinter dem Block weiter: dorthin ruecken.
+			var tz: float = lerpf(opp.point.z, float(pz), 2.2)
+			pl.target.z = lerpf(pl.target.z, clampf(tz, -4.2, 4.2), 0.3)
+		elif _k2_soft > 0.0 and pl.slot == 6:
+			pl.target = pl.target.lerp(court_pos(t, Vector2(4.0, team_local(t, opp.point).y * 0.5)), 0.7)
+
+
+## Gedaechtnis fuettern: Angriffe, Bahnen, Annahmen; eigene Angriffe, die abgewehrt wurden.
+func _observe_touch(o: Opp, q: int, tgt: Vector3) -> void:
+	var other := 1 - o.team
+	match o.kind:
+		"attack":
+			var key := last_shot_style if o.tech_key == "" or o.tech_key == "clean" else o.tech_key
+			var dir := AiPlan.attack_dir(key, team_local(o.team, o.point).y, team_local(o.team, tgt).y)
+			plan(other).observe_attack(o.player.lane, dir)
+			_last_attack = {"team": o.team, "lane": o.player.lane, "dir": dir}
+			_rally_pattern.append("%s-%s-%s" % [set_tempo[o.team], o.player.lane, dir])
+		"pass":
+			plan(other).observe_reception(str(o.player.get_instance_id()), q)
+		"dig":
+			if not _last_attack.is_empty() and _last_attack.team != o.team and q <= Q.GOOD:
+				plan(_last_attack.team).observe_own(_last_attack.lane, _last_attack.dir, true)
+				_last_attack = {}
+
+
+func _observe_rally_end(winner: int, reason: String) -> void:
+	if not _last_attack.is_empty():
+		plan(_last_attack.team).observe_own(_last_attack.lane, _last_attack.dir, winner != _last_attack.team)
+	_last_attack = {}
+	# Messung gegen "Schema F": Ablauf des Ballwechsels (erster Angriff und Zahl der Angriffe).
+	if autoplay or trace:
+		var first: String = _rally_pattern[0] if not _rally_pattern.is_empty() else "ohne Angriff"
+		var key := "Muster %s |%d" % [first, mini(_rally_pattern.size(), 3)]
+		stats[key] = stats.get(key, 0) + 1
+	_rally_pattern = []
 
 
 func _shot_blocked(o: Opp, contact: Vector2) -> bool:
@@ -2432,6 +2645,7 @@ func _log_touch(o: Opp, q: int) -> void:
 	var tgt := Ballistics.pos_at(ball.position, ball_vel, lt, ball_g) if lt > 0.0 else ball.position
 	touch_logged.emit(o.team, {"kind": o.kind, "key": o.tech_key, "lane": o.player.lane, "target": tgt,
 		"tempo": set_tempo[o.team], "quality": q, "approach": o.approach, "human": o.human})
+	_observe_touch(o, q, tgt)
 
 
 ## Tastenhinweis: einmal pro Annahme melden, welche neuen Techniken gerade gehen.
@@ -2533,6 +2747,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	if tempo == "quick" and (lane_choice == "auto" or lane_choice == ""):
 		lane_choice = "mid"
 	var hitter := _pick_hitter(o.team, setter, lane_choice, sl)
+	plan(1 - o.team).observe_set(hitter.lane)
 	var d := 1.0
 	var l := -3.6
 	var T := 1.15
@@ -2718,22 +2933,23 @@ func _do_setter_attack(o: Opp, q: int, e: float, lane_choice: String) -> void:
 func _ai_set_tempo(o: Opp, q: int) -> String:
 	if q == Q.WEAK or o.tech != "over":
 		return "high"
-	var r := rng.randf()
+	var pp: AiPlan = plan(o.team)
 	var mid_blocker := _lane_player(1 - o.team, "mid")
 	var leaning := mid_blocker != null and absf(mid_blocker.position.z) > 2.0  # Block steht aussen: Mitte/Dump offen
-	if _can_dump(o) and o.player.role == "S" and r < (0.2 if leaning else 0.07):
+	if _can_dump(o) and o.player.role == "S" and rng.randf() < pp.dump_rate * (2.5 if leaning else 1.0):
 		return "dump"
-	if pass_quality <= Q.GOOD and r < 0.55:
-		return "quick" if (leaning and r < 0.3) else "fast"
-	return "high" if r < 0.8 else "fast"
+	if pass_quality <= Q.GOOD and rng.randf() < pp.tempo_fast:
+		return "quick" if rng.randf() < pp.quick_bias * (1.6 if leaning else 1.0) else "fast"
+	return "fast" if rng.randf() < 0.2 * pp.tempo_fast else "high"
 
 
 func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VPlayer:
 	var lane := choice
 	if choice == "auto" or choice == "":
 		var r := rng.randf()
-		var wl := 0.4
-		var wr := 0.3
+		var lw: Dictionary = plan(team).lane_w  # K1: Spielplan bestimmt, wen das Team anspielt
+		var wl: float = lw.left
+		var wr: float = lw.right
 		# Steht der menschliche Mittelblocker aussen, spielt die KI eher dorthin, wo er nicht ist.
 		var rb := _lane_player(1 - team, "mid")
 		if rb != null and (1 - team) == human_team:
@@ -2741,10 +2957,11 @@ func _pick_hitter(team: int, setter: VPlayer, choice: String, sl: Vector2) -> VP
 			var zr := court_pos(team, Vector2(1.0, 3.6)).z
 			var dl := absf(rb.position.z - zl)
 			var dr := absf(rb.position.z - zr)
-			wl = 0.3 + 0.35 * dl / (dl + dr + 0.01)
-			wr = 0.3 + 0.35 * dr / (dl + dr + 0.01)
+			wl = lw.left * (0.75 + 0.9 * dl / (dl + dr + 0.01))
+			wr = lw.right * (0.75 + 0.9 * dr / (dl + dr + 0.01))
 		if pass_quality <= Q.GOOD and sl.x < 2.5:
-			lane = "left" if r < wl else ("right" if r < wl + wr else "mid")
+			var wsum: float = wl + wr + float(lw.mid)
+			lane = "left" if r < wl / wsum else ("right" if r < (wl + wr) / wsum else "mid")
 		else:
 			lane = "left" if r < wl / (wl + wr) else "right"
 	var h := _lane_player(team, lane)
@@ -3447,6 +3664,7 @@ func _end_rally(winner: int, reason: String) -> void:
 	_hitter = [null, null]
 	charging = false
 	flutter = 0.0
+	_observe_rally_end(winner, reason)
 	score[winner] += 1
 	streak[winner] += 1
 	streak[1 - winner] = 0
@@ -3649,6 +3867,9 @@ func _update_players(delta: float) -> void:
 				if not (pl in list) and is_front_row(pl):
 					var lane: Vector2 = FORM["defense"]["front"][pl.lane if pl.lane in ["left", "mid", "right"] else "right"]
 					pl.target = court_pos(t, Vector2(3.0, lane.y))
+	if phase == Phase.RALLY:
+		for t2 in 2:
+			_k2_defense(t2)
 	# Vor dem Aufschlag: Sprungaufschlaeger steht weiter hinten (Platz zum Anlauf).
 	if phase == Phase.PRE_SERVE:
 		var srv0 := server()
