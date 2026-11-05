@@ -192,6 +192,7 @@ const PLAYS := {
 const PLAY_KEYS := ["quick", "slide", "pipe", "combo"]
 var play_call := ["", ""]  # angesagter Spielzug je Team ("" = keiner)
 var _decoys: Array = [[], []]  # je Team: Taeuscher {pl, goal, jump_at, until, jumped}
+var _net_joust := {}  # V-2: geplanter Netzkampf bei einem flachen Ball uebers Netz {a, b}
 var _play_info := [{}, {}]  # letztes Zuspiel je Team: call, geo, quick_z (Taeuscher Mitte) fuer den Block
 var _dpad_y := false  # Steuerkreuz gehoert gerade zur Spielzug-Ansage (Y gehalten)  # A beim Aufschlag: sicherer Aufschlag, das Spiel trifft selbst
 var _human_stuff := false  # dein voller Block in diesem Ballwechsel: immer Wiederholung
@@ -843,6 +844,7 @@ func start_rally() -> void:
 	block_dirs = [[], []]
 	play_call = ["", ""]
 	_decoys = [[], []]
+	_net_joust = {}
 	_play_info = [{}, {}]
 	touches = 0
 	possession = serving_team
@@ -1759,6 +1761,12 @@ func _try_team(team: int) -> bool:
 		h = H_ATTACK
 	else:
 		kind = "free"
+	# V-2 Overpass: eine zu stramme Annahme, Abwehr oder ein freier Ball fliegt hoch und nah ans
+	# Netz auf diese Seite. Der Spieler vorn am Netz darf direkt draufhauen (Mensch mit R2).
+	var over_pl := _overpass_hitter(team, idx, apex)
+	if over_pl != null:
+		kind = "attack"
+		h = H_ATTACK
 
 	var tc := Ballistics.time_to_height(ball.position, ball_vel, h, ball_g)
 	if tc < 0.0 and kind != "attack":
@@ -1771,7 +1779,7 @@ func _try_team(team: int) -> bool:
 	if tc < 0.0:
 		return false
 	var p := Ballistics.pos_at(ball.position, ball_vel, tc, ball_g)
-	if kind == "attack" and (signf(p.x) != side_of(team) or absf(p.x) > 6.0 or absf(p.x) < 0.2):
+	if kind == "attack" and over_pl == null and (signf(p.x) != side_of(team) or absf(p.x) > 6.0 or absf(p.x) < 0.2):
 		kind = "free"
 		h = H_PASS
 		tc = Ballistics.time_to_height(ball.position, ball_vel, h, ball_g)
@@ -1793,7 +1801,11 @@ func _try_team(team: int) -> bool:
 
 	var excluded: VPlayer = last_toucher if last_touch_team == team else null
 	var pl: VPlayer = null
-	if kind == "attack":
+	if over_pl != null:
+		pl = over_pl
+		_hitter[team] = over_pl
+		_play_info[team] = {}
+	elif kind == "attack":
 		pl = _chosen_hitter(team)
 		if pl == excluded or (pl != null and is_down(pl)):
 			pl = null
@@ -1849,7 +1861,9 @@ func _try_team(team: int) -> bool:
 	if kind == "attack":
 		# Notangriff: schlechtes Zuspiel oder Ball zu weit weg vom Netz -> kein voller Schlag.
 		var far := absf(p.x) > (4.6 if not is_front_row(pl) else 3.2)
-		o.emergency = set_q[team] == Q.WEAK or far
+		o.emergency = (set_q[team] == Q.WEAK or far) and over_pl == null
+		if over_pl != null:
+			stats["Overpass-Angriff"] = stats.get("Overpass-Angriff", 0) + 1
 	o.speed = Vector3(ball_vel.x, ball_vel.y - ball_g * tc, ball_vel.z).length()
 	o.human = team == human_team and (drill == null or drill.human_does(kind))
 	# Ein Flatterball ist schwer zu lesen: kleineres Timing-Fenster bei der Annahme.
@@ -1886,6 +1900,31 @@ func _try_team(team: int) -> bool:
 		blockers[1 - team] = []
 	opp = o
 	return true
+
+
+## V-2: Kommt der Ball als Overpass hoch und nah ans Netz, wer vorn kann ihn direkt angreifen?
+## Nur beim ersten Kontakt nach einem Ball, der kein Angriff war (Annahme, Abwehr, freier Ball).
+func _overpass_hitter(team: int, idx: int, apex: float) -> VPlayer:
+	if idx != 0 or not last_action in ["pass", "dig", "free", "set"] or last_touch_team == team:
+		return null
+	if apex < H_ATTACK + 0.05:
+		return null
+	var tc := Ballistics.time_to_height(ball.position, ball_vel, H_ATTACK, ball_g)
+	if tc < 0.25:
+		return null
+	var p := Ballistics.pos_at(ball.position, ball_vel, tc, ball_g)
+	if signf(p.x) != side_of(team) or absf(p.x) < 0.08 or absf(p.x) > 2.2 or absf(p.z) > HALF_W - 0.2:
+		return null
+	var best: VPlayer = null
+	var bd := 1e9
+	for pl in players[team]:
+		if pl.role == "L" or not is_front_row(pl) or is_down(pl):
+			continue
+		var d := flat_dist(pl.position, p)
+		if d <= pl.run_speed * tc + 0.5 and d < bd:
+			bd = d
+			best = pl
+	return best
 
 
 ## Lauftempo nach Schnelligkeit: 40 -> 8 % langsamer, 99 -> 8 % schneller.
@@ -2512,10 +2551,20 @@ func _ai_attack_choice(o: Opp) -> void:
 	options.sort_custom(func(a, b): return pp.avoid(lane, _shot_dir(o, a)) < pp.avoid(lane, _shot_dir(o, b)))
 	var r := rng.randf()
 	if r < pp.tip:
-		options.push_front(Vector2(rng.randf_range(-0.5, 0.5), -0.7))  # Leger
-	elif r < pp.tip + 0.06:
+		# Leger in die Luecke: dorthin, wo am wenigsten Abwehr steht.
+		options.push_front(_gap_contact(o, [Vector2(-0.8, -0.7), Vector2(-0.4, -0.75), Vector2(0.0, -0.7), Vector2(0.4, -0.75), Vector2(0.8, -0.7)], false))
+		stats["KI Leger in Luecke"] = stats.get("KI Leger in Luecke", 0) + 1
+	elif r < pp.tip + 0.05 and not o.emergency:
+		# V-2: Gefuehlsschlag in die tiefe Ecke, die frei ist (nur mit dem Hecht zu erreichen).
+		o.rs = _gap_contact(o, [Vector2(-0.6, 0.8), Vector2(0.6, 0.8)], true)
+		o.finesse = true
+		o.power = rng.randf_range(0.5, 0.75)
+		o.over = o.power
+		stats["KI Ecke"] = stats.get("KI Ecke", 0) + 1
+		return
+	elif r < pp.tip + 0.06 + 0.05:
 		options.push_front(Vector2(signf(cross) * 0.95, 0.0))  # Cut Shot
-	elif r < pp.tip + 0.1 and absf(hl) > 1.5:
+	elif r < pp.tip + 0.15 and absf(hl) > 1.5:
 		options.push_front(Vector2(-signf(cross) * 0.95, 0.5))  # Block-Out
 	else:
 		var first: Vector2 = options[0]
@@ -2543,6 +2592,27 @@ func _ai_attack_choice(o: Opp) -> void:
 	if not o.finesse and not o.emergency and _shot_blocked(o, o.rs) and rng.randf() < 0.12 * (1.0 + pp.finesse):
 		o.finesse = true
 		o.rs = Vector2(0.0, -0.8)
+
+
+## V-2: Unter mehreren Trefferpunkten den waehlen, dessen Landepunkt am weitesten von der
+## naechsten Abwehrspieler entfernt ist (die KI sieht, wo Luecken sind).
+func _gap_contact(o: Opp, cands: Array, finesse: bool) -> Vector2:
+	var best: Vector2 = cands[0]
+	var bs := -1.0
+	for cv in cands:
+		var c: Vector2 = cv
+		var info := attack_shot(o.team, o.point, c, 0.6, finesse)
+		if not info.has("target"):
+			continue
+		var tg: Vector3 = info.target
+		var near := 1e9
+		for pl in players[1 - o.team]:
+			near = minf(near, flat_dist(pl.position, tg))
+		var sc := near + rng.randf_range(0.0, 0.6)  # nicht immer exakt dieselbe Stelle
+		if sc > bs:
+			bs = sc
+			best = c
+	return best
 
 
 # ---------------------------------------------------------------- K1/K2: Spielplan und Gedaechtnis
@@ -2971,7 +3041,9 @@ func _fault(o: Opp, reason: String) -> void:
 func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	pass_quality = q
 	# Zu frueh: Ball geht Richtung Netz (oder sogar rueber). Zu spaet: zu weit nach hinten.
-	var d := SETTER_TARGET.x + excess(e, o.kind, o.win_scale) * 8.0
+	# V-2: eine harte Annahme zu frueh genommen springt weiter Richtung Netz, auch mal rueber.
+	var ex0 := excess(e, o.kind, o.win_scale)
+	var d := SETTER_TARGET.x + ex0 * 8.0 * (1.0 + (0.8 * hard_ball(o.speed) if ex0 < 0.0 else 0.0))
 	var l := SETTER_TARGET.y
 	var spread := 0.0
 	if q == Q.GOOD:
@@ -3000,6 +3072,8 @@ func _do_pass(o: Opp, q: int, e: float, was_flutter: bool) -> void:
 	var off := Vector2(ed * spread * 0.6, side * spread * 0.8)
 	var target := court_pos(o.team, Vector2(d + off.x, l + off.y))
 	target.y = mods.h
+	if signf(target.x) != side_of(o.team):
+		stats["Overpass"] = stats.get("Overpass", 0) + 1
 	var dist := flat_dist(target, ball.position)
 	var T: float = clampf(0.9 + dist / 7.0, 1.0, 1.8) * float(mods.T_mul)
 	if q == Q.WEAK:
@@ -3173,17 +3247,28 @@ func _joust(o: Opp, hitter: VPlayer, l: float) -> bool:
 			rival = pl
 	if rival == null or absf(rival.position.z - z) > 2.5:
 		return false
+	hitter.jump()
+	rival.jump()
+	_net_fight(hitter, rival, Vector3(side_of(o.team) * 0.15, NET_H + 0.35, z))
+	_hitter[o.team] = null
+	set_q[o.team] = Q.WEAK
+	return true
+
+
+## Netzkampf entscheiden: wer hoeher hinkommt (Sprungkraft, Groesse, Reichweite), drueckt den Ball
+## auf die andere Seite. Bei Gleichstand gewinnt b (der schon am Netz steht).
+func _net_fight(a: VPlayer, b: VPlayer, from: Vector3) -> void:
+	var hitter := a
+	var rival := b
+	var z := from.z
 	var reach_h := hitter.jump_v0 * hitter.jump_v0 / (2.0 * G) + VPlayer.SPIKE_REACH + hitter.reach_add + 0.04 * pf(hitter, "power")
 	var reach_r := rival.jump_v0 * rival.jump_v0 / (2.0 * G) + VPlayer.BLOCK_REACH + rival.reach_add + 0.04 * pf(rival, "block")
 	var winner := hitter if reach_h > reach_r + 0.02 else rival
 	var loser_team := 1 - winner.team
-	hitter.jump()
-	rival.jump()
 	hitter.anim_style = "joust"
 	rival.anim_style = "joust"
 	popup(winner, "Netzkampf gewonnen!", Q_COLOR[Q.GOOD])
 	stats["Netzkampf"] = stats.get("Netzkampf", 0) + 1
-	var from := Vector3(side_of(o.team) * 0.15, NET_H + 0.35, z)
 	var target := court_pos(loser_team, Vector2(1.6, 0.0))
 	target.z = clampf(z, -HALF_W + 0.5, HALF_W - 0.5)
 	target.y = R
@@ -3194,9 +3279,7 @@ func _joust(o: Opp, hitter: VPlayer, l: float) -> bool:
 	last_touch_team = winner.team
 	last_toucher = null
 	last_action = "joust"
-	_hitter[o.team] = null
-	set_q[o.team] = Q.WEAK
-	return true
+	block_at = clock
 
 
 ## Dump nur vom Zuspieler selbst: vorn am Netz, kein Libero, Ball nicht schlecht.
@@ -3973,6 +4056,7 @@ func _step_ball(delta: float) -> void:
 	var res := Ballistics.advance(prev, ball_vel, delta, ball_g)
 	var nxt: Vector3 = res[0]
 	ball_vel = res[1]
+	_watch_net_fight(prev)
 	if prev.x != 0.0 and signf(prev.x) != signf(nxt.x):
 		var f := prev.x / (prev.x - nxt.x)
 		var c := prev.lerp(nxt, f)
@@ -3986,6 +4070,7 @@ func _step_ball(delta: float) -> void:
 			ball_g = G
 			flutter = 0.0
 			net_touched = true
+			_net_joust = {}
 			_fx("net", c, clampf(net_speed / 22.0, 0.25, 1.0))
 			if possession != last_touch_team:
 				possession = last_touch_team
@@ -3994,6 +4079,15 @@ func _step_ball(delta: float) -> void:
 		if c.y <= NET_BOTTOM - R:
 			_end_rally(1 - last_touch_team, "Unter dem Netz durch")
 			return
+		if not _net_joust.is_empty():
+			var ja: VPlayer = _net_joust.a
+			var jb: VPlayer = _net_joust.b
+			_net_joust = {}
+			if is_instance_valid(ja) and is_instance_valid(jb):
+				_net_fight(ja, jb, Vector3(signf(prev.x) * 0.15, c.y, c.z))
+				stats["Netzkampf aus Overpass"] = stats.get("Netzkampf aus Overpass", 0) + 1
+				plan_next()
+				return
 		if _try_block(c, prev):
 			return
 		var t_new := team_at_x(nxt.x)
@@ -4004,6 +4098,44 @@ func _step_ball(delta: float) -> void:
 	if nxt.y <= R:
 		ball.position.y = R
 		_on_ball_landed()
+
+
+## V-2: Fliegt ein Ball (keine Angriffsaktion) knapp ueber das Netz, springen die beiden Spieler
+## vorn an dieser Stelle gleichzeitig hin: Netzkampf statt glatter Overpass. Die Sprungkraft und
+## Reichweite entscheiden; die Spieler springen rechtzeitig vorher ab.
+func _watch_net_fight(prev: Vector3) -> void:
+	if not _net_joust.is_empty() or not last_action in ["pass", "dig", "free", "set"]:
+		return
+	if absf(ball_vel.x) < 1.0 or signf(ball_vel.x) == signf(prev.x) or absf(prev.x) < 0.05:
+		return
+	var t := absf(prev.x) / absf(ball_vel.x)
+	if t > 0.34:
+		return
+	var c := Ballistics.pos_at(prev, ball_vel, t, ball_g)
+	if c.y < NET_H + R + 0.02 or c.y > NET_H + 0.6 or absf(c.z) > HALF_W - 0.3:
+		return
+	var own := team_at_x(prev.x)
+	var a := _net_player(own, c.z)
+	var b := _net_player(1 - own, c.z)
+	if a == null or b == null or a == last_toucher:
+		return
+	a.jump()
+	b.jump()
+	_net_joust = {"a": a, "b": b}
+	if opp != null and not opp.done and (opp.player == a or opp.player == b):
+		opp.pending = false
+
+
+func _net_player(team: int, z: float) -> VPlayer:
+	var best: VPlayer = null
+	for pl in players[team]:
+		if pl.role == "L" or not is_front_row(pl) or is_down(pl) or pl.airborne:
+			continue
+		if absf(pl.position.x) > 1.6 or absf(pl.position.z - z) > 1.7:
+			continue
+		if best == null or absf(pl.position.z - z) < absf(best.position.z - z):
+			best = pl
+	return best
 
 
 ## Nach dem Punkt rollt und springt der Ball weiter, statt auf dem Boden festzukleben.
@@ -4186,7 +4318,7 @@ func _block_bounce(pl: VPlayer, c: Vector3, v: Vector3, dz: float, firm: float, 
 	var n := Vector3(s_att * cos(a), -sin(a), 0.0)
 	# Aussenhand: je weiter aussen getroffen, desto mehr wischt der Ball seitlich ab.
 	var edge := clampf((absf(dz) - 0.22) / 0.3, 0.0, 1.0)
-	n.z = signf(dz) * edge * 1.2
+	n.z = signf(dz) * edge * 1.55  # V-2: Aussenhand wischt weiter ab (manchmal nur mit Hecht)
 	n = n.normalized()
 	# Fingerspitzen bremsen wenig, die ganze Hand viel.
 	var frac := clampf((top - c.y) / 0.6, 0.15, 1.0) * (1.0 - 0.6 * edge)
@@ -4197,7 +4329,7 @@ func _block_bounce(pl: VPlayer, c: Vector3, v: Vector3, dz: float, firm: float, 
 	var vt := v - vn * n
 	var out := v - frac * ((1.0 + e) * vn * n + 0.3 * vt)
 	if frac < 0.6:
-		out.y += (0.6 - frac) * v.length() * 0.3  # ueber die Fingerspitzen: Ball springt hoch
+		out.y += (0.6 - frac) * v.length() * 0.36  # ueber die Fingerspitzen: Ball springt hoch und weit
 	if not soft:
 		out += n * 2.0 * frac * minf(firm, 1.2)  # der Blocker drueckt die Haende zum Angreifer
 	return out
