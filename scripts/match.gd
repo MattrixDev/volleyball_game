@@ -114,6 +114,7 @@ class Opp:
 	# Annahme steuerbar (Reception): rechter Stick, frontal, Hecht von Hand
 	var aim := Vector2.ZERO  # rechter Stick bei der Annahme (x seitlich, y Richtung Netz)
 	var dove := false  # mit B gehechtet
+	var launched := false  # echter Hechtflug zu diesem Ball laeuft (Reichweite = Arme aus dem Flug)
 	var dive_e := 0.0  # Timing des Hechts (s, < 0 = frueh)
 	var square := false  # frontal hinter dem Ball
 	var recv_keys: Array = []  # erkannte Annahme-Techniken (pass_flat, square, dive, ...)
@@ -249,6 +250,7 @@ var cam_subject: VPlayer = null
 var _slow_tail_until := 0.0
 var _hitstop_left := 0.0
 var _hitstop_scale := SLOW  # wie langsam der Treffer-Stopp ist
+var _after_stop := false  # nach dem Treffer-Stopp schnell (nicht gummiartig) zurueck zum Tempo
 var _time_scale := 1.0  # gleitet weich zur gewuenschten Zeitlupe
 
 var _ring_target: MeshInstance3D
@@ -277,6 +279,7 @@ func _ready() -> void:
 			Teams.home = a.get_slice("=", 1)  # Test: Teams waehlen
 		elif a.begins_with("--away="):
 			Teams.away = a.get_slice("=", 1)
+	HumanFigure.preload_data()
 	for t in 2:
 		_spawn_team(t)
 	_make_ball()
@@ -1433,6 +1436,11 @@ func _auto_input() -> Dictionary:
 						d.hit_down = true
 					elif charging and _due(opp.t):
 						d.hit_up = true
+				elif (pro_bot or skilled) and opp.kind in ["pass", "dig"] and Technique.goes_down(_defense_style(opp)) \
+						and clock >= opp.t - DIVE_LEAD - 0.05:
+					# Koenner hechtet mit B: Absprung kurz bevor der Ball da ist (nicht erst im Kontakt)
+					if _due(opp.t - DIVE_LEAD):
+						d.fast = true
 				elif _due(opp.t):
 					if opp.kind == "set" and opp.speed <= OVER_OK:
 						var dirs := [Vector2(-1, 0), Vector2(1, 0), Vector2(0, 1), Vector2(0, -1)]
@@ -1487,10 +1495,6 @@ func _pro_reception(d: Dictionary) -> bool:
 	var o := opp
 	var side: float = team_local(o.team, o.point).y - team_local(o.team, o.player.position).y
 	var sp := _stand_pos(o, Vector3(o.point.x, 0.0, o.point.z))
-	if flat_dist(o.player.position, sp) > Technique.reach(_defense_style(o)) - 0.2 and Technique.goes_down(_defense_style(o)):
-		d.fast = true  # B: Hecht
-		_auto_t = -1.0
-		return true
 	if absf(side) > 0.3:
 		d.rs_pad = Vector2(-signf(side), 0.0)
 	elif o.kind == "pass" and o.speed < 20.0:
@@ -1632,8 +1636,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	touch_result.emit("serve", serving_team, human_serves(), q, e, ball_vel.length(), 0.0)
 	if human_serves() and sup:
 		big_hit.emit(0.85)
-		_hitstop_left = 0.09
-		_hitstop_scale = 0.05
+		_hit_stop(0.06, 0.05)
 	elif human_serves() and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
 	plan_next()
@@ -2220,6 +2223,7 @@ func _press(o: Opp, e: float, choice: String) -> void:
 
 
 func _ai_actions() -> void:
+	_plan_dive()
 	if opp != null and not opp.done:
 		# Die Flugbahn weicht etwas von der Vorausberechnung ab (Flatterball, Bildrate): ist der Ball
 		# schon fast am Boden, kommt der Kontakt jetzt (mit dem geplanten Timing-Fehler), statt dass
@@ -2540,6 +2544,58 @@ func _shot_blocked(o: Opp, contact: Vector2) -> bool:
 
 # ---------------------------------------------------------------- Ballberuehrungen
 
+## Hecht: so weit reichen die gestreckten Arme aus dem Flug (Koerper -> Ball, m).
+const DIVE_ARM := 1.15
+const DIVE_LEAD := 0.3
+static var _dive_trace := OS.get_cmdline_user_args().has("--dive-trace")  # Test: Hechte ausgeben  # so lange vor dem Kontakt springt ein Spieler zum Hecht ab
+
+
+func dive_arm(o: Opp) -> float:
+	return DIVE_ARM + 0.12 * pf(o.player, "defense") + (0.1 if ptrait(o.player, "katze") else 0.0)
+
+
+## Weitester Hechtflug der Technik (m), gute Abwehrspieler fliegen weiter.
+func dive_max(o: Opp) -> float:
+	var base := {"sprawl": 1.6, "dive_side": 1.8, "pancake": 2.1}.get(o.style, 1.6) as float
+	return base + 0.3 * pf(o.player, "defense")
+
+
+## Den Hecht zu diesem Ball wirklich starten: Abdruck jetzt, Kontakt zum geplanten Zeitpunkt.
+func launch_dive(o: Opp) -> void:
+	var pl := o.player
+	if o.launched or pl.dive_timer > 0.0 or pl.airborne:
+		return  # in der Luft (Block) kein Abdruck moeglich: dann wie frueher ohne Flug
+	pl.anim_t = o.t
+	pl.anim_style = o.style
+	pl.start_dive(Vector3(o.point.x, 0.0, o.point.z), dive_arm(o) * 0.95, dive_max(o))
+	o.launched = true
+	if _dive_trace:
+		print("START %s t_left=%.3f T=%.2f D=%.2f v0=%.2f clock=%.3f" % [pl.role, o.t - clock, pl._dv_T, pl._dv_D.length(), pl._dv_v0.length(), clock])
+	stats["Hecht geflogen"] = stats.get("Hecht geflogen", 0) + 1
+
+
+## Vorausgeplanter Hecht (KI und Hechthilfe): kurz vor dem Kontakt pruefen, ob der Spieler nur
+## mit einem Hecht hinkommt, und dann rechtzeitig abspringen statt erst im Kontakt umzufallen.
+func _plan_dive() -> void:
+	var o := opp
+	if o == null or o.done or o.launched or o.dove or not (o.kind in ["pass", "dig", "free"]):
+		return
+	var pl := o.player
+	if pl.dive_timer > 0.0 or pl.airborne or is_down(pl):
+		return
+	if o.human and not cfg.assisted("dive"):
+		return
+	var t_left := o.t - clock
+	if t_left > DIVE_LEAD or t_left < 0.08:
+		return
+	var st := recv.filter_style(o, _defense_style(o)) if o.human else _defense_style(o)
+	if not Technique.goes_down(st):
+		return
+	o.style = st
+	o.style_locked = true
+	launch_dive(o)
+
+
 func execute_touch(o: Opp, e: float, choice: String) -> void:
 	o.done = true
 	var pl := o.player
@@ -2565,10 +2621,17 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		var cap := {"pass": 1.25, "free": 1.4, "dig": 2.0}[o.kind] as float
 		reach = minf(Technique.reach(o.style), cap) if o.style != "" else 0.75
 		reach = recv.reach(o, maxf(reach, 0.75))
+		if o.launched:
+			# Echter Hecht: der Koerper ist hingeflogen, es zaehlt der Abstand der gestreckten Arme.
+			reach = dive_arm(o)
 		pl.anim_style = o.style
-	if o.no_reach:
+	if o.no_reach and pl.dive_timer <= 0.0:
 		pl.dive()
+	if o.launched and _dive_trace:
+		print("HECHT clock=%.3f dt=%.2f %s %s q=%s e=%.3f horiz=%.2f reach=%.2f style=%s dist0=%.2f" % [clock, pl.dive_timer, pl.role, o.kind, Q_TEXT[q], e, horiz, reach, o.style, pl._dv_from.distance_to(Vector3(o.point.x, 0, o.point.z))])
 	if q == Q.MISS or horiz > reach or o.no_reach:
+		if o.launched:
+			stats["Hecht verfehlt"] = stats.get("Hecht verfehlt", 0) + 1
 		if trace:
 			print("  T%d %s %s VERFEHLT q=%s e=%.3f horiz=%.2f" % [o.team, pl.role, o.kind, Q_TEXT[q], e, horiz])
 		var txt := "Zu früh" if e < 0.0 else "Zu spät"
@@ -2608,8 +2671,8 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		libero_set_front[o.team] = true
 	if defense:
 		# Folgen der Technik: nach Hecht oder Sprawl liegt der Spieler kurz, der Ball wird ungenauer.
-		if Technique.goes_down(o.style) and not (o.dove and pl.dive_timer > 0.0):
-			pl.dive()
+		if Technique.goes_down(o.style) and pl.dive_timer <= 0.0:
+			pl.dive()  # nur noch, wenn der Hecht nicht schon vorher angesetzt wurde
 		pl.down_until = clock + Technique.recovery(o.style)
 		q = maxi(q, Technique.best_quality(o.style))
 		if o.style != "":
@@ -3459,12 +3522,10 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 		big_hit.emit(1.0 if perfect else 0.4)
 		if sup:
 			# Wuchtschlag: etwas laengerer Mini-Stopp, dann gleitet das Spiel weich weiter.
-			_hitstop_left = 0.11
-			_hitstop_scale = 0.05
+			_hit_stop(0.06, 0.05)
 		elif perfect:
 			# Kurzer Mini-Stopp beim perfekten Schlag, danach gleitet das Spiel weich weiter.
-			_hitstop_left = 0.07
-			_hitstop_scale = 0.06
+			_hit_stop(0.05, 0.06)
 	elif sup:
 		big_hit.emit(0.55)
 	elif last_attack_speed > 24.0:
@@ -3666,6 +3727,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			if def == human_team:
 				big_hit.emit(1.0 if in_block >= 2 else 0.8)  # Halt/Kamera entscheidet die Zeitlupen-Einstellung
 				_human_stuff = true
+				if in_block >= 2:
+					_hit_stop(0.06, 0.1)
 		else:
 			# Abpraller: der Ball springt zurueck, das angreifende Team kann neu aufbauen.
 			popup(pl, "Abpraller", Q_COLOR[Q.GOOD])
@@ -3997,7 +4060,7 @@ func _update_players(delta: float) -> void:
 			# Im Ballwechsel verschieben sich alle ein Stueck zur Ballseite (wie echte Abwehr).
 			var shade := 0.0
 			if phase == Phase.RALLY:
-				shade = clampf((ball.position.z) * 0.15, -0.6, 0.6)
+				shade = clampf((ball.position.z) * 0.2, -0.8, 0.8)
 			for pl in players[t]:
 				if not ((phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done)) and pl == server()):
 					pl.target = formation_pos(t, pl, form) + Vector3(0.0, 0.0, shade)
@@ -4128,7 +4191,8 @@ func _update_players(delta: float) -> void:
 			if is_down(pl):
 				pl.target = pl.position  # liegt noch am Boden oder steht gerade auf
 			pl.urgent = opp != null and not opp.done and pl == opp.player
-			if not blockers[t].is_empty() and pl in blockers[t]:
+			pl.blocking = not blockers[t].is_empty() and pl in blockers[t]
+			if pl.blocking:
 				pl.urgent = true
 			pl.tick(delta)
 	VPlayer.separate(players[0] + players[1], delta)
@@ -4170,6 +4234,26 @@ func _stand_pos(o: Opp, p: Vector3) -> Vector3:
 
 ## Zeitlupe und Kamera: In jeder Spielphase gilt das eingestellte Tempo (Menue), die
 ## Kamera rueckt beim eigenen Aufschlag, Angriff und Block naeher.
+## Kurzer Treffer-Stopp (Mini-Stopp). Nur wenn die Zeitlupe an ist: ohne Zeitlupe soll das Spiel
+## ohne Unterbrechung durchlaufen. Hoechstens 60 ms, danach geht es sofort im alten Tempo weiter.
+func _hit_stop(seconds: float, scale: float) -> void:
+	if not slow_active():
+		return
+	_hitstop_left = minf(seconds, 0.06)
+	_hitstop_scale = scale
+	_after_stop = true
+
+
+## Ist irgendeine Zeitlupe eingeschaltet (Schalter an und mindestens ein Regler ueber 0)?
+func slow_active() -> bool:
+	if not slowmo_on:
+		return false
+	for k in ["slow_serve", "slow_receive", "slow_set", "slow_attack", "slow_block"]:
+		if cfg.get_v(k) > 0.0:
+			return true
+	return false
+
+
 func _update_time_and_camera(real_delta: float) -> void:
 	var want := 1.0
 	cam_mode = ""
@@ -4216,8 +4300,12 @@ func _update_time_and_camera(real_delta: float) -> void:
 		_time_scale = want
 	elif want < _time_scale:
 		_time_scale = maxf(want, _time_scale - real_delta * 6.0)
+		_after_stop = false
 	else:
-		_time_scale = minf(want, _time_scale + real_delta * 1.8)
+		# Nach dem Treffer-Stopp in gut 0,1 s zurueck, sonst wirkt der Ablauf wie Gummi.
+		_time_scale = minf(want, _time_scale + real_delta * (9.0 if _after_stop else 1.8))
+		if _time_scale >= want:
+			_after_stop = false
 	Engine.time_scale = _time_scale
 
 

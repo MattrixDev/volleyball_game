@@ -64,16 +64,23 @@ func _start_dive(o) -> bool:
 	var goal: Vector3 = m._stand_pos(o, Vector3(o.point.x, 0.0, o.point.z))
 	var dv := Vector3(goal.x - pl.position.x, 0.0, goal.z - pl.position.z)
 	var to_net: float = -m.side_of(o.team)
+	# B ist der Absprung, nicht der Ballkontakt: ideal ist DIVE_LEAD (0,3 s) vor dem Ball. Der
+	# Kontakt kommt dann im Flug, im geplanten Moment. Wer spaeter drueckt, fliegt kuerzer.
+	var eq: float = e + m.DIVE_LEAD
 	o.dove = true
-	o.dive_e = e
-	o.style = Technique.manual_dive(dv.x * to_net, dv.z, dv.length(), o.kind == "dig")
+	o.dive_e = eq
+	if not o.launched:
+		o.style = Technique.manual_dive(dv.x * to_net, dv.z, dv.length(), o.kind == "dig")
 	o.style_locked = true
 	o.tech = "bump"
 	o.win_scale *= 1.3  # der Hecht ueberbrueckt Raum: das Timing ist etwas gnaediger
-	if pl.dive_timer <= 0.0:
-		pl.anim_t = o.t  # die Figur plant den Hecht so, dass sie im Kontakt voll gestreckt ist
-		pl.dive()
-	m._press(o, e, "")
+	m.launch_dive(o)
+	if e < 0.0:
+		o.pending = true
+		o.press_e = eq
+		o.press_choice = ""
+	else:
+		m.execute_touch(o, eq, "")
 	return true
 
 
@@ -107,6 +114,10 @@ func before_touch(o) -> void:
 ## gibt es keinen automatischen Hecht mehr (der Spieler bleibt stehen).
 func reach(o, base: float) -> float:
 	if o.dove:
+		# Mit echtem Flug zaehlt der Abstand der Arme (Match.dive_arm); wie weit er kommt, entscheidet
+		# der Flug selbst: frueh abgesprungen fliegt weiter, spaet abgesprungen kuerzer.
+		if o.launched:
+			return m.dive_arm(o)
 		var early := clampf(-o.dive_e / DIVE_EARLY, 0.0, 1.0)
 		var late := clampf(o.dive_e / 0.15, 0.0, 1.0)
 		var r := Technique.reach(o.style) + 0.35 * early - 0.3 * late

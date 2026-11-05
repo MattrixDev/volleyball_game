@@ -12,7 +12,7 @@ const TABLE := {
 	"pass_fix": ["Seitlich ausgeglichen", "Ball neben dem Körper: linken Stick im Kontakt zur Gegenseite halten, dann fliegt er nicht weg"],
 	"square": ["Frontal angenommen", "Lauf rechtzeitig hinter den Ball: größeres Timing-Fenster, genauere Annahme"],
 	"side_taken": ["Seitlich angenommen", ""],
-	"dive": ["Hecht", "B: selbst hechten (früh gehechtet reicht weiter)"],
+	"dive": ["Hecht", "B: abspringen, kurz bevor der Ball da ist (zu spät = kurzer Hecht)"],
 	# Angriff
 	"clean": ["Sauber getroffen", "R2 genau am höchsten Punkt loslassen: sauber getroffen, alle Winkel offen"],
 	"roll": ["Roll-Shot", "L2 halten + R2: Roll-Shot mit halber Kraft hinter den Block"],

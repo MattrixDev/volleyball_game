@@ -199,6 +199,22 @@ func build(colors: Dictionary, with_pads := true, hair_style := 0, official := f
 func _sync() -> void:
 	if _skel == null:
 		return
+	# Mit Physik-Interpolation setzt _process die Knochen ohnehin in jedem Bild neu; im Physiktakt
+	# genuegt dann eine Markierung (sparte rund 45 Knochen-Durchlaeufe pro Takt). Nur wer die
+	# Knochen gleich liest (Finger am Ball), rechnet sie mit _sync_now() sofort.
+	if is_physics_interpolated_and_enabled() and is_inside_tree():
+		_bones_dirty = true
+		return
+	_sync_now()
+
+
+var _bones_dirty := false
+
+
+func _sync_now() -> void:
+	if _skel == null:
+		return
+	_bones_dirty = false
 	var g := {}
 	for name in JOINTS:
 		var par: String = _parent[name]
@@ -314,9 +330,20 @@ func _finger_spread(sd: String, fn: String) -> float:
 
 
 ## Finger einen Physiktakt weiterrechnen. ball = Ballmitte (Welt) oder INF, ball_r = Radius.
+var _fing_acc := 0.0
+
+
 func fingers_step(delta: float, ball: Vector3, ball_r: float) -> void:
 	if not has_fingers or delta <= 0.0:
 		return
+	# Weit weg vom Ball reichen 40 Fingerschritte pro Sekunde (man sieht keinen Unterschied, spart
+	# aber zwei Drittel der Rechenzeit); in Ballnaehe jeder Takt.
+	var near: bool = ball != Vector3.INF and ((j["wr_l"] as Node3D).global_position.distance_to(ball) < 2.5 or (j["wr_r"] as Node3D).global_position.distance_to(ball) < 2.5)
+	_fing_acc += delta
+	if not near and _fing_acc < 0.024:
+		return
+	delta = _fing_acc
+	_fing_acc = 0.0
 	var kf := 34.0  # Eigenfrequenz der Finger (1/s): schnell, aber sichtbar weich
 	for sd in ["l", "r"]:
 		for fn in FINGERS:
@@ -325,7 +352,8 @@ func fingers_step(delta: float, ball: Vector3, ball_r: float) -> void:
 				var key: String = fn + str(seg) + "_" + sd
 				var st: Array = _fa[key]
 				var tgt := _finger_target(sd, fn, seg)
-				var v: float = st[1] + ((tgt - st[0]) * kf * kf - st[1] * 2.0 * 0.8 * kf) * delta
+				# implizit gedaempft: bleibt auch bei laengeren Schritten stabil
+				var v: float = (st[1] + (tgt - st[0]) * kf * kf * delta) / (1.0 + 2.0 * 0.8 * kf * delta + kf * kf * delta * delta)
 				st[0] = clampf(st[0] + v * delta, -0.45, 1.65)
 				st[1] = v
 	_apply_fingers()
@@ -338,6 +366,8 @@ func fingers_step(delta: float, ball: Vector3, ball_r: float) -> void:
 		var wr_w: Vector3 = j["wr_" + sd].global_position
 		if wr_w.distance_to(ball) > ball_r + 0.25:
 			continue
+		if _bones_dirty:
+			_sync_now()
 		for _it in 2:
 			var moved := false
 			for fn in FINGERS:
@@ -496,6 +526,54 @@ static func clip_pose(clip: String, u: float, loop := true) -> Dictionary:
 		var q0 := _clip_quat(frames[i0], name)
 		var q1 := _clip_quat(frames[i1], name)
 		out[name] = Basis(q0.slerp(q1, w)).get_euler()
+	return out
+
+
+## ------------------------------------------------------------------ Echte Bewegungsdaten
+## Spruenge aus der CMU-Motion-Capture-Datenbank (tools/mocap/cmu_to_clips.py): je Clip 60 Bilder/s
+## und die Zeitpunkte crouch (tiefster Punkt), takeoff, peak, land (Bildnummern).
+static var _mocap := {}
+
+
+static var _mocap_names: Array = []
+
+
+static func mocap_jumps() -> Array:
+	if _mocap.is_empty():
+		var f := FileAccess.open("res://assets/models/mocap_jumps.json", FileAccess.READ)
+		_mocap = JSON.parse_string(f.get_as_text()) if f else {"_": {}}
+		_mocap.erase("_")
+		_mocap_names = _mocap.keys()
+		_mocap_names.sort()
+	return _mocap_names
+
+
+## Bewegungsdaten gleich beim Start laden, nicht erst beim ersten Sprung (sonst steht das Spiel
+## dort fuer gut 0,2 s).
+static func preload_data() -> void:
+	mocap_jumps()
+	clip_pose("_", 0.0)
+	markers()
+
+
+static func mocap_ev(clip: String) -> Dictionary:
+	mocap_jumps()
+	return _mocap.get(clip, {}).get("ev", {})
+
+
+## Pose (Euler je Gelenk wie clip_pose) bei Bild frame (Kommazahl, wird geklemmt).
+static func mocap_pose(clip: String, frame: float) -> Dictionary:
+	mocap_jumps()
+	if not _mocap.has(clip):
+		return {}
+	var frames: Array = _mocap[clip].frames
+	var t := clampf(frame, 0.0, frames.size() - 1.0)
+	var i0 := int(t)
+	var i1 := mini(i0 + 1, frames.size() - 1)
+	var w := t - i0
+	var out := {}
+	for name in JOINTS:
+		out[name] = Basis(_clip_quat(frames[i0], name).slerp(_clip_quat(frames[i1], name), w)).get_euler()
 	return out
 
 
