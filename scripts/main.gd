@@ -69,6 +69,7 @@ func _ready() -> void:
 	hud.whistled.connect(func(): arena.referee_whistle())
 	match_node.big_hit.connect(_on_big_hit)
 	match_node.contact.connect(_on_contact)
+	match_node.own_block.connect(_on_own_block)
 	match_node.point_won.connect(_on_point)
 	add_child(match_node)
 	for a in OS.get_cmdline_user_args():
@@ -79,6 +80,10 @@ func _ready() -> void:
 			lab.main_cam = camera
 			add_child(lab)
 			break
+	# Technikname nach dem Kontakt und Tastenhinweise beim ersten Mal (Skill-Gap)
+	var tech_hints := preload("res://scripts/tech_hints.gd").new()
+	tech_hints.match_node = match_node
+	hud.add_child(tech_hints)
 	var trainer := preload("res://scripts/trainer.gd").new()
 	trainer.match_node = match_node
 	hud.add_child(trainer)
@@ -436,6 +441,20 @@ func _on_menu_closed() -> void:
 
 
 ## Ballkontakte: Geraeusch, Lichtblitz bei harten Schlaegen, Staub am Boden.
+## Dein Block: voller Block = harter Doppelknall, die Halle springt sofort auf, der Controller
+## rummst. Beruehrung = dumpfer Zusatzklang und nur ein kurzes Zucken.
+func _on_own_block(full: bool, pos: Vector3) -> void:
+	if full:
+		sfx.play("block", 1.0, 0.72)
+		fx.flash(pos, 1.0, Color(0.85, 0.92, 1.0))
+		sfx.crowd("cheer", 1.0)
+		crowd.cheer(match_node.human_team, 1.0)
+		_rumble(0.6, 1.0, 0.22)
+	else:
+		sfx.play("block", 0.45, 0.85)
+		_rumble(0.3, 0.0, 0.08)
+
+
 func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
 	if kind == "spike_super":
 		# Wuchtschlag: zwei tiefe Knalle, kraeftiger Ruck. Bewusst ohne Leuchtspur, bleibt echt.
@@ -536,6 +555,8 @@ func _setup_input() -> void:
 	_action("set_fast", [KEY_R], [JOY_BUTTON_B])
 	_action("set_quick", [KEY_F], [JOY_BUTTON_Y])
 	_action("hit", [KEY_E], [], [[JOY_AXIS_TRIGGER_RIGHT, 1.0]])
+	# L2 = Gefuehlstaste (Roll-Shot, tiefe Ecke, Luecke), Tastatur: Umschalt
+	_action("finesse", [KEY_SHIFT], [], [[JOY_AXIS_TRIGGER_LEFT, 1.0]])
 	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])
 	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])
 	_action("toggle_assist", [KEY_F1], [JOY_BUTTON_BACK])

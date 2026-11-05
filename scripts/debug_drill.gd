@@ -22,6 +22,8 @@ var _rot_done := false
 var _serve_flip := 0
 var _blocks := [0, 0]  # Angriffe des Gegners, davon Blockpunkte
 var _block_touch := 0
+var _tech := {}  # Angriffstechniken: Technik -> wie oft gespielt
+var _tech_last := []  # Techniken des letzten Kontakts
 # Freies Laufen
 var _free := false
 var _cur := 0
@@ -44,6 +46,7 @@ func _ready() -> void:
 	m.drill = self
 	m.touch_result.connect(_on_touch)
 	m.contact.connect(_on_contact)
+	m.technique_done.connect(_on_technique)
 	if _free:
 		_start_free()
 	else:
@@ -256,6 +259,9 @@ func _on_touch(kind: String, team: int, human: bool, q: int, e: float, speed: fl
 		var v := speed if kind in ["attack", "serve"] else speed_in
 		var spd := "  ·  Ball %d km/h" % roundi(v * 3.6) if v > 0.5 else ""
 		_last = "%s: %s%s%s" % [names.get(kind, kind), m.Q_TEXT[q], timing, spd]
+		if not _tech_last.is_empty():
+			_last += "  ·  " + " · ".join(_tech_last.map(func(k): return TechNames.text(k)))
+			_tech_last = []
 		if DebugMode.opts.after == "reset" and id != "ballwechsel":
 			var wait := 1.6
 			match kind:
@@ -270,6 +276,14 @@ func _on_touch(kind: String, team: int, human: bool, q: int, e: float, speed: fl
 		_blocks[0] += 1
 		if DebugMode.opts.after == "reset":
 			_reset_at = m.clock + 1.8
+	_update_panel()
+
+
+func _on_technique(pl, key: String) -> void:
+	if pl == null or pl.team != match_node.human_team:
+		return
+	_tech[key] = int(_tech.get(key, 0)) + 1
+	_tech_last.append(key)
 	_update_panel()
 
 
@@ -499,13 +513,30 @@ func _update_panel() -> void:
 		var total: int = _q_count[0] + _q_count[1] + _q_count[2] + _q_count[3]
 		if total > 0:
 			lines.append("Perfekt %d  ·  Gut %d  ·  Schwach %d  ·  Daneben %d" % _q_count)
+		if id == "angriff_technik":
+			var parts := []
+			for k in ["clean", "roll", "corner", "seam", "approach_wide", "approach_tight", "approach_delay"]:
+				parts.append("%s %d" % [TechNames.text(k), int(_tech.get(k, 0))])
+			lines.append("  ·  ".join(parts.slice(0, 4)))
+			lines.append("  ·  ".join(parts.slice(4)))
+		if id == "annahme_technik":
+			var rp := []
+			for k in ["pass_flat", "pass_high", "pass_fix", "square", "side_taken", "dive"]:
+				rp.append("%s %d" % [TechNames.text(k), int(_tech.get(k, 0))])
+			lines.append("  ·  ".join(rp.slice(0, 3)))
+			lines.append("  ·  ".join(rp.slice(3)))
 		if _last != "":
 			lines.append("Zuletzt: " + _last)
 		if _last_reason != "":
 			lines.append("Ende: " + _last_reason)
 		var o := DebugMode.opts
 		var set_info := ""
-		if id in ["zuspiel", "angriff", "block", "abwehr"]:
+		if id in ["zuspiel", "angriff", "angriff_technik", "block", "abwehr"]:
 			set_info = "  ·  Zuspiel %s, %s" % [DebugMode.option_text("lane"), DebugMode.option_text("tempo")]
 		_help.text = "Rotation %d%s  ·  Y / T: Debug-Menü  ·  Start / Esc: Pause" % [int(o.rot) + 1, set_info]
+		if id == "annahme_technik":
+			var run_txt := "Laufen: selbst (frontal hinter den Ball = mehr Zeit, genauer)" if not match_node.cfg.assisted("run") else "Laufhilfe an (Back / F1 schaltet auf selbst laufen)"
+			_help.text = "Beim Annehmen: R1 halten = flach ans Netz, L1 halten = hoch und sicher, linker Stick zur Seite = Ball neben dem Körper ausgleichen · B = hechten (früh = weiter, danach liegst du) · %s\n" % run_txt + _help.text
+		if id == "angriff_technik":
+			_help.text = "R2 genau am höchsten Punkt = sauber getroffen (scharfe Winkel) · L2 + R2 = Gefühlsschlag: Stick Mitte Roll-Shot, oben tiefe Ecke, Seite Lücke · linker Stick vor dem Absprung: zur Seitenlinie = von außen, zur Mitte = eng, zurück = verzögern\n" + _help.text
 	_stats.text = "\n".join(lines)

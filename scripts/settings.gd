@@ -42,8 +42,20 @@ const PRESETS := {
 }
 const PRESET_TEXT := {"leicht": "Leicht", "normal": "Normal", "profi": "Profi", "eigene": "Eigene"}
 
+## Hilfe je Bereich: assistiert (Standard, das Spiel nimmt dir den Bereich ab) oder manuell
+## (du steuerst selbst: genauer, aber fehleranfaelliger). [Schluessel, Anzeige, Erklaerung]
+const ASSIST_AREAS := [
+	["run", "Laufen zur Annahme", "Assistiert: dein Spieler läuft von selbst zum Ball. Manuell: du läufst mit dem linken Stick und kannst dich genau hinter den Ball stellen."],
+	["pass_aim", "Annahme zielen", "Ohne Eingabe geht die Annahme immer zum Zuspieler. R1 halten = flach ans Netz, L1 halten = hoch und sicher, linker Stick seitlich im Kontakt = Ball neben dem Körper ausgleichen. Assistiert: grobe Wahl. Manuell: der rechte Stick zielt zusätzlich stufenlos, falsch gegengehalten fliegt der Ball weg."],
+	["dive", "Hechten", "Assistiert: das Spiel hechtet von selbst, wenn du sonst nicht hinkommst, B hechtet zusätzlich von Hand. Manuell: nur B hechtet, ohne B bleibst du stehen und bist schneller wieder im Spiel."],
+	["attack_aim", "Angriff zielen", "Assistiert: wer nur gut trifft, schlägt trotzdem in die Ecken, die der Stick zeigt. Manuell: nur ein sauber getroffener Ball (R2 genau am höchsten Punkt) erreicht die scharfen Winkel, dafür sind Linie und scharfe Diagonale noch etwas schärfer."],
+	["approach", "Anlauf", "Assistiert: der Angreifer läuft von selbst an. Manuell: der linke Stick steuert den Anlauf (außen, eng, verzögern)."],
+	["set_aim", "Zuspiel-Feinsteuerung", "Assistiert: das Zuspiel geht an die übliche Stelle. Manuell: der rechte Stick schiebt den Ball näher ans Netz oder weiter weg."],
+]
+
 var preset := "normal"
 var values := {}
+var assists := {}  # Bereich -> true (assistiert) / false (manuell); fehlt = assistiert
 ## Spielregeln (gehoeren zu keiner Stufe): Gewinnsaetze und Libero-Wechsel.
 var sets_to_win := 2  # 1 = ein Satz, 2 = Best of 3, 3 = Best of 5
 var libero_auto := false
@@ -137,6 +149,15 @@ func get_v(key: String) -> float:
 	return float(values.get(key, PRESETS["normal"].get(key, AUDIO.get(key, CAM_DEFAULTS.get(key, 35)))))
 
 
+## Ist dieser Bereich assistiert? (Standard: ja)
+func assisted(area: String) -> bool:
+	return bool(assists.get(area, true))
+
+
+func set_assisted(area: String, v: bool) -> void:
+	assists[area] = v
+
+
 ## Spieltempo in einer Phase (1 = normal, 0,1 = zehnmal langsamer).
 func time_scale(key: String) -> float:
 	return 1.0 - get_v(key) / 100.0
@@ -153,6 +174,8 @@ func save() -> void:
 	cf.set_value("spiel", "gewinnsaetze", sets_to_win)
 	cf.set_value("spiel", "libero_auto", libero_auto)
 	cf.set_value("spiel", "wiederholungen", replays)
+	for a in ASSIST_AREAS:
+		cf.set_value("hilfen", a[0], assisted(a[0]))
 	for k in values:
 		cf.set_value("kamera" if CAM_DEFAULTS.has(k) else "werte", k, values[k])
 	cf.save(PATH)
@@ -165,6 +188,8 @@ func load_file() -> void:
 	sets_to_win = clampi(int(cf.get_value("spiel", "gewinnsaetze", 2)), 1, 3)
 	libero_auto = bool(cf.get_value("spiel", "libero_auto", false))
 	replays = bool(cf.get_value("spiel", "wiederholungen", true))
+	for a in ASSIST_AREAS:
+		assists[a[0]] = bool(cf.get_value("hilfen", a[0], true))
 	var p: String = cf.get_value("spiel", "stufe", "normal")
 	apply_preset(p if PRESETS.has(p) else "normal")
 	for k in AUDIO:
