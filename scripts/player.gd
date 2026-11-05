@@ -224,6 +224,7 @@ func reset_state() -> void:
 	airborne = false
 	has_jumped = false
 	dive_timer = 0.0
+	_dv_T = 0.0
 	manual_dir = Vector3.ZERO
 	hand_shift = 0.0
 	hand_reach = 0.0
@@ -259,6 +260,67 @@ func jump() -> void:
 func dive() -> void:
 	dive_timer = 0.7
 	_dive_t0 = now
+	_dv_T = 0.0
+	_dv_face = Vector3.ZERO
+
+
+## Echter Hechtsprung: der Koerper fliegt wirklich zum Ball. point = Treffpunkt (Welt), arm =
+## Abstand Koerper -> Haende im gestreckten Flug, max_len = weitester Flug. anim_t muss schon der
+## geplante Kontakt sein. Der Flug nimmt den Schwung aus dem Lauf mit (kein Stopp vor dem Abdruck)
+## und ist beim Kontakt zu gut drei Vierteln geschafft; danach rutscht er aus. Rueckgabe: Fluglaenge.
+func start_dive(point: Vector3, arm: float, max_len: float) -> float:
+	dive()
+	var to := Vector3(point.x - position.x, 0.0, point.z - position.z)
+	var d := to.length()
+	var dir := to / d if d > 0.01 else Vector3(-side, 0.0, 0.0)
+	var lead := clampf(anim_t - now, 0.0, 0.7)
+	_dv_T = clampf(lead / DIVE_S_CONTACT, 0.3, 0.75)
+	_dv_t0 = now
+	_dv_from = position
+	_dv_v0 = _vel
+	var v_al := _vel.dot(dir)
+	var v_perp := _vel - dir * v_al
+	# Beim Kontakt (s = DIVE_S_CONTACT) sollen die Haende am Ball sein.
+	var h10 := DIVE_S_CONTACT * pow(1.0 - DIVE_S_CONTACT, 2.0)
+	var h01 := DIVE_S_CONTACT * DIVE_S_CONTACT * (3.0 - 2.0 * DIVE_S_CONTACT)
+	var want := (d - arm - h10 * _dv_T * v_al) / h01
+	var l := clampf(want, 0.25, max_len)
+	_dv_D = dir * l + v_perp * _dv_T * 0.25
+	# Blickrichtung im Flug: nach vorn gehechtet schaut er in Flugrichtung; zur Seite (dive_side)
+	# fliegt er seitlich, die Brust bleibt zum Spielfeld, der Ball liegt auf der Seite des Hechts.
+	var cur := Vector3(-sin(_yaw), 0.0, -cos(_yaw))
+	if _astyle() == "dive_side":
+		var sgn := signf(cur.cross(Vector3.UP).dot(dir))
+		_dv_face = Vector3.UP.cross(dir * (sgn if sgn != 0.0 else 1.0))
+	else:
+		_dv_face = dir
+	return l
+
+
+const DIVE_S_CONTACT := 0.7  # Anteil des Flugs beim Ballkontakt
+var _dv_T := 0.0  # Dauer des Flugs bis zum Liegen (0 = alter Hecht am Platz)
+var _dv_t0 := 0.0
+var _dv_from := Vector3.ZERO
+var _dv_v0 := Vector3.ZERO
+var _dv_D := Vector3.ZERO
+var _dv_face := Vector3.ZERO
+
+
+## Wo der Spieler gerade im Hechtflug ist (Hermite-Kurve: Anfangstempo = Laufschwung, am Ende 0).
+func _dive_travel() -> void:
+	var s := clampf((now - _dv_t0) / _dv_T, 0.0, 1.0)
+	var h10 := s * pow(1.0 - s, 2.0)
+	var h01 := s * s * (3.0 - 2.0 * s)
+	var p := _dv_from + _dv_v0 * _dv_T * h10 + _dv_D * h01
+	_vel = (_dv_v0 * (1.0 - 4.0 * s + 3.0 * s * s) + _dv_D * (6.0 * s - 6.0 * s * s) / _dv_T) if s < 1.0 else Vector3.ZERO
+	position = Vector3(p.x, position.y, p.z)
+	if s >= 1.0:
+		_dv_T = 0.0
+
+
+## Ist der Spieler gerade im echten Hechtflug?
+func dive_flying() -> bool:
+	return _dv_T > 0.0 and dive_timer > 0.0
 
 
 func spike_hand() -> float:
@@ -286,6 +348,8 @@ func tick(delta: float) -> void:
 			jump_h = 0.0
 			airborne = false
 		_vel = Vector3.ZERO
+	elif _dv_T > 0.0 and dive_timer > 0.0:
+		_dive_travel()
 	elif dive_timer <= 0.3:
 		# Weich anlaufen und vor dem Ziel abbremsen statt sofort auf vollem Tempo.
 		var acc := ACCEL_BLOCK if blocking else (ACCEL_URGENT if urgent else ACCEL)
@@ -426,6 +490,8 @@ func _animate(delta: float) -> void:
 		face = Vector3(-side, 0.0, 0.0)
 	if not alert and celebrate_until < now:
 		face = Vector3(-side, 0.0, 0.0)
+	if dive_timer > 0.0 and _dv_face.length() > 0.1 and (_dv_T > 0.0 or now - _dive_t0 < 0.8):
+		face = _dv_face
 	# Anlauf von aussen (wide): Koerper zum Feld gedreht; von innen nach aussen (tight): zur
 	# Seitenlinie. Kurz vor dem Absprung dreht er wieder zum Netz.
 	if anim_kind == "attack" and not airborne and _approach() in ["wide", "tight"]:

@@ -114,6 +114,7 @@ class Opp:
 	# Annahme steuerbar (Reception): rechter Stick, frontal, Hecht von Hand
 	var aim := Vector2.ZERO  # rechter Stick bei der Annahme (x seitlich, y Richtung Netz)
 	var dove := false  # mit B gehechtet
+	var launched := false  # echter Hechtflug zu diesem Ball laeuft (Reichweite = Arme aus dem Flug)
 	var dive_e := 0.0  # Timing des Hechts (s, < 0 = frueh)
 	var square := false  # frontal hinter dem Ball
 	var recv_keys: Array = []  # erkannte Annahme-Techniken (pass_flat, square, dive, ...)
@@ -1435,6 +1436,11 @@ func _auto_input() -> Dictionary:
 						d.hit_down = true
 					elif charging and _due(opp.t):
 						d.hit_up = true
+				elif (pro_bot or skilled) and opp.kind in ["pass", "dig"] and Technique.goes_down(_defense_style(opp)) \
+						and clock >= opp.t - DIVE_LEAD - 0.05:
+					# Koenner hechtet mit B: Absprung kurz bevor der Ball da ist (nicht erst im Kontakt)
+					if _due(opp.t - DIVE_LEAD):
+						d.fast = true
 				elif _due(opp.t):
 					if opp.kind == "set" and opp.speed <= OVER_OK:
 						var dirs := [Vector2(-1, 0), Vector2(1, 0), Vector2(0, 1), Vector2(0, -1)]
@@ -1489,10 +1495,6 @@ func _pro_reception(d: Dictionary) -> bool:
 	var o := opp
 	var side: float = team_local(o.team, o.point).y - team_local(o.team, o.player.position).y
 	var sp := _stand_pos(o, Vector3(o.point.x, 0.0, o.point.z))
-	if flat_dist(o.player.position, sp) > Technique.reach(_defense_style(o)) - 0.2 and Technique.goes_down(_defense_style(o)):
-		d.fast = true  # B: Hecht
-		_auto_t = -1.0
-		return true
 	if absf(side) > 0.3:
 		d.rs_pad = Vector2(-signf(side), 0.0)
 	elif o.kind == "pass" and o.speed < 20.0:
@@ -2221,6 +2223,7 @@ func _press(o: Opp, e: float, choice: String) -> void:
 
 
 func _ai_actions() -> void:
+	_plan_dive()
 	if opp != null and not opp.done:
 		# Die Flugbahn weicht etwas von der Vorausberechnung ab (Flatterball, Bildrate): ist der Ball
 		# schon fast am Boden, kommt der Kontakt jetzt (mit dem geplanten Timing-Fehler), statt dass
@@ -2541,6 +2544,58 @@ func _shot_blocked(o: Opp, contact: Vector2) -> bool:
 
 # ---------------------------------------------------------------- Ballberuehrungen
 
+## Hecht: so weit reichen die gestreckten Arme aus dem Flug (Koerper -> Ball, m).
+const DIVE_ARM := 1.15
+const DIVE_LEAD := 0.3
+static var _dive_trace := OS.get_cmdline_user_args().has("--dive-trace")  # Test: Hechte ausgeben  # so lange vor dem Kontakt springt ein Spieler zum Hecht ab
+
+
+func dive_arm(o: Opp) -> float:
+	return DIVE_ARM + 0.12 * pf(o.player, "defense") + (0.1 if ptrait(o.player, "katze") else 0.0)
+
+
+## Weitester Hechtflug der Technik (m), gute Abwehrspieler fliegen weiter.
+func dive_max(o: Opp) -> float:
+	var base := {"sprawl": 1.6, "dive_side": 1.8, "pancake": 2.1}.get(o.style, 1.6) as float
+	return base + 0.3 * pf(o.player, "defense")
+
+
+## Den Hecht zu diesem Ball wirklich starten: Abdruck jetzt, Kontakt zum geplanten Zeitpunkt.
+func launch_dive(o: Opp) -> void:
+	var pl := o.player
+	if o.launched or pl.dive_timer > 0.0 or pl.airborne:
+		return  # in der Luft (Block) kein Abdruck moeglich: dann wie frueher ohne Flug
+	pl.anim_t = o.t
+	pl.anim_style = o.style
+	pl.start_dive(Vector3(o.point.x, 0.0, o.point.z), dive_arm(o) * 0.95, dive_max(o))
+	o.launched = true
+	if _dive_trace:
+		print("START %s t_left=%.3f T=%.2f D=%.2f v0=%.2f clock=%.3f" % [pl.role, o.t - clock, pl._dv_T, pl._dv_D.length(), pl._dv_v0.length(), clock])
+	stats["Hecht geflogen"] = stats.get("Hecht geflogen", 0) + 1
+
+
+## Vorausgeplanter Hecht (KI und Hechthilfe): kurz vor dem Kontakt pruefen, ob der Spieler nur
+## mit einem Hecht hinkommt, und dann rechtzeitig abspringen statt erst im Kontakt umzufallen.
+func _plan_dive() -> void:
+	var o := opp
+	if o == null or o.done or o.launched or o.dove or not (o.kind in ["pass", "dig", "free"]):
+		return
+	var pl := o.player
+	if pl.dive_timer > 0.0 or pl.airborne or is_down(pl):
+		return
+	if o.human and not cfg.assisted("dive"):
+		return
+	var t_left := o.t - clock
+	if t_left > DIVE_LEAD or t_left < 0.08:
+		return
+	var st := recv.filter_style(o, _defense_style(o)) if o.human else _defense_style(o)
+	if not Technique.goes_down(st):
+		return
+	o.style = st
+	o.style_locked = true
+	launch_dive(o)
+
+
 func execute_touch(o: Opp, e: float, choice: String) -> void:
 	o.done = true
 	var pl := o.player
@@ -2566,10 +2621,17 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		var cap := {"pass": 1.25, "free": 1.4, "dig": 2.0}[o.kind] as float
 		reach = minf(Technique.reach(o.style), cap) if o.style != "" else 0.75
 		reach = recv.reach(o, maxf(reach, 0.75))
+		if o.launched:
+			# Echter Hecht: der Koerper ist hingeflogen, es zaehlt der Abstand der gestreckten Arme.
+			reach = dive_arm(o)
 		pl.anim_style = o.style
-	if o.no_reach:
+	if o.no_reach and pl.dive_timer <= 0.0:
 		pl.dive()
+	if o.launched and _dive_trace:
+		print("HECHT clock=%.3f dt=%.2f %s %s q=%s e=%.3f horiz=%.2f reach=%.2f style=%s dist0=%.2f" % [clock, pl.dive_timer, pl.role, o.kind, Q_TEXT[q], e, horiz, reach, o.style, pl._dv_from.distance_to(Vector3(o.point.x, 0, o.point.z))])
 	if q == Q.MISS or horiz > reach or o.no_reach:
+		if o.launched:
+			stats["Hecht verfehlt"] = stats.get("Hecht verfehlt", 0) + 1
 		if trace:
 			print("  T%d %s %s VERFEHLT q=%s e=%.3f horiz=%.2f" % [o.team, pl.role, o.kind, Q_TEXT[q], e, horiz])
 		var txt := "Zu früh" if e < 0.0 else "Zu spät"
@@ -2609,8 +2671,8 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		libero_set_front[o.team] = true
 	if defense:
 		# Folgen der Technik: nach Hecht oder Sprawl liegt der Spieler kurz, der Ball wird ungenauer.
-		if Technique.goes_down(o.style) and not (o.dove and pl.dive_timer > 0.0):
-			pl.dive()
+		if Technique.goes_down(o.style) and pl.dive_timer <= 0.0:
+			pl.dive()  # nur noch, wenn der Hecht nicht schon vorher angesetzt wurde
 		pl.down_until = clock + Technique.recovery(o.style)
 		q = maxi(q, Technique.best_quality(o.style))
 		if o.style != "":
