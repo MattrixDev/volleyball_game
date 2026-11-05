@@ -338,7 +338,7 @@ func show_sub(team: int, team_name: String, what: String, in_txt: String, out_tx
 	h.add_child(_txt(in_n, 14, Color(0.2, 0.55, 0.25)))
 	secs = minf(secs, 2.5)
 	_subs.add_child(p)
-	while _subs.get_child_count() > 4:
+	while _subs.get_child_count() > 2:
 		var old := _subs.get_child(0)
 		_subs.remove_child(old)
 		old.queue_free()
@@ -414,6 +414,9 @@ func update_view(m) -> void:
 		_hint.visible = _hint.text != ""
 		_dev.visible = not in_play and m.phase != m.Phase.REPLAY
 		_ref.visible = not in_play
+		_subs.visible = not in_play
+		if in_play and _banner.visible:
+			_banner.visible = false  # Einblendungen (Gegner, Auszeit) enden mit dem Pfiff
 	_info.text = "Stufe %s  ·  Laufhilfe %s  ·  Zeitlupe %s  ·  Zoom %s" % [
 		GameSettings.PRESET_TEXT[m.cfg.preset], "an" if m.assist else "aus", "an" if m.slowmo_on else "aus", "an" if m.zoom_on else "aus"]
 	_lineup.text = _lineup_text(m)

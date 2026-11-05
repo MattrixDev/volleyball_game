@@ -2413,7 +2413,7 @@ func _ai_block_hands(t: int, b: VPlayer) -> void:
 	if t != human_team:
 		b.hand_reach = 0.12 if rng.randf() < 0.12 else 0.0
 		# Die KI zieht die Haende meist rechtzeitig zurueck, manchmal zu spaet (dann Netz).
-		_ai_late_retract[b] = b.hand_reach > 0.0 and rng.randf() < clampf(0.3 - 0.12 * pf(b, "block"), 0.1, 0.45)
+		_ai_late_retract[b] = b.hand_reach > 0.0 and rng.randf() < clampf(0.15 - 0.06 * pf(b, "block"), 0.05, 0.25)
 
 
 ## Block: Wer ueber das Netz gegriffen hat (Stick nach vorn), muss die Haende beim Herunterkommen
@@ -2435,7 +2435,7 @@ func _check_block_net() -> void:
 			if pl.jump_v < 0.0 and pl.jump_h < BLOCK_NET_H and cfg.unit("faults") > 0.0:
 				pl.hand_reach = 0.0
 				_ai_late_retract.erase(pl)
-				stats["Netz beim Block"] = stats.get("Netz beim Block", 0) + 1
+				stats["Netz beim Block T%d" % t] = stats.get("Netz beim Block T%d" % t, 0) + 1
 				last_touch_team = t
 				_fx("net", Vector3(0.0, NET_H, pl.position.z), 0.5)
 				_end_rally(1 - t, "Netzberührung beim Block")
