@@ -43,7 +43,8 @@ func _process(_delta: float) -> void:
 		elif (match_node.phase == match_node.Phase.POINT_PAUSE or match_node.phase == match_node.Phase.REPLAY) and match_node.human_team >= 0:
 			match_node.trainer_wanted = true
 			match_node._notice("Trainerbank öffnet sich gleich vor dem Aufschlag")
-		else:
+		elif match_node.phase != match_node.Phase.RALLY and match_node.phase != match_node.Phase.TOSS:
+			# Im Ballwechsel ist Y frei (spaeter Tricks): dort kein Hinweistext.
 			match_node._notice("Trainerbank: nur vor dem Aufschlag (Auszeit, Libero, Wechsel)")
 
 

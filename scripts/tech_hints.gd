@@ -53,7 +53,9 @@ func _ready() -> void:
 
 
 func _quiet() -> bool:
-	return match_node.autoplay or match_node.attract or match_node.human_team < 0
+	# Im Spiel kein Text (Mattis, 05.11.2026): Technik-Namen und Tastenhinweise nur in den Uebungen.
+	return match_node.autoplay or match_node.attract or match_node.human_team < 0 \
+		or (match_node.drill == null and not match_node.show_popups)
 
 
 func _on_done(pl, key: String) -> void:
