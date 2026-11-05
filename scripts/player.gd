@@ -1031,7 +1031,7 @@ func _contact_ik() -> void:
 		# Mit dem Video-Angriff kommt das Ausholen (Bogenspannung) aus dem Clip; die Zielhilfe
 		# uebernimmt erst kurz vor dem Treffpunkt, damit der Ball sicher getroffen wird.
 		var vid := anim_kind == "attack" and not "video" in _off
-		var w0 := smoothstep(-0.16, -0.06, rel) if vid else smoothstep(-0.5, -0.3, rel)
+		var w0 := smoothstep(-0.1, -0.04, rel) if vid else smoothstep(-0.5, -0.3, rel)
 		w = w0 * (1.0 - smoothstep(0.3, 0.45, rel))
 		if not airborne:
 			w *= 0.6
@@ -1044,7 +1044,7 @@ func _contact_ik() -> void:
 			ld = ld.slerp((f * 0.3 - up * 0.85 - r * 0.05).normalized(), lt)
 			ld = (ld - r * 0.15 * sin(PI * lt)).normalized()
 		tg[os] = sh_l + ld * 0.6
-		wl = (smoothstep(-0.2, -0.08, rel) if vid else smoothstep(-0.5, -0.3, rel)) * (1.0 - smoothstep(0.12, 0.3, rel))
+		wl = (smoothstep(-0.12, -0.05, rel) if vid else smoothstep(-0.5, -0.3, rel)) * (1.0 - smoothstep(0.12, 0.3, rel))
 		# Hand: beim Ausholen Handflaeche nach vorn, im Treffpunkt flach hinter dem Ball,
 		# danach klappt das Handgelenk ab (Finger ueber den Ball nach vorn unten).
 		var snap := smoothstep(0.0, 0.1, rel)
@@ -1820,9 +1820,12 @@ static func _clip_at(clip: String, rel: float, keys: Array) -> Dictionary:
 ## Zeitpunkte der Meshy-Volleyball-Animationen (aus den Bildfolgen abgelesen)
 ## kern_*: Meshy-Kernanimationen (Text-to-Motion, nach echter Technik beschrieben)
 const SPIKE_KEYS := [[-1.1, 0.18], [-0.404, 0.40], [0.0, 0.60], [0.4, 0.70], [0.6, 0.78]]
-## video_angriff (Pexels 6217265, Zeitlupe): Arme hinten 4,3 s, Absprung 5,75 s, Schlag 7,18 s,
-## Ausschwingen 7,5 und 7,75 s; u = (t - 4,0) / 3,87.
-const VSPIKE_KEYS := [[-1.1, 0.077], [-0.404, 0.451], [0.0, 0.821], [0.4, 0.903], [0.6, 0.968]]
+## video_angriff (Pexels 6217265, Zeitlupe): Arme hinten 4,3 s, Absprung 5,75 s, beide Arme oben
+## 6,1 s, Hand hinter dem Kopf 6,45 s, weit gespannter Bogen 6,9 s, Schlag 7,18 s, Ausschwingen
+## 7,5 und 7,75 s; u = (t - 4,0) / 3,87. Die Zeitlupe wird so gestaucht, dass die Bogenspannung
+## im Spiel gut 0,2 s sichtbar bleibt.
+const VSPIKE_KEYS := [[-1.1, 0.077], [-0.404, 0.451], [-0.3, 0.541], [-0.2, 0.632], [-0.08, 0.749],
+	[0.0, 0.821], [0.4, 0.903], [0.6, 0.968]]
 const VSPIKE_UPPER := ["chest", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r"]
 const SET_KEYS := [[-0.7, 0.17], [-0.15, 0.42], [0.0, 0.47], [0.35, 0.56]]
 const BUMP_KEYS := [[-0.6, 0.3], [0.0, 0.58], [0.35, 0.7]]
