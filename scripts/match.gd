@@ -352,6 +352,7 @@ func _unshaded(c: Color) -> StandardMaterial3D:
 func _make_ball() -> void:
 	ball = Node3D.new()
 	add_child(ball)
+	VPlayer.ball_node = ball
 	# Ball aus Blender (assets/models/ball.glb, r = 10,5 cm), etwas groesser gezeichnet,
 	# damit man ihn gut sieht
 	var src: Node3D = preload("res://assets/models/ball.glb").instantiate()
@@ -1329,7 +1330,8 @@ func _do_toss() -> void:
 		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 3.2)
 	else:
 		ball_vel = Vector3(0.0, 5.0, 0.0)
-		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 2.5)
+		# 2,32 m: so hoch reicht der gestreckte Arm auf den Zehenspitzen.
+		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 2.32)
 	last_action = "toss"
 	last_touch_team = serving_team
 	ai_serve_e = ai_e("serve")
@@ -1769,28 +1771,52 @@ func _rally_input(inp: Dictionary) -> void:
 				elif inp.over_up:
 					_human_touch("over", "")
 	elif hp != null and not blockers[human_team].is_empty() and hp == blockers[human_team][0]:
-		var d := _stick_dir(mv)
-		# Doppelblock: der rechte Stick steuert den zweiten Blocker (sonst schliesst er von selbst).
-		var helper: VPlayer = blockers[human_team][1] if blockers[human_team].size() > 1 else null
-		var d2 := _stick_dir(inp.rs)
+		# Einzel- und Dreierblock: beide Sticks steuern den ganzen Block. Doppelblock: der linke
+		# Stick gehoert dem Blocker, der aus deiner Sicht links steht, der rechte dem rechten.
+		var team_block: Array = []
+		for b in blockers[human_team]:
+			if b != null:
+				team_block.append(b)
+		var s := side_of(human_team)
 		var rs_on: bool = inp.rs.length() > 0.3
-		var dt := get_physics_process_delta_time()
-		if not hp.airborne:
-			hp.manual_dir = Vector3(0, 0, d.z)
-			if helper != null and not helper.airborne and rs_on:
-				helper.manual_dir = Vector3(0, 0, d2.z)
-			if inp.hit_down and not hp.has_jumped:
-				hp.jump()
-				if helper != null and not helper.has_jumped:
-					helper.jump()
-					_ai_block_hands(human_team, helper)
+		var both := mv
+		if inp.rs.length() > mv.length():
+			both = inp.rs
+		var ctl: Dictionary = {}  # Blocker -> Stickrichtung (Vector2) oder null = KI
+		if team_block.size() == 2:
+			var left_b: VPlayer = team_block[0]
+			var right_b: VPlayer = team_block[1]
+			if -s * left_b.position.z > -s * right_b.position.z:
+				left_b = team_block[1]
+				right_b = team_block[0]
+			ctl[left_b] = mv
+			ctl[right_b] = inp.rs if rs_on else null
 		else:
-			# In der Luft: Haende mit dem Stick verschieben, Stick nach vorn = ueber das Netz greifen.
-			hp.hand_shift = move_toward(hp.hand_shift, d.z * 0.45, 3.0 * dt)
-			hp.hand_reach = 0.12 if mv.y > 0.5 else 0.0
-			if helper != null and helper.airborne and rs_on:
-				helper.hand_shift = move_toward(helper.hand_shift, d2.z * 0.45, 3.0 * dt)
-				helper.hand_reach = 0.12 if inp.rs.y > 0.5 else 0.0
+			for b in team_block:
+				ctl[b] = both
+		var dt := get_physics_process_delta_time()
+		var any_jump := false
+		for b in team_block:
+			var c = ctl[b]
+			var cd := Vector3.ZERO
+			var cy := 0.0
+			if c != null:
+				cd = _stick_dir(c)
+				cy = c.y
+			if not b.airborne:
+				if c != null:
+					b.manual_dir = Vector3(0, 0, cd.z)
+			else:
+				if c != null:
+					# In der Luft: Haende mit dem Stick verschieben, Stick nach vorn = ueber das Netz greifen.
+					b.hand_shift = move_toward(b.hand_shift, cd.z * 0.45, 3.0 * dt)
+					b.hand_reach = 0.12 if cy > 0.5 else 0.0
+		if inp.hit_down and not hp.airborne and not hp.has_jumped:
+			for b in team_block:
+				if not b.has_jumped:
+					b.jump()
+					if b != hp:
+						_ai_block_hands(human_team, b)
 
 
 func _attack_input(inp: Dictionary) -> void:
@@ -2631,6 +2657,7 @@ func _on_ball_landed() -> void:
 
 
 func _fx(kind: String, pos: Vector3, strength: float) -> void:
+	_body_hit(kind, pos, strength)
 	if autoplay:
 		return
 	_rec_events.append([clock, kind, pos, strength])
@@ -2895,8 +2922,17 @@ func _update_players(delta: float) -> void:
 	if opp != null and not opp.done:
 		opp.player.anim_kind = opp.kind
 		opp.player.anim_tech = opp.tech
-		opp.player.anim_t = opp.t
-		opp.player.contact_pt = opp.point
+		# Zuspiel, bevor gedrueckt ist: der Zuspieler geht schon in die Pritschhaltung, wenn der
+		# Ball pritschbar ist (wie im Spiel: die Haende sind frueh oben). Gebaggert wird nur, wenn es so gedrueckt wird.
+		# (Auch kurz nach dem geplanten Treffpunkt noch, sonst springen die Haende fuer ein, zwei Takte in
+		# die Baggerhaltung, bis der Druck auf dem Steuerkreuz verarbeitet ist.)
+		if opp.kind == "set" and not opp.pending and opp.tech == "bump" and opp.speed <= OVER_OK \
+				and not (opp.player.role == "L" and absf(opp.point.x) < 3.0) and clock < opp.t + 0.15:
+			opp.player.anim_tech = "over"
+		# Zu spaet dran: die Bewegung haelt kurz im Treffpunkt an, bis der Ball wirklich gespielt wird
+		opp.player.anim_t = maxf(opp.t, minf(clock, opp.t + 0.12))
+		# Zu spaet dran: Arme und Haende gehen dem Ball nach, statt am geplanten Punkt zu warten.
+		opp.player.contact_pt = opp.point.lerp(ball.position, smoothstep(0.0, 0.05, clock - opp.t))
 		opp.player.contact_aim = _contact_aim(opp)
 		opp.player.contact_on = true
 	if phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done):
@@ -2913,6 +2949,7 @@ func _update_players(delta: float) -> void:
 			if not blockers[t].is_empty() and pl in blockers[t]:
 				pl.urgent = true
 			pl.tick(delta)
+	VPlayer.separate(players[0] + players[1], delta)
 
 
 ## Wohin der Spieler den Ball spielt: Annahme zum Zuspieler, Zuspiel zum Angreifer, Angriff
@@ -3131,3 +3168,30 @@ func hint() -> String:
 			if opp != null and opp.team != human_team and opp.kind == "set":
 				return "Block lesen: linker Stick stellt den Mittelblocker am Netz hin, bevor der Ball zum Angreifer fliegt"
 	return ""
+
+
+## Ballkontakt als Stoss auf den Koerper (Semi-Ragdoll, siehe VPlayer.impact): wer den Ball
+## spielt, gibt in Flugrichtung des ankommenden Balls nach; am Block alle Blocker in der Naehe.
+func _body_hit(kind: String, pos: Vector3, strength: float) -> void:
+	var incoming := -ball_vel if ball_vel.length() > 0.1 else Vector3.DOWN
+	match kind:
+		"bump", "set":
+			if last_toucher:
+				var k := kind
+				if kind == "bump" and last_toucher.anim_kind == "dig":
+					k = "dig"
+				# Richtung, aus der der Ball kam: vor dem Kontakt flog er auf den Spieler zu
+				var come: Vector3 = (pos - last_toucher.global_position - Vector3.UP * 1.0)
+				last_toucher.impact(k, strength, -come.normalized() * 0.3 + Vector3.DOWN * 0.7 if kind == "bump" else -come)
+		"spike", "spike_perfect", "tip":
+			if last_toucher:
+				last_toucher.impact("spike", strength * (0.4 if kind == "tip" else 1.0), Vector3.ZERO)
+		"serve":
+			var sv = last_toucher
+			if sv and sv.airborne:
+				sv.impact("serve", strength * 0.6, Vector3.ZERO)
+		"block":
+			for t in 2:
+				for pl in players[t]:
+					if pl.block_pose and pl.global_position.distance_to(Vector3(pos.x, 0, pos.z)) < 1.6:
+						pl.impact("block", strength, Vector3(pl.side, 0.15, 0.0) - incoming.normalized() * 0.0)
