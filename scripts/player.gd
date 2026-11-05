@@ -1023,8 +1023,11 @@ func _contact_ik() -> void:
 		var hand := cock
 		pole_w = 1.0
 		poles[hs] = cock_el
-		if rel >= -0.2 and rel < 0.0:
-			var sw := smoothstep(-0.2, -0.01, rel)
+		# Mit Video-Bewegung bleibt die Bogenspannung bis kurz vor dem Treffpunkt, dann peitscht der
+		# Arm in gut 0,1 s durch (wie im Video), statt lange ueber dem Kopf nach vorn zu wandern.
+		var sw0 := -0.12 if anim_kind in ["attack", "serve"] and not "video" in _off else -0.2
+		if rel >= sw0 and rel < 0.0:
+			var sw := smoothstep(sw0, -0.01, rel)
 			# Hand bleibt zurueck (peitscht spaet), der Ellbogen fuehrt
 			var t := pow(sw, 1.5)
 			hand = cock * (1.0 - t) * (1.0 - t) + over * 2.0 * (1.0 - t) * t + hit * t * t
