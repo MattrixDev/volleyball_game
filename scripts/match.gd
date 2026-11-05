@@ -77,6 +77,7 @@ const SERVE_KIND_TEXT := ["Stand", "Sprung"]
 ## Die naechste Ballberuehrung, die ansteht.
 class Opp:
 	var team := 0
+	var t0 := 0.0  ## Spielzeit, als dieser Kontakt geplant wurde
 	var player: VPlayer = null
 	var kind := ""  # pass, dig, set, attack, free
 	var t := 0.0  # idealer Zeitpunkt der Beruehrung
@@ -173,6 +174,7 @@ var side_changed_deciding := false
 var streak := [0, 0]  # Punkte in Folge
 ## K1/K2: Spielplan und Gedaechtnis je Team (siehe ai_plan.gd); wird zu Spielbeginn gebaut.
 var plans: Array = [null, null]
+var _r1_down_at := -10.0  # R1 zuletzt gedrueckt (Annahme nutzt R1 auch; Dump nur nach neuem Druck)
 var _block_auto_style := {}  # B1: Block-Technik vor dem weichen Block (L2)
 var _soft_hint_opp: Opp = null
 var _last_attack := {}  # letzter Angriff fuer das Gedaechtnis: team, lane, dir
@@ -1110,7 +1112,7 @@ func _hold_ball_at_server() -> void:
 func _empty_input() -> Dictionary:
 	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "dpad_down": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_held": false,
 		"bump_held": false, "over_held": false, "bump_up": false, "over_up": false, "dpad_up": Vector2.ZERO,
-		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false, "finesse_held": false, "rs_pad": Vector2.ZERO}
+		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false, "finesse_held": false, "rs_pad": Vector2.ZERO, "l1_held": false}
 
 
 func _read_input() -> Dictionary:
@@ -1119,6 +1121,9 @@ func _read_input() -> Dictionary:
 	var stick := _held_stick(Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up"))
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
 	d.rs_pad = stick if stick.length() > 0.15 else Vector2.ZERO  # nur Stick / IJKL, ohne Maus
+	d.l1_held = Input.is_action_pressed("serve_prev")  # L1: in der Annahme = hoch und sicher
+	if Input.is_action_just_pressed("set_dump"):
+		_r1_down_at = clock
 	d.mouse_rs = mouse_rs
 	d.dump_held = Input.is_action_pressed("set_dump")
 	d.bump = Input.is_action_just_pressed("bump")
@@ -1727,6 +1732,7 @@ func _try_team(team: int) -> bool:
 	o.player = pl
 	o.kind = kind
 	o.t = clock + tc
+	o.t0 = clock
 	o.point = p
 	if force_style != "":
 		o.style = force_style
@@ -2048,7 +2054,9 @@ func _rally_input(inp: Dictionary) -> void:
 				# rechts Diagonal, oben Mitte, unten Hinterfeld). Pritschen oder Baggern waehlt das Spiel.
 				# R2 gehalten = schneller Ball (Mitte: Schnellangriff), R1 = Dump,
 				# R1 + R2 = der Zuspieler schlaegt selbst. X/A und B/Y gehen weiter (Tastatur).
-				if not assist:
+				# Haelst du das Steuerkreuz (linker Daumen), laeuft der Zuspieler von selbst: der Daumen
+				# kann nicht gleichzeitig laufen und die Richtung druecken.
+				if not assist and inp.dpad.length() < 0.5:
 					hp.manual_dir = _stick_dir(mv)
 				var lane := _set_choice(inp.dpad if inp.dpad.length() > 0.5 else inp.mouse_rs)
 				var lib_front: bool = opp.player.role == "L" and absf(opp.point.x) < 3.0
@@ -2072,9 +2080,10 @@ func _rally_input(inp: Dictionary) -> void:
 					trig = "over"
 				if trig != "":
 					var tempo := "high"
-					if inp.dump_held and inp.hit_held:
+					var r1: bool = inp.dump_held and _r1_down_at >= opp.t0 - 0.05  # noch von der Annahme gehalten: kein Dump
+					if r1 and inp.hit_held:
 						tempo = "attack"
-					elif inp.dump_held:
+					elif r1:
 						tempo = "dump"
 					elif inp.hit_held:
 						tempo = "quick" if lane == "mid" else "fast"

@@ -7,9 +7,9 @@ extends RefCounted
 ## Schluessel -> [Name nach dem Kontakt, Tastenhinweis]
 const TABLE := {
 	# Annahme (Thread "Annahme steuerbar machen")
-	"pass_flat": ["Flach ans Netz", "Rechter Stick nach vorn beim Annehmen: flacher, schneller Pass ans Netz (kleineres Fenster)"],
-	"pass_high": ["Hoch und sicher", "Rechter Stick zurück beim Annehmen: hoher, sicherer Ball (kein Schnellangriff danach)"],
-	"pass_fix": ["Seitlich ausgeglichen", "Ball neben dem Körper: rechten Stick zur Gegenseite halten, dann fliegt er nicht weg"],
+	"pass_flat": ["Flach ans Netz", "R1 halten beim Annehmen: flacher, schneller Pass ans Netz (kleineres Fenster)"],
+	"pass_high": ["Hoch und sicher", "L1 halten beim Annehmen: hoher, sicherer Ball (kein Schnellangriff danach)"],
+	"pass_fix": ["Seitlich ausgeglichen", "Ball neben dem Körper: linken Stick im Kontakt zur Gegenseite halten, dann fliegt er nicht weg"],
 	"square": ["Frontal angenommen", "Lauf rechtzeitig hinter den Ball: größeres Timing-Fenster, genauere Annahme"],
 	"side_taken": ["Seitlich angenommen", ""],
 	"dive": ["Hecht", "B: selbst hechten (früh gehechtet reicht weiter)"],
