@@ -2285,7 +2285,9 @@ func _set_input(inp: Dictionary, hp: VPlayer) -> void:
 		opp.finesse = inp.finesse_held
 		opp.tech = "over"
 		opp.win_scale = hit_window_scale(0.45 if opp.finesse else opp.power, rs, false)
-		_press(opp, e, lane + "|" + ("dump" if opp.finesse else "attack"))
+		var k2 := "dump" if opp.finesse else "attack"
+		stats["Mensch 2. Ball " + k2] = stats.get("Mensch 2. Ball " + k2, 0) + 1
+		_press(opp, e, lane + "|" + k2)
 		return
 	# Halten = Zuspieler stellt sich hin und geht in die Haltung, Loslassen = Zuspiel
 	if inp.dpad.length() > 0.5 or inp.bump_held:
@@ -3001,6 +3003,8 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	if out_of_system and lane_choice == "mid":
 		lane_choice = "left"
 	set_q[o.team] = q
+	if (tempo == "dump" or tempo == "attack") and o.human:
+		stats["Mensch 2. Ball moeglich" if _can_dump(o) else "Mensch 2. Ball nicht moeglich"] = stats.get("Mensch 2. Ball moeglich" if _can_dump(o) else "Mensch 2. Ball nicht moeglich", 0) + 1
 	if (tempo == "dump" or tempo == "attack") and not _can_dump(o):
 		if o.human:
 			popup(setter, "Dump nicht möglich" if tempo == "dump" else "Schlag nicht möglich", Q_COLOR[Q.WEAK])
