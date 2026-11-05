@@ -536,7 +536,7 @@ func _update_panel() -> void:
 		_help.text = "Rotation %d%s  ·  Y / T: Debug-Menü  ·  Start / Esc: Pause" % [int(o.rot) + 1, set_info]
 		if id == "annahme_technik":
 			var run_txt := "Laufen: selbst (frontal hinter den Ball = mehr Zeit, genauer)" if not match_node.cfg.assisted("run") else "Laufhilfe an (Back / F1 schaltet auf selbst laufen)"
-			_help.text = "Rechter Stick beim Annehmen: vorn = flach ans Netz, hinten = hoch und sicher, zur Seite = Ball neben dem Körper ausgleichen · B = hechten (früh = weiter, danach liegst du) · %s\n" % run_txt + _help.text
+			_help.text = "Beim Annehmen: R1 halten = flach ans Netz, L1 halten = hoch und sicher, linker Stick zur Seite = Ball neben dem Körper ausgleichen · B = hechten (früh = weiter, danach liegst du) · %s\n" % run_txt + _help.text
 		if id == "angriff_technik":
 			_help.text = "R2 genau am höchsten Punkt = sauber getroffen (scharfe Winkel) · L2 + R2 = Gefühlsschlag: Stick Mitte Roll-Shot, oben tiefe Ecke, Seite Lücke · linker Stick vor dem Absprung: zur Seitenlinie = von außen, zur Mitte = eng, zurück = verzögern\n" + _help.text
 	_stats.text = "\n".join(lines)

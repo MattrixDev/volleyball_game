@@ -20,6 +20,8 @@ signal touch_result(kind: String, team: int, human: bool, q: int, e: float, spee
 signal technique_done(player: VPlayer, key: String)
 signal technique_available(key: String)
 signal touch_logged(team: int, info: Dictionary)
+## Dein eigener Block (fuer Klang, Halle und Controller-Rumpeln): full = voller Block.
+signal own_block(full: bool, pos: Vector3)
 
 const G := 9.81
 const R := Ballistics.BALL_R
@@ -77,6 +79,7 @@ const SERVE_KIND_TEXT := ["Stand", "Sprung"]
 ## Die naechste Ballberuehrung, die ansteht.
 class Opp:
 	var team := 0
+	var t0 := 0.0  ## Spielzeit, als dieser Kontakt geplant wurde
 	var player: VPlayer = null
 	var kind := ""  # pass, dig, set, attack, free
 	var t := 0.0  # idealer Zeitpunkt der Beruehrung
@@ -173,6 +176,8 @@ var side_changed_deciding := false
 var streak := [0, 0]  # Punkte in Folge
 ## K1/K2: Spielplan und Gedaechtnis je Team (siehe ai_plan.gd); wird zu Spielbeginn gebaut.
 var plans: Array = [null, null]
+var _r1_down_at := -10.0  # R1 zuletzt gedrueckt (Annahme nutzt R1 auch; Dump nur nach neuem Druck)
+var _human_stuff := false  # dein voller Block in diesem Ballwechsel: immer Wiederholung
 var _block_auto_style := {}  # B1: Block-Technik vor dem weichen Block (L2)
 var _soft_hint_opp: Opp = null
 var _last_attack := {}  # letzter Angriff fuer das Gedaechtnis: team, lane, dir
@@ -1112,7 +1117,7 @@ func _hold_ball_at_server() -> void:
 func _empty_input() -> Dictionary:
 	return {"mv": Vector2.ZERO, "rs": Vector2.ZERO, "bump": false, "over": false, "fast": false, "quick": false, "dpad": Vector2.ZERO, "dpad_down": Vector2.ZERO, "mouse_rs": Vector2.ZERO, "dump_held": false,
 		"bump_held": false, "over_held": false, "bump_up": false, "over_up": false, "dpad_up": Vector2.ZERO,
-		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false, "finesse_held": false, "rs_pad": Vector2.ZERO}
+		"hit_down": false, "hit_up": false, "hit_held": false, "kind_prev": false, "kind_next": false, "finesse_held": false, "rs_pad": Vector2.ZERO, "l1_held": false}
 
 
 func _read_input() -> Dictionary:
@@ -1121,6 +1126,9 @@ func _read_input() -> Dictionary:
 	var stick := _held_stick(Input.get_vector("aim_left", "aim_right", "aim_down", "aim_up"))
 	d.rs = stick if stick.length() > 0.15 else mouse_rs
 	d.rs_pad = stick if stick.length() > 0.15 else Vector2.ZERO  # nur Stick / IJKL, ohne Maus
+	d.l1_held = Input.is_action_pressed("serve_prev")  # L1: in der Annahme = hoch und sicher
+	if Input.is_action_just_pressed("set_dump"):
+		_r1_down_at = clock
 	d.mouse_rs = mouse_rs
 	d.dump_held = Input.is_action_pressed("set_dump")
 	d.bump = Input.is_action_just_pressed("bump")
@@ -1728,6 +1736,7 @@ func _try_team(team: int) -> bool:
 	o.player = pl
 	o.kind = kind
 	o.t = clock + tc
+	o.t0 = clock
 	o.point = p
 	if force_style != "":
 		o.style = force_style
@@ -1758,7 +1767,6 @@ func _try_team(team: int) -> bool:
 		o.win_scale *= 1.35
 		_stick_lock_until = clock + 0.45
 		_need_neutral = true
-		popup(pl, "Dein Ball", Color(1.0, 0.9, 0.4))
 	# Staerken: wer gut annimmt, abwehrt, zuspielt oder schlaegt, hat als Mensch etwas mehr Zeit
 	# (groesseres Timing-Fenster) und trifft als KI genauer.
 	var sk := _touch_skill(pl, kind)
@@ -1766,6 +1774,8 @@ func _try_team(team: int) -> bool:
 		o.win_scale *= 1.0 + 0.12 * sk
 	if not o.human:
 		o.ai_e = ai_e(kind) * clampf(1.0 - 0.3 * sk, 0.55, 1.45)
+		if team == human_team and idx == 0 and last_action == "block_touch" and last_touch_team == team:
+			o.ai_e *= 0.55  # nach deiner Blockberuehrung ist der Ball gebremst: deine Abwehr hat es leichter
 		if kind == "dig":
 			_ai_dig_limits(o, tc)
 	if kind == "attack":
@@ -2049,7 +2059,9 @@ func _rally_input(inp: Dictionary) -> void:
 				# rechts Diagonal, oben Mitte, unten Hinterfeld). Pritschen oder Baggern waehlt das Spiel.
 				# R2 gehalten = schneller Ball (Mitte: Schnellangriff), R1 = Dump,
 				# R1 + R2 = der Zuspieler schlaegt selbst. X/A und B/Y gehen weiter (Tastatur).
-				if not assist:
+				# Haelst du das Steuerkreuz (linker Daumen), laeuft der Zuspieler von selbst: der Daumen
+				# kann nicht gleichzeitig laufen und die Richtung druecken.
+				if not assist and inp.dpad.length() < 0.5:
 					hp.manual_dir = _stick_dir(mv)
 				var lane := _set_choice(inp.dpad if inp.dpad.length() > 0.5 else inp.mouse_rs)
 				var lib_front: bool = opp.player.role == "L" and absf(opp.point.x) < 3.0
@@ -2073,9 +2085,10 @@ func _rally_input(inp: Dictionary) -> void:
 					trig = "over"
 				if trig != "":
 					var tempo := "high"
-					if inp.dump_held and inp.hit_held:
+					var r1: bool = inp.dump_held and _r1_down_at >= opp.t0 - 0.05  # noch von der Annahme gehalten: kein Dump
+					if r1 and inp.hit_held:
 						tempo = "attack"
-					elif inp.dump_held:
+					elif r1:
 						tempo = "dump"
 					elif inp.hit_held:
 						tempo = "quick" if lane == "mid" else "fast"
@@ -3624,8 +3637,13 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	# wischt seitlich ab), Blockstaerke und Wucht des Balls. Kein Wuerfel.
 	var firm := clampf(stuff_p / 0.45, 0.25, 1.4)
 	var soft: bool = pl.anim_style == "soft"
+	# Dein Block, perfekt gemacht: am hoechsten Punkt (kaum noch Steig- oder Fallgeschwindigkeit)
+	# und die Haende mittig am Ball. Das ist fast immer ein voller Block, Koennen entscheidet.
+	var perfect: bool = def == human_team and not soft and absf(pl.jump_v) < 1.1 and absf(hit_dz) < 0.22
 	var v_in := ball_vel
-	var v_out := _block_bounce(pl, c, v_in, hit_dz, firm, soft, s_att)
+	var v_out := _block_bounce(pl, c, v_in, hit_dz, firm, soft, s_att, perfect)
+	if perfect:
+		stats["Block perfekt"] = stats.get("Block perfekt", 0) + 1
 	var back := signf(v_out.x) == s_att
 	ball.position = Vector3((s_att if back else -s_att) * (R + 0.05), c.y, c.z)
 	ball_vel = v_out
@@ -3645,7 +3663,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			popup(pl, txt, Q_COLOR[Q.PERFECT])
 			stats[txt] = stats.get(txt, 0) + 1
 			if def == human_team:
-				big_hit.emit(1.0 if in_block >= 2 else 0.7)
+				big_hit.emit(1.0 if in_block >= 2 else 0.8)  # Halt/Kamera entscheidet die Zeitlupen-Einstellung
+				_human_stuff = true
 				if in_block >= 2:
 					_hit_stop(0.06, 0.1)
 		else:
@@ -3671,7 +3690,11 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			stats["Block Soft-Touch"] = stats.get("Block Soft-Touch", 0) + 1
 	if soft and def == human_team:
 		technique_done.emit(pl, "block_soft")
-	_fx("block", c, 1.0 if last_action == "block" else 0.55)
+	var full: bool = last_action == "block" and ball_vel.y < -4.0
+	_fx("block", c, 1.0 if full else 0.55)
+	if def == human_team and not autoplay:
+		# Dein Block: voller Block = harter Doppelknall, Halle, kraeftiges Rumpeln; Beruehrung = dumpf, leicht.
+		own_block.emit(full, c)
 	last_touch_team = def
 	last_toucher = null
 	plan_next()
@@ -3680,9 +3703,14 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 
 ## Ball prallt von den Blockhaenden ab (Weltkoordinaten). n = Flaechennormale der Haende,
 ## zeigt zum Angreifer; a = wie weit die Haende ueber das Netz nach unten gekippt sind.
-func _block_bounce(pl: VPlayer, c: Vector3, v: Vector3, dz: float, firm: float, soft: bool, s_att: float) -> Vector3:
+func _block_bounce(pl: VPlayer, c: Vector3, v: Vector3, dz: float, firm: float, soft: bool, s_att: float, perfect := false) -> Vector3:
 	var top := pl.block_top()
 	var a := 0.05 + 0.15 * firm + (0.25 if pl.hand_reach > 0.0 else 0.0)
+	if perfect:
+		# Perfekt: die Haende sind schon ueber dem Netz und druecken den Ball steil auf die Seite
+		# des Angreifers. Das ist die Belohnung fuer Timing und Stellung.
+		var sp := v.length()
+		return Vector3(s_att * clampf(0.18 * sp, 2.5, 5.0), -clampf(0.4 * sp, 7.0, 12.0), v.z * 0.15)
 	if pl.jump_v < -1.0:
 		a -= 0.3  # schon auf dem Weg nach unten: Haende kippen nach hinten
 	if soft:
@@ -3765,6 +3793,10 @@ func _fx(kind: String, pos: Vector3, strength: float) -> void:
 ## spaeter die naechste.
 func _is_highlight(reason: String) -> bool:
 	points_since_replay += 1
+	if reason == "Block-Punkt!" and _human_stuff:
+		_human_stuff = false
+		return true  # dein voller Block: immer zeigen
+	_human_stuff = false
 	var strong := false
 	match reason:
 		"Ass!", "Block-Punkt!":

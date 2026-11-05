@@ -1,8 +1,8 @@
 class_name Reception
 extends RefCounted
 ## Annahme und Abwehr fuer den Menschen steuerbar (Skill-Gap, Schritt 1):
-##  A1 Annahme lenken: rechter Stick beim Kontakt (vorn = flach ans Netz, hinten = hoch zur
-##     3-m-Linie, Seite = Ball neben dem Koerper ausgleichen).
+##  A1 Annahme lenken beim Kontakt: R1 = flach ans Netz, L1 = hoch zur 3-m-Linie, linker Stick
+##     seitlich = Ball neben dem Koerper ausgleichen (rechter Stick geht auch).
 ##  A2 Frontal hinter dem Ball: wer manuell laeuft und rechtzeitig hinter dem Ball steht, hat
 ##     ein groesseres Timing-Fenster und nimmt genauer an.
 ##  A4 Hechten von Hand (B): frueh hechten reicht weiter, danach liegt man am Boden.
@@ -40,7 +40,14 @@ static func aim_key(aim: Vector2) -> String:
 func input(o, inp: Dictionary) -> bool:
 	if o.pending:
 		return false
+	# Lenken ohne den rechten Daumen (der drueckt A/X oder B): R1 halten = flach ans Netz,
+	# L1 halten = hoch und sicher, linker Stick seitlich im Kontakt = seitlich ausgleichen.
+	# Der rechte Stick geht weiter (Tastatur IJKL, wer lieber so spielt).
 	var a: Vector2 = inp.get("rs_pad", Vector2.ZERO)
+	if a.length() < STICK_MIN:
+		var fwd := (1.0 if inp.get("dump_held", false) else 0.0) - (1.0 if inp.get("l1_held", false) else 0.0)
+		var mv: Vector2 = inp.get("mv", Vector2.ZERO)
+		a = Vector2(mv.x if absf(mv.x) > 0.6 and fwd == 0.0 else 0.0, fwd)
 	o.aim = a if o.kind != "free" else Vector2.ZERO
 	o.player.platform_tilt = o.aim if o.aim.length() >= STICK_MIN else Vector2.ZERO
 	if inp.get("fast", false):
