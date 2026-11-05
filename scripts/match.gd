@@ -1276,7 +1276,6 @@ func _physics_process(delta: float) -> void:
 			_rally_input(inp)
 			_ai_actions()
 			_step_ball(delta)
-			_check_block_net()
 		Phase.POINT_PAUSE:
 			_step_dead_ball(delta)
 			# A / Leertaste: gleich weiter (nach einem kurzen Moment fuer den Jubel)
@@ -2414,34 +2413,6 @@ func _ai_block_hands(t: int, b: VPlayer) -> void:
 	b.hand_shift = shift
 	if t != human_team:
 		b.hand_reach = 0.12 if rng.randf() < 0.12 else 0.0
-		# Die KI zieht die Haende meist rechtzeitig zurueck, manchmal zu spaet (dann Netz).
-		_ai_late_retract[b] = b.hand_reach > 0.0 and rng.randf() < clampf(0.15 - 0.06 * pf(b, "block"), 0.05, 0.25)
-
-
-## Block: Wer ueber das Netz gegriffen hat (Stick nach vorn), muss die Haende beim Herunterkommen
-## zurueckziehen (Stick los). Sonst streift er beim Landen das Netz. Ohne Greifen kein Netzfehler.
-const BLOCK_NET_H := 0.3  # unter dieser Sprunghoehe (auf dem Weg nach unten) beruehren die Haende das Netz
-var _ai_late_retract := {}
-
-
-func _check_block_net() -> void:
-	if phase != Phase.RALLY:
-		return
-	for t in 2:
-		for pl in players[t]:
-			if not pl.airborne or pl.hand_reach <= 0.0 or absf(pl.position.x) > 1.2:
-				continue
-			if t != human_team and pl.jump_v < -1.0 and not _ai_late_retract.get(pl, false):
-				pl.hand_reach = 0.0  # KI: rechtzeitig zurueckgezogen
-				continue
-			if pl.jump_v < 0.0 and pl.jump_h < BLOCK_NET_H and cfg.unit("faults") > 0.0:
-				pl.hand_reach = 0.0
-				_ai_late_retract.erase(pl)
-				stats["Netz beim Block T%d" % t] = stats.get("Netz beim Block T%d" % t, 0) + 1
-				last_touch_team = t
-				_fx("net", Vector3(0.0, NET_H, pl.position.z), 0.5)
-				_end_rally(1 - t, "Netzberührung beim Block")
-				return
 
 
 func _ai_prepare(o: Opp) -> void:
@@ -3870,8 +3841,8 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		return false
 	var pl := hit_pl
 	var top2: float = pl.block_top()
-	# Ueber das Netz greifen ist stark, aber riskant: das Netz beruehrt, wer die Haende beim
-	# Herunterkommen nicht rechtzeitig zurueckzieht (siehe _check_block_net). Normal springen ist sicher.
+	# Ueber das Netz greifen (Stick nach vorn) macht den Block staerker. Netzfehler beim Block gibt
+	# es nicht (Mattis, 05.11.2026: "Bitte mach einfach den Netzfehler raus").
 	var s_att := signf(prev.x)
 	ball_g = G
 	# Wie gut steht der Block? Haende ganz oben, ueber das Netz gegriffen, mehrere Blocker.
