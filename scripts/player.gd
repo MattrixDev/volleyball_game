@@ -1026,10 +1026,16 @@ func _contact_ik() -> void:
 		# Mit Video-Bewegung bleibt die Bogenspannung bis kurz vor dem Treffpunkt, dann peitscht der
 		# Arm in gut 0,1 s durch (wie im Video), statt lange ueber dem Kopf nach vorn zu wandern.
 		var sw0 := -0.12 if anim_kind in ["attack", "serve"] and not "video" in _off else -0.2
+		var smooth_whip := anim_kind in ["attack", "serve"] and not "glatt" in _off
 		if rel >= sw0 and rel < 0.0:
 			var sw := smoothstep(sw0, -0.01, rel)
 			# Hand bleibt zurueck (peitscht spaet), der Ellbogen fuehrt
 			var t := pow(sw, 1.5)
+			if smooth_whip:
+				# Schneller werdend bis in den Treffpunkt (kein Abbremsen vor dem Ball): der Arm
+				# kommt mit voller Geschwindigkeit durch den Kontakt, das vermeidet den Ruck danach.
+				var lin := clampf((rel - sw0) / -sw0, 0.0, 1.0)
+				t = lin * lin * (1.6 - 0.6 * lin)
 			hand = cock * (1.0 - t) * (1.0 - t) + over * 2.0 * (1.0 - t) * t + hit * t * t
 			poles[hs] = cock_el.lerp(lead_el, smoothstep(0.0, 0.55, sw))
 		elif rel >= 0.0:
@@ -1037,11 +1043,23 @@ func _contact_ik() -> void:
 			poles[hs] = lead_el.lerp(sh_r + r * 0.4 - up * 0.25 + f * 0.1, smoothstep(0.0, 0.12, rel))
 			# Richtung um die Schulter drehen (Bogen auf Armlaenge), nicht quer durch den Raum mischen
 			var hd := (hit - sh_r).normalized()
-			if rel < 0.07:
+			var rad := 0.45
+			if smooth_whip and anim_kind == "attack":
+				# (Aufschlag: der Treffpunkt kann sich durch den Zeitfehler verspaeten, dort bleibt
+				# die Hand kurz am Ball wie bisher.)
+				# Nachschwung startet mit Schwung (ohne Halt im Treffpunkt) und auf der Armlaenge des
+				# Treffpunkts, die erst allmaehlich auf 0,45 m zurueckgeht (sonst springt das Ziel).
+				var k := clampf(rel / 0.18, 0.0, 1.0)
+				k = 1.0 - (1.0 - k) * (1.0 - k)
+				var td := (thru - sh_r).normalized()
+				var cd := (cross - sh_r).normalized()
+				hd = hd.slerp(td, clampf(k / 0.45, 0.0, 1.0)) if k < 0.45 else td.slerp(cd, (k - 0.45) / 0.55)
+				rad = lerpf((hit - sh_r).length(), 0.45, smoothstep(0.0, 0.12, rel))
+			elif rel < 0.07:
 				hd = hd.slerp((thru - sh_r).normalized(), smoothstep(0.0, 0.07, rel))
 			else:
 				hd = (thru - sh_r).normalized().slerp((cross - sh_r).normalized(), smoothstep(0.07, 0.18, rel))
-			hand = sh_r + hd * 0.45
+			hand = sh_r + hd * rad
 		tg = {hs: hand}
 		# Mit dem Video-Angriff kommt das Ausholen (Bogenspannung) aus dem Clip; die Zielhilfe
 		# uebernimmt erst kurz vor dem Treffpunkt, damit der Ball sicher getroffen wird.
