@@ -244,6 +244,7 @@ var cam_subject: VPlayer = null
 var _slow_tail_until := 0.0
 var _hitstop_left := 0.0
 var _hitstop_scale := SLOW  # wie langsam der Treffer-Stopp ist
+var _after_stop := false  # nach dem Treffer-Stopp schnell (nicht gummiartig) zurueck zum Tempo
 var _time_scale := 1.0  # gleitet weich zur gewuenschten Zeitlupe
 
 var _ring_target: MeshInstance3D
@@ -272,6 +273,7 @@ func _ready() -> void:
 			Teams.home = a.get_slice("=", 1)  # Test: Teams waehlen
 		elif a.begins_with("--away="):
 			Teams.away = a.get_slice("=", 1)
+	HumanFigure.preload_data()
 	for t in 2:
 		_spawn_team(t)
 	_make_ball()
@@ -1624,8 +1626,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	touch_result.emit("serve", serving_team, human_serves(), q, e, ball_vel.length(), 0.0)
 	if human_serves() and sup:
 		big_hit.emit(0.85)
-		_hitstop_left = 0.09
-		_hitstop_scale = 0.05
+		_hit_stop(0.06, 0.05)
 	elif human_serves() and q == Q.PERFECT and power > 0.8:
 		big_hit.emit(0.6)
 	plan_next()
@@ -3446,12 +3447,10 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 		big_hit.emit(1.0 if perfect else 0.4)
 		if sup:
 			# Wuchtschlag: etwas laengerer Mini-Stopp, dann gleitet das Spiel weich weiter.
-			_hitstop_left = 0.11
-			_hitstop_scale = 0.05
+			_hit_stop(0.06, 0.05)
 		elif perfect:
 			# Kurzer Mini-Stopp beim perfekten Schlag, danach gleitet das Spiel weich weiter.
-			_hitstop_left = 0.07
-			_hitstop_scale = 0.06
+			_hit_stop(0.05, 0.06)
 	elif sup:
 		big_hit.emit(0.55)
 	elif last_attack_speed > 24.0:
@@ -3648,8 +3647,7 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 			if def == human_team:
 				big_hit.emit(1.0 if in_block >= 2 else 0.7)
 				if in_block >= 2:
-					_hitstop_left = 0.3
-					_hitstop_scale = SLOW
+					_hit_stop(0.06, 0.1)
 		else:
 			# Abpraller: der Ball springt zurueck, das angreifende Team kann neu aufbauen.
 			popup(pl, "Abpraller", Q_COLOR[Q.GOOD])
@@ -3968,7 +3966,7 @@ func _update_players(delta: float) -> void:
 			# Im Ballwechsel verschieben sich alle ein Stueck zur Ballseite (wie echte Abwehr).
 			var shade := 0.0
 			if phase == Phase.RALLY:
-				shade = clampf((ball.position.z) * 0.15, -0.6, 0.6)
+				shade = clampf((ball.position.z) * 0.2, -0.8, 0.8)
 			for pl in players[t]:
 				if not ((phase == Phase.PRE_SERVE or (phase == Phase.TOSS and not serve_done)) and pl == server()):
 					pl.target = formation_pos(t, pl, form) + Vector3(0.0, 0.0, shade)
@@ -4099,7 +4097,8 @@ func _update_players(delta: float) -> void:
 			if is_down(pl):
 				pl.target = pl.position  # liegt noch am Boden oder steht gerade auf
 			pl.urgent = opp != null and not opp.done and pl == opp.player
-			if not blockers[t].is_empty() and pl in blockers[t]:
+			pl.blocking = not blockers[t].is_empty() and pl in blockers[t]
+			if pl.blocking:
 				pl.urgent = true
 			pl.tick(delta)
 	VPlayer.separate(players[0] + players[1], delta)
@@ -4141,6 +4140,26 @@ func _stand_pos(o: Opp, p: Vector3) -> Vector3:
 
 ## Zeitlupe und Kamera: In jeder Spielphase gilt das eingestellte Tempo (Menue), die
 ## Kamera rueckt beim eigenen Aufschlag, Angriff und Block naeher.
+## Kurzer Treffer-Stopp (Mini-Stopp). Nur wenn die Zeitlupe an ist: ohne Zeitlupe soll das Spiel
+## ohne Unterbrechung durchlaufen. Hoechstens 60 ms, danach geht es sofort im alten Tempo weiter.
+func _hit_stop(seconds: float, scale: float) -> void:
+	if not slow_active():
+		return
+	_hitstop_left = minf(seconds, 0.06)
+	_hitstop_scale = scale
+	_after_stop = true
+
+
+## Ist irgendeine Zeitlupe eingeschaltet (Schalter an und mindestens ein Regler ueber 0)?
+func slow_active() -> bool:
+	if not slowmo_on:
+		return false
+	for k in ["slow_serve", "slow_receive", "slow_set", "slow_attack", "slow_block"]:
+		if cfg.get_v(k) > 0.0:
+			return true
+	return false
+
+
 func _update_time_and_camera(real_delta: float) -> void:
 	var want := 1.0
 	cam_mode = ""
@@ -4187,8 +4206,12 @@ func _update_time_and_camera(real_delta: float) -> void:
 		_time_scale = want
 	elif want < _time_scale:
 		_time_scale = maxf(want, _time_scale - real_delta * 6.0)
+		_after_stop = false
 	else:
-		_time_scale = minf(want, _time_scale + real_delta * 1.8)
+		# Nach dem Treffer-Stopp in gut 0,1 s zurueck, sonst wirkt der Ablauf wie Gummi.
+		_time_scale = minf(want, _time_scale + real_delta * (9.0 if _after_stop else 1.8))
+		if _time_scale >= want:
+			_after_stop = false
 	Engine.time_scale = _time_scale
 
 

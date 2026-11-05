@@ -7,6 +7,11 @@ const HudScript := preload("res://scripts/hud.gd")
 var camera: Camera3D
 var match_node
 var _shake := 0.0
+var _shake_t := 0.0
+var _want_pos_s := Vector3.INF  # weich nachgefuehrtes Kameraziel
+var _want_look_s := Vector3.INF
+var _was_close := false  # Kamera war gerade nah (Angriff, Aufschlag) und gleitet zurueck
+var _back_t := 0.0
 var _cam_base := Vector3(-22.0, 11.2, 0.0)
 var _cam_pos := Vector3(-22.0, 11.2, 0.0)
 var _cam_look := Vector3(1.5, 1.0, 0.0)
@@ -72,7 +77,11 @@ func _ready() -> void:
 	match_node.point_won.connect(_on_point)
 	add_child(match_node)
 	for a in OS.get_cmdline_user_args():
-		if a.begins_with("--lab-"):
+		if a.begins_with("--flow="):
+			add_child(load("res://tools/flow_probe.gd").new())  # Test: Fluss messen
+		elif a.begins_with("--perf="):
+			add_child(load("res://tools/perf_probe.gd").new())  # Test: Bildzeiten messen
+		elif a.begins_with("--lab-"):
 			# Test: Animations-Labor (Fehler messen, Stellen filmen), siehe anim_lab.gd und tools/lab/
 			var lab := AnimLab.new()
 			lab.match_node = match_node
@@ -167,7 +176,9 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	# Kamera in Echtzeit bewegen, auch waehrend der Zeitlupe.
 	var rd := delta / maxf(Engine.time_scale, 0.01)
-	var bpos: Vector3 = match_node.ball.position if match_node and match_node.ball else Vector3.ZERO
+	# Sichtbare (weich zwischen den Physiktakten gerechnete) Lage, sonst zittert die Kamera leicht
+	# im Takt der Physik gegen das fluessig gezeichnete Bild.
+	var bpos: Vector3 = match_node.ball.get_global_transform_interpolated().origin if match_node and match_node.ball else Vector3.ZERO
 	var bz := bpos.z
 	# Die Kamera steht immer hinter dem eigenen Team, auch nach dem Seitenwechsel.
 	var cs: float = match_node.camera_side() if match_node else -1.0
@@ -189,7 +200,13 @@ func _process(delta: float) -> void:
 		mode = "replay" if preview_mode == "replay" else ("" if preview_mode == "view" else preview_mode)
 		subj = _preview_subject(preview_mode)
 		_hold_left = 0.0
-	elif mode == "attack" or mode == "block":
+	elif mode == "block":
+		# Kein eigener Blickwechsel beim Block: die Uebersicht zeigt Block und Angriff, ein
+		# Schnitt hin und zurueck reisst den Ballwechsel nur auseinander.
+		mode = ""
+		subj = null
+		_hold_left = 0.0
+	elif mode == "attack":
 		_hold_mode = mode
 		_hold_subj = subj
 		_hold_left = 0.7
@@ -201,13 +218,13 @@ func _process(delta: float) -> void:
 		_hold_left = 0.0
 	if match_node and mode == "replay":
 		# Fernsehkamera von der Seitenlinie, folgt dem Ball.
-		var b: Vector3 = match_node.ball.position
+		var b: Vector3 = bpos
 		want_pos = Vector3(b.x * 0.6, 5.2, -12.2)
 		want_look = Vector3(b.x * 0.9, maxf(b.y * 0.6, 0.8), b.z * 0.3)
 		want_fov = 44.0
 	elif subj != null:
 		var s: float = subj.side
-		var p: Vector3 = subj.position
+		var p: Vector3 = subj.get_global_transform_interpolated().origin
 		match mode:
 			"serve":
 				# Hinter der Schulter des Aufschlaegers.
@@ -246,13 +263,31 @@ func _process(delta: float) -> void:
 	if mode == "replay":
 		w = 4.0
 	elif mode == "attack":
-		w = 5.0  # schneller in die Angriffsansicht, damit sie zum Schlag steht
+		w = 4.0  # zuegig, aber weich in die Angriffsansicht, damit sie zum Schlag steht
+	elif _was_close:
+		w = 2.2  # nach Angriff oder Aufschlag langsam zurueck in die Uebersicht gleiten
+	if mode in ["attack", "serve"]:
+		_was_close = true
+		_back_t = 0.0
+	elif _was_close:
+		_back_t += rd
+		if _back_t > 1.6:
+			_was_close = false
 	if cfg:
 		w *= cfg.unit("cam_smooth")
 	var cdt := minf(rd, 0.1)
 	var steps := maxi(1, ceili(cdt / 0.008))
 	var h := cdt / steps
+	var goal_pos := want_pos
+	var goal_look := want_look
 	for i in steps:
+		# Ziel erst weich nachfuehren, dann die Feder: so beginnt jeder Schwenk sanft statt mit
+		# einem Ruck, wenn sich die Ansicht aendert.
+		var kp := 1.0 - exp(-h * w * 2.5)
+		_want_pos_s = goal_pos if _want_pos_s == Vector3.INF else _want_pos_s.lerp(goal_pos, kp)
+		_want_look_s = goal_look if _want_look_s == Vector3.INF else _want_look_s.lerp(goal_look, kp)
+		want_pos = _want_pos_s
+		want_look = _want_look_s
 		_cam_vel += ((want_pos - _cam_pos) * w * w - _cam_vel * 2.0 * w) * h
 		_cam_pos += _cam_vel * h
 		_look_vel += ((want_look - _cam_look) * w * w - _look_vel * 2.0 * w) * h
@@ -262,8 +297,11 @@ func _process(delta: float) -> void:
 	_shot_attack_check()
 	var off := Vector3.ZERO
 	if _shake > 0.0:
-		_shake = maxf(0.0, _shake - rd * 2.5)
-		off = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * _shake * 0.25 * (cfg.unit("cam_shake") if cfg else 1.0)
+		# Weiches Nachschwingen statt Zufallszittern in jedem Bild (das wirkte wie Ruckeln).
+		_shake = maxf(0.0, _shake - rd * 3.0)
+		_shake_t += rd
+		var a := _shake * _shake * 0.09 * (cfg.unit("cam_shake") if cfg else 1.0)
+		off = Vector3(sin(_shake_t * 31.0), sin(_shake_t * 23.0 + 1.3), sin(_shake_t * 27.0 + 2.1) * 0.5) * a
 	# Kameraseite im Menue: das Bild nach oben schieben, damit es nicht unter dem Menue liegt.
 	camera.v_offset = lerpf(camera.v_offset, -1.2 if preview_mode != "" else 0.0, minf(rd * 10.0, 1.0))
 	camera.position = _cam_pos + off

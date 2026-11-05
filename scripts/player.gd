@@ -80,9 +80,18 @@ var _run_phase := 0.0
 var _run_amt := 0.0
 var _last_pos := Vector3.ZERO
 var _vel := Vector3.ZERO  # Laufgeschwindigkeit (weich beschleunigen und abbremsen)
-const ACCEL := 40.0  # m/s^2: in ca. 0,15 s auf vollem Tempo
-const ACCEL_URGENT := 110.0  # wer gerade zum Ball muss, sprintet fast sofort los
+const ACCEL := 16.0  # m/s^2: menschlicher Antritt, in gut 0,35 s auf vollem Tempo, weich abbremsen
+const ACCEL_URGENT := 45.0  # wer gerade zum Ball muss, sprintet sofort los (Ball bleibt erreichbar)
+const ACCEL_BLOCK := 100.0  # Blocker am Netz: kurze, explosive Nachstellschritte (wie vorher)
+const TURN_MAX := 10.0  # rad/s: schneller dreht sich niemand (vorher bis 19 rad/s, wirkte ruckartig)
+## Versetzte Reaktion: springt das Ziel weit (neue Aufstellung, Ball geht hinueber), laeuft nicht
+## jeder im selben Augenblick los, sondern nach einer kleinen, je Spieler verschiedenen Lesezeit.
+const REACT_JUMP := 0.6  # m: ab so viel Zielwechsel wird erst gelesen
+var _goal := Vector3.INF  # Ziel, auf das der Spieler gerade wirklich laeuft
+var _react_until := -1.0
+var _react_n := 0
 var urgent := false  # vom Match gesetzt: dieser Spieler spielt den naechsten Ball
+var blocking := false  # vom Match gesetzt: laeuft zum Block (Nachstellschritte am Netz sind schnell)
 var _jersey := Color.WHITE
 var _move_fwd := 1.0
 var _move_side := 0.0
@@ -230,6 +239,8 @@ func reset_state() -> void:
 	contact_on = false
 	_reach_off = Vector3.ZERO
 	_vel = Vector3.ZERO
+	_goal = Vector3.INF
+	_react_until = -1.0
 	_last_pos = position
 	_loco = Vector3.ZERO
 	_loco_v = Vector3.ZERO
@@ -277,9 +288,10 @@ func tick(delta: float) -> void:
 		_vel = Vector3.ZERO
 	elif dive_timer <= 0.3:
 		# Weich anlaufen und vor dem Ziel abbremsen statt sofort auf vollem Tempo.
-		var acc := ACCEL_URGENT if urgent else ACCEL
+		var acc := ACCEL_BLOCK if blocking else (ACCEL_URGENT if urgent else ACCEL)
 		var want := Vector3.ZERO
-		var to := Vector3(target.x - position.x, 0.0, target.z - position.z)
+		var goal := _read_goal()
+		var to := Vector3(goal.x - position.x, 0.0, goal.z - position.z)
 		var dist := to.length()
 		if manual_dir.length() > 0.15:
 			want = manual_dir.limit_length(1.0) * run_speed
@@ -293,6 +305,7 @@ func tick(delta: float) -> void:
 		position += step
 		if manual_dir.length() > 0.15:
 			target = position
+			_goal = position
 	position.x = clampf(position.x, -13.0, 13.0)
 	position.z = clampf(position.z, -8.0, 8.0)
 	# Niemand laeuft ueber die Mittellinie.
@@ -304,6 +317,28 @@ func tick(delta: float) -> void:
 		dive_timer -= delta
 	_loco_step(delta)
 	_animate(delta)
+
+
+## Ziel mit Lesezeit: grosse Zielwechsel werden erst nach 0,06 bis 0,26 s uebernommen (je Spieler
+## und Situation anders), kleine sofort. Wer zum Ball muss, blockt oder gesteuert wird, reagiert sofort.
+func _read_goal() -> Vector3:
+	if _goal == Vector3.INF or urgent or manual_dir.length() > 0.15 or block_pose:
+		_goal = target
+		_react_until = -1.0
+		return _goal
+	var jump := Vector2(target.x - _goal.x, target.z - _goal.z).length()
+	if jump <= REACT_JUMP:
+		if _react_until < 0.0:
+			_goal = target
+		return _goal
+	if _react_until < 0.0:
+		_react_n += 1
+		var h := float(hash(str(number) + str(side) + str(_react_n)) % 1000) / 1000.0
+		_react_until = now + 0.06 + 0.2 * h
+	if now >= _react_until:
+		_goal = target
+		_react_until = -1.0
+	return _goal
 
 
 # ---------------------------------------------------------------- Posen
@@ -412,7 +447,8 @@ func _animate(delta: float) -> void:
 			face = cur.lerp(av.normalized(), smoothstep(-0.45, -0.1, crel))
 			turn = 14.0
 	var want := atan2(-face.x, -face.z)
-	_yaw = lerp_angle(_yaw, want, clampf(delta * turn, 0.0, 1.0))
+	var dyaw := wrapf(lerp_angle(_yaw, want, clampf(delta * turn, 0.0, 1.0)) - _yaw, -PI, PI)
+	_yaw = wrapf(_yaw + clampf(dyaw, -TURN_MAX * delta, TURN_MAX * delta), -PI, PI)
 	fig.rotation.y = _yaw
 
 	_stiff = 20.0
