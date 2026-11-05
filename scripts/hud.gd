@@ -64,10 +64,11 @@ func _ready() -> void:
 	_pad.anchor_right = 1.0
 	_pad.anchor_top = 1.0
 	_pad.anchor_bottom = 1.0
-	_pad.offset_left = -330.0
-	_pad.offset_right = -30.0
-	_pad.offset_top = -360.0
-	_pad.offset_bottom = -110.0
+	_pad.offset_left = -250.0
+	_pad.offset_right = -40.0
+	_pad.offset_top = -220.0
+	_pad.offset_bottom = -40.0
+	_pad.scale = Vector2(0.7, 0.7)
 	_pad.visible = false
 
 
@@ -269,7 +270,7 @@ func _build_replay() -> void:
 			bar.offset_top = -54.0
 		_replay.add_child(bar)
 	var tag := Label.new()
-	tag.text = "●  WIEDERHOLUNG"
+	tag.text = "●"
 	tag.add_theme_font_size_override("font_size", 24)
 	tag.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
 	tag.position = Vector2(24, 12)
@@ -397,7 +398,7 @@ func update_view(m) -> void:
 	for t in 2:
 		var ts: TeamStyle = Teams.playing()[t]
 		(_chip[t] as Panel).add_theme_stylebox_override("panel", _round(ts.jersey, 9))
-		(_name[t] as Label).text = String(ts.name.split(" ")[-1])
+		(_name[t] as Label).text = String(ts.name.split(" ")[-1]).substr(0, 3).to_upper()
 		(_num[t] as Label).text = str(m.score[t])
 		(_serve[t] as Panel).modulate.a = 1.0 if m.serving_team == t else 0.0
 		var ds: Array = _setdots[t]
@@ -412,8 +413,13 @@ func update_view(m) -> void:
 	if not _attract:
 		_notice.visible = _notice.text != ""
 		_hint.visible = _hint.text != ""
-		_dev.visible = not in_play and m.phase != m.Phase.REPLAY
-		_ref.visible = not in_play
+		# Kein Text im Spiel (Mattis, 05.11.2026): Testkarte, Schiedsrichter-Karte, Hinweise und
+		# Meldungen sind ganz weg. Der Schiedsrichter zeigt seine Zeichen nur noch in der Halle (3D).
+		_dev.visible = false
+		_ref.modulate.a = 0.0
+		_notice.visible = false
+		_hint.visible = false
+		_setchip.visible = false
 		_subs.visible = not in_play
 		if in_play and _banner.visible:
 			_banner.visible = false  # Einblendungen (Gegner, Auszeit) enden mit dem Pfiff

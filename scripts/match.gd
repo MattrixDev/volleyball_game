@@ -706,7 +706,7 @@ func popup(pl: VPlayer, text: String, color: Color) -> void:
 		return
 	# Kein Text im Spiel (wie bei FIFA): Timing und Technik spuert man ueber Rumble, Ton,
 	# Ballflug und den Ring am Spieler. Die Texte bleiben nur fuer die Debug-Uebungen.
-	if drill == null and not show_popups:
+	if not show_popups and (drill == null or phase == Phase.RALLY):
 		return
 	# Lebende Popups: das alte Popup desselben Spielers weicht dem neuen, alle anderen
 	# werden gestapelt, damit nie Text auf Text liegt.
@@ -1088,7 +1088,6 @@ func call_timeout(t: int) -> String:
 	if hud:
 		hud.whistle(false)
 		hud.ref_signal([["timeout", "Auszeit %s" % TEAM_NAMES[t], 8.0]])
-		hud.show_banner("Auszeit %s" % TEAM_NAMES[t], "Noch %d Auszeit(en) in diesem Satz" % r.timeouts_left)
 	return ""
 
 
@@ -2498,11 +2497,7 @@ func plan(t: int) -> AiPlan:
 
 ## Vor dem Spiel: was fuer ein Gegner wartet (K1, Scouting).
 func _scouting_banner() -> void:
-	if hud == null or human_team < 0 or attract or autoplay:
-		return
-	var op := 1 - human_team
-	var pp := plan(op)
-	hud.show_banner("Gegner: %s  ·  %s" % [TEAM_NAMES[op], pp.title], pp.desc)
+	return  # Spielplan des Gegners: keine Einblendung mehr (kein Text im Spiel), steht im Pausenmenue
 
 
 ## Kurzer Text fuer die Anzeige "Gegner" im Pausenmenue oder in Hinweisen.
@@ -4117,15 +4112,14 @@ func _finish_set(winner: int) -> void:
 		matches_done += 1
 		match_wins[winner] += 1
 		stats["Spiele " + TEAM_NAMES[winner]] = stats.get("Spiele " + TEAM_NAMES[winner], 0) + 1
-		var reward := _club_reward(winner)
+		_club_reward(winner)  # Muenzen und Aufgaben gibt es weiter, nur ohne Einblendung
 		if hud:
-			hud.show_banner("%s gewinnt das Spiel %d:%d" % [TEAM_NAMES[winner], sets_won[winner], sets_won[1 - winner]],
-				"Sätze: %s   ·   A / Leertaste: neues Spiel%s" % [history, "" if reward.is_empty() else "\n" + "\n".join(reward)])
+			# Nur das Ergebnis, ohne Erklaertext (A startet wie bisher das naechste Spiel).
+			hud.show_banner("%d : %d" % [sets_won[0], sets_won[1]], history)
 	else:
 		phase = Phase.SET_OVER
 		if hud:
-			hud.show_banner("Satz %d geht an %s  %d:%d" % [set_no, TEAM_NAMES[winner], score[winner], score[1 - winner]],
-				"Sätze %d:%d   ·   Seitenwechsel   ·   A / Leertaste: nächster Satz" % [sets_won[0], sets_won[1]])
+			hud.show_banner("%d : %d" % [score[0], score[1]])
 
 
 ## Mein Verein: nach jedem eigenen Spiel Muenzen und Aufgaben (nicht im Zuschauermodus oder Test).
@@ -4166,7 +4160,6 @@ func _do_side_change() -> void:
 	if hud:
 		hud.ref_signal([["sidechange", "Seitenwechsel", 3.5]])
 		hud.whistle(false)
-		hud.show_banner("Seitenwechsel", "%s %d : %d %s" % [TEAM_NAMES[0], score[0], score[1], TEAM_NAMES[1]])
 
 
 ## Schiedsrichter-Zeichen nach einem Ballwechsel: erst der Grund, dann Aufschlag fuer das Team.
