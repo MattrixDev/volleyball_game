@@ -101,12 +101,32 @@ def smooth(P, sigma):
     return out
 
 
+ARM_L, ARM_R = [11, 13, 15, 17, 19, 21], [12, 14, 16, 18, 20, 22]
+LEG_L, LEG_R = [23, 25, 27, 29, 31], [24, 26, 28, 30, 32]
+
+
+def fix_swaps(P):
+    """MediaPipe vertauscht bei verdeckten Gliedern manchmal links und rechts fuer einzelne Bilder.
+    Je Bild und Glied (Arm, Bein) wird die Zuordnung genommen, die naeher am Vorbild liegt."""
+    P = P.copy()
+    for a, b in [(ARM_L, ARM_R), (LEG_L, LEG_R)]:
+        ends = [a[1], a[2]] if len(a) == 6 else [a[1], a[2]]
+        ende = [b[1], b[2]]
+        for i in range(1, len(P)):
+            keep = np.linalg.norm(P[i, ends] - P[i - 1, ends]) + np.linalg.norm(P[i, ende] - P[i - 1, ende])
+            swap = np.linalg.norm(P[i, ende] - P[i - 1, ends]) + np.linalg.norm(P[i, ends] - P[i - 1, ende])
+            if swap < 0.6 * keep:
+                P[i, a + b] = P[i, b + a]
+    return P
+
+
 def convert(path, t0=0.0, t1=1e9, sigma=1.5, yaw_s=0.35):
     d = json.load(open(path))
     F = [f for f in d["frames"] if "world" in f and t0 <= f["t"] <= t1]
     T = np.array([f["t"] for f in F])
     # MediaPipe: x rechts, y unten, z von der Kamera weg -> Spiel: y oben, z zur Kamera
     P = np.array([f["world"] for f in F]) * np.array([1.0, -1.0, -1.0])
+    P = fix_swaps(P)
     P = smooth(P, sigma)
     # Blickrichtung je Bild (aus der Hueftlinie), langsam geglaettet
     lat = P[:, HIP["r"]] - P[:, HIP["l"]]

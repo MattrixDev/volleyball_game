@@ -971,7 +971,9 @@ func _contact_ik() -> void:
 		var palm := palm0.lerp(push, smoothstep(0.0, 0.2, rel)).normalized()
 		var fing := (up - palm * up.dot(palm)).normalized()
 		hands = {"l": [fing - r * 0.08, palm], "r": [fing + r * 0.08, palm]}
-	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne):
+	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne) \
+			or (anim_kind == "serve" and anim_tech == "stand" and rel > -0.5 and not "video" in _off):
+		# (Standaufschlag mit Video-Bewegung: dieselbe Bogenspannung und derselbe Armzug im Stand.)
 		# Angriff wie im Volleyball (Bogenspannung): der Ellbogen holt hoch und weit nach hinten aus,
 		# die Hand liegt hinter dem Kopf auf Ohrhoehe, die Schlagschulter dreht zurueck und der
 		# Oberkoerper spannt sich. Dann fuehrt der Ellbogen nach vorn oben, der Unterarm peitscht
@@ -985,6 +987,11 @@ func _contact_ik() -> void:
 		var wt := smoothstep(-0.55, -0.35, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
 		var twist := lerpf(-0.5, 0.35, smoothstep(-0.18, 0.1, rel))
 		var arch := 0.2 * (1.0 - smoothstep(-0.12, 0.0, rel)) - 0.3 * smoothstep(0.0, 0.15, rel)
+		if anim_kind in ["attack", "serve"] and not "video" in _off:
+			# Kraeftiger ausholen (Mattis): Schlagschulter weiter zurueck, staerkeres Hohlkreuz, dann
+			# schnelles Durchdrehen kurz vor dem Treffpunkt.
+			twist = lerpf(-0.9, 0.45, smoothstep(-0.1, 0.06, rel))
+			arch = 0.38 * (1.0 - smoothstep(-0.08, 0.0, rel)) - 0.35 * smoothstep(0.0, 0.15, rel)
 		var ch: Node3D = fig.j["chest"]
 		ch.quaternion = ch.quaternion * Quaternion(Vector3.UP, twist * wt * mir) * Quaternion(Vector3.RIGHT, arch * wt)
 		fig._sync()
@@ -1002,6 +1009,11 @@ func _contact_ik() -> void:
 		# Ausholen: Oberarm seitlich und zurueck, Ellbogen etwa auf Schulterhoehe, Hand hinter dem Kopf.
 		var cock := sh_r + up * 0.3 - f * 0.1 + r * 0.08
 		var cock_el := sh_r + up * 0.12 + r * 0.45 - f * 0.25
+		if anim_kind in ["attack", "serve"] and not "video" in _off:
+			# Bogenspannung wie im Video: Hand hinter dem Kopf etwa auf Ohrhoehe, Ellbogen hoch und
+			# weit nach hinten aussen.
+			cock = sh_r + up * 0.12 - f * 0.34 + r * 0.14
+			cock_el = sh_r + up * 0.08 + r * 0.55 - f * 0.4
 		var lead_el := sh_r + up * 0.45 + r * 0.15 + f * 0.2
 		var over := sh_r + up * 0.32 + r * 0.06 + f * 0.04
 		# Nachschwung mit fast gestrecktem Arm: schraeg nach vorn unten in Schlagrichtung, dann tief
@@ -1030,10 +1042,11 @@ func _contact_ik() -> void:
 		tg = {hs: hand}
 		# Mit dem Video-Angriff kommt das Ausholen (Bogenspannung) aus dem Clip; die Zielhilfe
 		# uebernimmt erst kurz vor dem Treffpunkt, damit der Ball sicher getroffen wird.
-		var vid := anim_kind == "attack" and not "video" in _off
-		var w0 := smoothstep(-0.1, -0.04, rel) if vid else smoothstep(-0.5, -0.3, rel)
+		var vid := anim_kind in ["attack", "serve"] and not "video" in _off
+		# Ausholen kraeftiger (Mattis): die Hand wird zusaetzlich weit hinter den Kopf gezogen.
+		var w0 := smoothstep(-0.36, -0.22, rel) if vid else smoothstep(-0.5, -0.3, rel)
 		w = w0 * (1.0 - smoothstep(0.3, 0.45, rel))
-		if not airborne:
+		if not airborne and anim_kind != "serve":
 			w *= 0.6
 		# Linker Arm zeigt zum Ball, bis der Schlagarm durchzieht, dann zieht er seitlich am Koerper
 		# nach unten (gibt dem Schlag Schwung).
@@ -1820,12 +1833,23 @@ static func _clip_at(clip: String, rel: float, keys: Array) -> Dictionary:
 ## Zeitpunkte der Meshy-Volleyball-Animationen (aus den Bildfolgen abgelesen)
 ## kern_*: Meshy-Kernanimationen (Text-to-Motion, nach echter Technik beschrieben)
 const SPIKE_KEYS := [[-1.1, 0.18], [-0.404, 0.40], [0.0, 0.60], [0.4, 0.70], [0.6, 0.78]]
-## video_angriff (Pexels 6217265, Zeitlupe): Arme hinten 4,3 s, Absprung 5,75 s, beide Arme oben
-## 6,1 s, Hand hinter dem Kopf 6,45 s, weit gespannter Bogen 6,9 s, Schlag 7,18 s, Ausschwingen
-## 7,5 und 7,75 s; u = (t - 4,0) / 3,87. Die Zeitlupe wird so gestaucht, dass die Bogenspannung
-## im Spiel gut 0,2 s sichtbar bleibt.
-const VSPIKE_KEYS := [[-1.1, 0.077], [-0.404, 0.451], [-0.3, 0.541], [-0.2, 0.632], [-0.08, 0.749],
-	[0.0, 0.821], [0.4, 0.903], [0.6, 0.968]]
+## video_angriff (Pexels 6217265, Zeitlupe, Clip ab 0,6 s): Ball liegt in der rechten Hand 0,9 s,
+## Wurf mit einer Hand (Abwurf 1,15-1,6 s), Anlauf ab 2,1 s, Arme hinten 4,3 s, Absprung 5,75 s,
+## beide Arme oben 6,1 s, Hand hinter dem Kopf 6,45 s, weit gespannter Bogen 6,9 s, Schlag 7,18 s,
+## Ausschwingen 7,5 und 7,75 s; u = (t - 0,6) / 7,27. Die Zeitlupe wird so gestaucht, dass die
+## Bogenspannung im Spiel gut 0,2 s sichtbar bleibt.
+const VSPIKE_KEYS := [[-1.1, 0.5086], [-0.404, 0.7079], [-0.3, 0.756], [-0.2, 0.8042], [-0.08, 0.866],
+	[0.0, 0.9045], [0.4, 0.9485], [0.6, 0.9829]]
+## Sprungaufschlag = dasselbe Video von Anfang an: Wurf (Ball verlaesst die Hand bei rel -1,18),
+## Anlauf, Absprung, Schlag.
+const VJSERVE_KEYS := [[-1.2, 0.0412], [-1.16, 0.0755], [-1.05, 0.1374], [-0.9, 0.2061], [-0.6, 0.5086],
+	[-0.404, 0.7079], [-0.3, 0.756], [-0.2, 0.8042], [-0.08, 0.866], [0.0, 0.9045], [0.4, 0.9485]]
+## video_aufschlag (Pexels 6217332, Flatteraufschlag, Zeitlupe, Clip ab 2,0 s): Ball liegt vor der
+## Brust 2,75 s, Wurf mit einer Hand 3,5-4,1 s, beide Arme oben 5,6 s, Schritt und Bogen 6,5-7,3 s,
+## Schlag 7,88 s, Ausschwingen bis 9,25 s; u = (t - 2,0) / 7,47. Ball verlaesst die Hand bei rel -0,74.
+const VSERVE_KEYS := [[-0.9, 0.1674], [-0.74, 0.2009], [-0.6, 0.2812], [-0.4, 0.4821], [-0.25, 0.6027],
+	[-0.1, 0.7098], [0.0, 0.7875], [0.2, 0.8839], [0.45, 0.9709]]
+const VSERVE_HOLD_U := 0.1
 const VSPIKE_UPPER := ["chest", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r"]
 const SET_KEYS := [[-0.7, 0.17], [-0.15, 0.42], [0.0, 0.47], [0.35, 0.56]]
 const BUMP_KEYS := [[-0.6, 0.3], [0.0, 0.58], [0.35, 0.7]]
@@ -1883,10 +1907,37 @@ func _target_pose_main() -> Dictionary:
 		return _p_celebrate()
 	var rel := now - anim_t
 	if anim_kind == "serve_hold":
-		return _mix(_mirror(_p_serve_hold()), _p_run(_run_amt), clampf(_run_amt * 2.0, 0.0, 1.0))
+		var hp := _p_serve_hold()
+		if anim_tech == "stand" and not "video" in _off:
+			# Ball liegt in der Wurfhand vor der Brust, die Schlaghand ruht daneben (Video).
+			var vh := HumanFigure.clip_pose("video_aufschlag", VSERVE_HOLD_U, false)
+			for k in VSPIKE_UPPER:
+				if vh.has(k):
+					hp[k] = vh[k]
+		return _mix(_mirror(hp), _p_run(_run_amt), clampf(_run_amt * 2.0, 0.0, 1.0))
 	if anim_kind == "serve" and rel < 0.5:
 		_stiff = 42.0
-		return _mirror(_p_serve(rel, anim_tech == "jump"))
+		var sp := _p_serve(rel, anim_tech == "jump")
+		if anim_tech == "jump" and not "video" in _off:
+			# Sprungaufschlag aus dem Video: Wurf mit einer Hand, Anlauf, Bogenspannung, Schlag.
+			# Beine kommen weiter aus Anlauf und Sprung des Spiels.
+			var vj := _clip_at("video_angriff", rel, VJSERVE_KEYS)
+			for k in VSPIKE_UPPER:
+				if vj.has(k):
+					sp[k] = vj[k]
+			if vj.has("hips"):
+				sp["hips"] = _qlerp(sp.get("hips", Vector3.ZERO), vj["hips"], 1.0 if airborne else 0.5)
+			_stiff = 45.0 if airborne else 30.0
+		elif anim_tech == "stand" and not "video" in _off:
+			# Standaufschlag aus dem Video: Wurf mit einer Hand, Bogenspannung, Schlag hoch vor der Schulter.
+			var vs := _clip_at("video_aufschlag", rel, VSERVE_KEYS)
+			for k in VSPIKE_UPPER:
+				if vs.has(k):
+					sp[k] = vs[k]
+			if vs.has("hips"):
+				sp["hips"] = _qlerp(sp.get("hips", Vector3.ZERO), vs["hips"], 0.5)
+			_stiff = 32.0
+		return _mirror(sp)
 	if block_pose:
 		_stiff = 30.0
 		return _p_block()
