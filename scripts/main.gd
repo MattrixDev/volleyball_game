@@ -76,6 +76,13 @@ func _ready() -> void:
 	match_node.contact.connect(_on_contact)
 	match_node.own_block.connect(_on_own_block)
 	match_node.point_won.connect(_on_point)
+	# Spielzug angesagt: kurzes Doppel-Tippen im Controller statt einer Einblendung.
+	match_node.play_called.connect(func(_t: int, call: String):
+		if call != "":
+			_rumble(0.25, 0.0, 0.05)
+			get_tree().create_timer(0.09, true, false, true).timeout.connect(func(): _rumble(0.25, 0.0, 0.05))
+		else:
+			_rumble(0.2, 0.0, 0.12))
 	add_child(match_node)
 	var feedback = preload("res://scripts/touch_feedback.gd").new()
 	add_child(feedback)
