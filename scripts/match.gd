@@ -173,6 +173,8 @@ var side_changed_deciding := false
 var streak := [0, 0]  # Punkte in Folge
 ## K1/K2: Spielplan und Gedaechtnis je Team (siehe ai_plan.gd); wird zu Spielbeginn gebaut.
 var plans: Array = [null, null]
+var _block_auto_style := {}  # B1: Block-Technik vor dem weichen Block (L2)
+var _soft_hint_opp: Opp = null
 var _last_attack := {}  # letzter Angriff fuer das Gedaechtnis: team, lane, dir
 var _rally_pattern: Array = []  # Ablauf des Ballwechsels (nur Messung im Autoplay)
 var timeout_team := -1
@@ -1969,6 +1971,7 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 		elif commit_miss[def]:
 			pl.block_jump_at += 0.12  # falsch geraten: kommt zu spaet
 	blockers[def] = list
+	_block_auto_style.clear()
 	block_dirs[def] = dirs
 	block_err[def] = rng.randf_range(-0.4, 0.4)
 	var pz = _predicted_cross_z(def, _block_att, p)
@@ -2122,6 +2125,18 @@ func _rally_input(inp: Dictionary) -> void:
 		else:
 			for b in team_block:
 				ctl[b] = both
+		# B1: L2 gehalten = weicher Block (Haende schraeg nach hinten, Ball bremsen statt abblocken).
+		var want_soft: bool = inp.get("finesse_held", false)
+		for b in team_block:
+			if want_soft and b.anim_style != "soft":
+				_block_auto_style[b] = b.anim_style
+				b.anim_style = "soft"
+			elif not want_soft and _block_auto_style.has(b):
+				b.anim_style = _block_auto_style[b]
+				_block_auto_style.erase(b)
+		if _soft_hint_opp != opp:
+			_soft_hint_opp = opp
+			technique_available.emit("block_soft")
 		var dt := get_physics_process_delta_time()
 		var any_jump := false
 		for b in team_block:
@@ -2298,6 +2313,10 @@ func _ai_attack_choice(o: Opp) -> void:
 	if not o.emergency and _shot_blocked(o, o.rs) and rng.randf() < pp.finesse:
 		o.finesse = true
 		o.rs = Vector2(0.0, 0.8) if rng.randf() < 0.4 else Vector2(0.0, 0.2)
+	# S3 auch fuer die KI: dichter Block und schlechtes Zuspiel, dann manchmal in den Block legen.
+	if not o.finesse and not o.emergency and _shot_blocked(o, o.rs) and rng.randf() < 0.12 * (1.0 + pp.finesse):
+		o.finesse = true
+		o.rs = Vector2(0.0, -0.8)
 
 
 # ---------------------------------------------------------------- K1/K2: Spielplan und Gedaechtnis
@@ -2982,6 +3001,11 @@ func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float, finesse
 	var hl := team_local(team, bp).y
 	if finesse and contact.y >= -0.35:
 		return _finesse_shot(team, bp, contact, power, hl)
+	if finesse and contact.y < -0.35:
+		var rb := _rebound_point(team, bp)
+		if not rb.is_empty():
+			# S3: Ball weich in den Block legen, damit er zurueckkommt und neu aufgebaut wird.
+			return {"style": "rebound", "g": G, "u": 10.0, "clear": 0.0, "target": rb.p, "d": 0.3, "l": hl, "blocker": rb.b}
 	var res := {"style": "spike", "g": G, "u": lerpf(16.0, 30.0, clampf(power, 0.0, 1.0)), "clear": 0.0}
 	var d := 7.8
 	var l := hl
@@ -2996,6 +3020,13 @@ func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float, finesse
 			res.style = "blockout"  # gegen die Aussenhand, knapp neben die Seitenlinie
 			d = 4.0
 			l = signf(hl) * 4.9
+			# S2: steht ein Block, zielt der Schlag genau auf dessen Aussenhand.
+			var oz = _outer_hand_z(team, toward)
+			if oz != null:
+				var tx := court_pos(team, Vector2(-d, 0.0)).x
+				var k := (tx - bp.x) / -bp.x if absf(bp.x) > 0.05 else 30.0
+				var tz := bp.z + (float(oz) - bp.z) * k
+				l = clampf(team_local(team, Vector3(tx, 0.0, tz)).y, -6.0, 6.0)
 		else:
 			res.style = "cut"
 			d = 2.8
@@ -3014,6 +3045,60 @@ func attack_shot(team: int, bp: Vector3, contact: Vector2, power: float, finesse
 	res.d = d
 	res.l = l
 	return res
+
+
+## S3: Wohin ein in den Block gelegter Ball zielt: auf die Haende des naechsten Blockers am Netz
+## (Hoehe = sein hoechster Punkt minus 0,6 m, also in die Handflaechen). Leer, wenn kein Block steht.
+func _rebound_point(team: int, bp: Vector3) -> Dictionary:
+	var best: VPlayer = null
+	var bd := 1e9
+	for b in blockers[1 - team]:
+		if b == null:
+			continue
+		var bz: float = b.hands_z() if b.airborne else b.target.z
+		if absf(bz - bp.z) < bd:
+			bd = absf(bz - bp.z)
+			best = b
+	if best == null or bd > 2.0:
+		return {}
+	var top := best.jump_v0 * best.jump_v0 / (2.0 * G) + VPlayer.BLOCK_REACH + best.reach_add
+	var bz2: float = best.hands_z() if best.airborne else best.target.z
+	return {"p": Vector3(0.0, top - 0.6, bz2), "b": best}
+
+
+## S2: Aussenhand des gegnerischen Blocks auf der Seite toward_local (Welt-z, knapp aussen), oder null.
+func _outer_hand_z(team: int, toward_local: float):
+	var dirw := -side_of(team) * toward_local
+	var out = null
+	for b in blockers[1 - team]:
+		if b == null:
+			continue
+		var bz: float = b.hands_z() if b.airborne else b.target.z
+		if out == null or (bz - float(out)) * dirw > 0.0:
+			out = bz
+	if out == null:
+		return null
+	return float(out) + dirw * 0.42
+
+
+## S3 ausfuehren: weicher, flacher Ball in die Blockhaende. Timing-Fehler lassen ihn neben die
+## Hand (zu frueh/zu spaet) oder zu tief ins Netz gehen.
+func _do_rebound(o: Opp, q: int, e: float, info: Dictionary, bp: Vector3) -> void:
+	var tgt: Vector3 = info.target
+	var aed := _err_dir(e, "attack", o.win_scale)
+	var err: float = [0.0, 0.25, 0.6, 0.6][q] * clampf(1.0 - 0.3 * _touch_skill(o.player, "attack"), 0.6, 1.45)
+	tgt.z += aed * err * side_of(o.team)
+	if aed > 0.0:
+		tgt.y -= err * 0.5  # zu spaet: Ball geht tiefer, Richtung Netzkante
+	var T := clampf(bp.distance_to(tgt) / 9.0, 0.08, 0.45)
+	ball_g = G
+	ball_vel = Ballistics.launch_with_time(bp, tgt, T)
+	last_action = "attack"
+	last_attack_speed = ball_vel.length()
+	last_super = false
+	o.tech_key = "rebound"
+	o.player.anim_style = "rebound"
+	stats["Schlag rebound"] = stats.get("Schlag rebound", 0) + 1
 
 
 ## Seitliches Ziel: Stick in der Mitte = gerade (Linie), voll zur Seite = bis zur
@@ -3240,6 +3325,10 @@ func _offer_attack_hints() -> void:
 	if not opp.emergency:
 		for k in ["roll", "corner", "seam"]:
 			technique_available.emit(k)
+	if not blockers[1 - opp.team].is_empty():
+		technique_available.emit("rebound")
+		if absf(team_local(opp.team, opp.point).y) > 1.5:
+			technique_available.emit("tool_hand")
 	if clock < opp.t - rise(opp.player) - 0.45:
 		for k in ["approach_wide", "approach_tight", "approach_delay"]:
 			technique_available.emit(k)
@@ -3255,6 +3344,9 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	if info.style == "tip":
 		ball_vel = Ballistics.launch_over_net(bp, info.target, info.clear, 4.0, 10.0, g)
 		last_action = "tip"
+		return
+	if info.style == "rebound":
+		_do_rebound(o, q, e, info, bp)
 		return
 	if info.get("finesse", false):
 		_do_finesse(o, q, e, info, bp)
@@ -3527,57 +3619,94 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 		stuff_p *= 0.5  # Haende schraeg nach hinten: bremst den Ball, drueckt ihn aber selten zurueck
 	elif pl.anim_style == "late":
 		stuff_p *= 0.6
-	var out_p := 0.85 if last_shot_style == "blockout" else 0.4
-	if absf(hit_dz) > 0.32 and rng.randf() < out_p:
-		# Ball streift die Aussenhand: springt seitlich weg, oft ins Aus (Block-Aus).
-		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(ball_vel.x * 0.5, rng.randf_range(1.5, 4.0), signf(hit_dz) * rng.randf_range(3.0, 7.0))
-		possession = def
-		touches = 0
-		last_action = "block_touch"
-		popup(pl, "Blockberührung", Q_COLOR[Q.GOOD])
-	elif absf(hit_dz) < 0.3 and c.y < top2 - 0.25 + pl.hand_reach and last_action == "attack" and rng.randf() < stuff_p:
-		# Kompletter Block: Ball wird hart nach unten auf die Seite des Angreifers gedrueckt.
-		ball.position = Vector3(s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(s_att * rng.randf_range(1.0, 3.0), -rng.randf_range(7.0, 10.0), ball_vel.z * 0.15 + rng.randf_range(-1.0, 1.0))
+	# Abpraller aus der Physik: die Haende sind eine schraege Flaeche am Netz. Wie der Ball
+	# zurueckkommt, folgt aus Handstellung (ueber das Netz gegriffen, weich nach hinten, schon auf
+	# dem Weg nach unten), Trefferhoehe (Fingerspitzen bremsen wenig), Trefferpunkt (Aussenhand
+	# wischt seitlich ab), Blockstaerke und Wucht des Balls. Kein Wuerfel.
+	var firm := clampf(stuff_p / 0.45, 0.25, 1.4)
+	var soft: bool = pl.anim_style == "soft"
+	var v_in := ball_vel
+	var v_out := _block_bounce(pl, c, v_in, hit_dz, firm, soft, s_att)
+	var back := signf(v_out.x) == s_att
+	ball.position = Vector3((s_att if back else -s_att) * (R + 0.05), c.y, c.z)
+	ball_vel = v_out
+	touches = 0
+	var att_was: String = last_action
+	stats["Block Kontakte"] = stats.get("Block Kontakte", 0) + 1
+	if back:
 		possession = 1 - def
-		touches = 0
 		last_action = "block"
-		var txt := "BLOCK!"
-		if in_block >= 3:
-			txt = "DREIERBLOCK!"
-		elif in_block == 2:
-			txt = "DOPPELBLOCK!"
-		popup(pl, txt, Q_COLOR[Q.PERFECT])
-		stats[txt] = stats.get(txt, 0) + 1
-		if def == human_team:
-			big_hit.emit(1.0 if in_block >= 2 else 0.7)
-			if in_block >= 2:
-				_hitstop_left = 0.3
-				_hitstop_scale = SLOW
-	elif last_action == "attack" and ball_vel.length() > 19.0 and rng.randf() < 0.35 * (1.0 + 0.3 * pf(last_toucher, "power")):
-		# Harter Schlag: Ball geht durch den Block, wird etwas gebremst, bleibt aber schnell.
-		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
-		ball_vel = Vector3(ball_vel.x * rng.randf_range(0.45, 0.6), ball_vel.y * 0.5 + rng.randf_range(-1.0, 1.5), ball_vel.z * 0.6 + rng.randf_range(-2.0, 2.0))
-		possession = def
-		touches = 0
-		last_action = "block_touch"
-		popup(pl, "Durch den Block!", Q_COLOR[Q.WEAK])
-		stats["Durch den Block"] = stats.get("Durch den Block", 0) + 1
+		if v_out.y < -4.0 and absf(v_out.x) > 0.8:
+			# Kompletter Block: Ball wird nach unten auf die Seite des Angreifers gedrueckt.
+			var txt := "BLOCK!"
+			if in_block >= 3:
+				txt = "DREIERBLOCK!"
+			elif in_block == 2:
+				txt = "DOPPELBLOCK!"
+			popup(pl, txt, Q_COLOR[Q.PERFECT])
+			stats[txt] = stats.get(txt, 0) + 1
+			if def == human_team:
+				big_hit.emit(1.0 if in_block >= 2 else 0.7)
+				if in_block >= 2:
+					_hitstop_left = 0.3
+					_hitstop_scale = SLOW
+		else:
+			# Abpraller: der Ball springt zurueck, das angreifende Team kann neu aufbauen.
+			popup(pl, "Abpraller", Q_COLOR[Q.GOOD])
+			stats["Block Abpraller"] = stats.get("Block Abpraller", 0) + 1
+			if last_shot_style == "rebound" and att != null:
+				technique_done.emit(att, "rebound")
+				popup(att, "Neuer Angriff", Q_COLOR[Q.GOOD])
 	else:
-		# Blockberuehrung: Ball geht weich weiter, zaehlt nicht als Beruehrung.
-		ball.position = Vector3(-s_att * (R + 0.05), c.y, c.z)
-		# Soft-Touch: der Ball faellt steil hinter den Block auf die eigene Seite des Blockers.
-		ball_vel = Vector3(-s_att * rng.randf_range(1.5, 4.0), rng.randf_range(2.5, 4.5), ball_vel.z * 0.3)
 		possession = def
-		touches = 0
 		last_action = "block_touch"
-		popup(pl, "Soft-Touch", Q_COLOR[Q.GOOD])
+		if absf(v_out.z) > 3.0 and absf(hit_dz) > 0.25:
+			popup(pl, "Blockberührung", Q_COLOR[Q.GOOD])
+			stats["Block abgewischt"] = stats.get("Block abgewischt", 0) + 1
+			if last_shot_style == "blockout" and att != null:
+				technique_done.emit(att, "tool_hand")
+		elif v_out.length() > 11.0 and att_was == "attack":
+			popup(pl, "Durch den Block!", Q_COLOR[Q.WEAK])
+			stats["Durch den Block"] = stats.get("Durch den Block", 0) + 1
+		else:
+			popup(pl, "Soft-Touch", Q_COLOR[Q.GOOD])
+			stats["Block Soft-Touch"] = stats.get("Block Soft-Touch", 0) + 1
+	if soft and def == human_team:
+		technique_done.emit(pl, "block_soft")
 	_fx("block", c, 1.0 if last_action == "block" else 0.55)
 	last_touch_team = def
 	last_toucher = null
 	plan_next()
 	return true
+
+
+## Ball prallt von den Blockhaenden ab (Weltkoordinaten). n = Flaechennormale der Haende,
+## zeigt zum Angreifer; a = wie weit die Haende ueber das Netz nach unten gekippt sind.
+func _block_bounce(pl: VPlayer, c: Vector3, v: Vector3, dz: float, firm: float, soft: bool, s_att: float) -> Vector3:
+	var top := pl.block_top()
+	var a := 0.05 + 0.15 * firm + (0.25 if pl.hand_reach > 0.0 else 0.0)
+	if pl.jump_v < -1.0:
+		a -= 0.3  # schon auf dem Weg nach unten: Haende kippen nach hinten
+	if soft:
+		a = -0.55  # weicher Block: Haende schraeg nach hinten, Ball geht hoch auf die eigene Seite
+	var n := Vector3(s_att * cos(a), -sin(a), 0.0)
+	# Aussenhand: je weiter aussen getroffen, desto mehr wischt der Ball seitlich ab.
+	var edge := clampf((absf(dz) - 0.22) / 0.3, 0.0, 1.0)
+	n.z = signf(dz) * edge * 1.2
+	n = n.normalized()
+	# Fingerspitzen bremsen wenig, die ganze Hand viel.
+	var frac := clampf((top - c.y) / 0.6, 0.15, 1.0) * (1.0 - 0.6 * edge)
+	var e := 0.06 if soft else 0.08 + 0.08 * firm
+	var vn := v.dot(n)
+	if vn >= 0.0:
+		return v
+	var vt := v - vn * n
+	var out := v - frac * ((1.0 + e) * vn * n + 0.3 * vt)
+	if frac < 0.6:
+		out.y += (0.6 - frac) * v.length() * 0.3  # ueber die Fingerspitzen: Ball springt hoch
+	if not soft:
+		out += n * 2.0 * frac * minf(firm, 1.2)  # der Blocker drueckt die Haende zum Angreifer
+	return out
 
 
 func _on_ball_landed() -> void:
