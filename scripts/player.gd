@@ -1816,6 +1816,10 @@ static func _clip_at(clip: String, rel: float, keys: Array) -> Dictionary:
 ## Zeitpunkte der Meshy-Volleyball-Animationen (aus den Bildfolgen abgelesen)
 ## kern_*: Meshy-Kernanimationen (Text-to-Motion, nach echter Technik beschrieben)
 const SPIKE_KEYS := [[-1.1, 0.18], [-0.404, 0.40], [0.0, 0.60], [0.4, 0.70], [0.6, 0.78]]
+## video_angriff (Pexels 6217265, Zeitlupe): Arme hinten 4,3 s, Absprung 5,75 s, Schlag 7,18 s,
+## Ausschwingen 7,5 und 7,75 s; u = (t - 4,0) / 3,87.
+const VSPIKE_KEYS := [[-1.1, 0.077], [-0.404, 0.451], [0.0, 0.821], [0.4, 0.903], [0.6, 0.968]]
+const VSPIKE_UPPER := ["chest", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r"]
 const SET_KEYS := [[-0.7, 0.17], [-0.15, 0.42], [0.0, 0.47], [0.35, 0.56]]
 const BUMP_KEYS := [[-0.6, 0.3], [0.0, 0.58], [0.35, 0.7]]
 
@@ -1880,7 +1884,16 @@ func _target_pose_main() -> Dictionary:
 		_stiff = 30.0
 		return _p_block()
 	if anim_kind == "attack" and rel < 0.5:
-		var clip := _mirror(_style_attack(_clip_at("kern_angriff", _approach_rel(rel), SPIKE_KEYS), rel))
+		var core := _clip_at("kern_angriff", _approach_rel(rel), SPIKE_KEYS)
+		if not "video" in _off and not core.is_empty():
+			# Oberkoerper und Armzug aus dem echten Video, Beine und Anlauf aus dem Kern-Clip.
+			var vid := _clip_at("video_angriff", _approach_rel(rel), VSPIKE_KEYS)
+			for k in VSPIKE_UPPER:
+				if vid.has(k):
+					core[k] = vid[k]
+			if vid.has("hips"):
+				core["hips"] = _qlerp(core.get("hips", Vector3.ZERO), vid["hips"], 0.5)
+		var clip := _mirror(_style_attack(core, rel))
 		if not clip.is_empty() and rel > -1.1:
 			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
 			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
