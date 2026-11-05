@@ -1,6 +1,6 @@
 """Aus einem Video gelesene Gelenke (video_pose.py) auf das Spielskelett uebertragen.
 
-Aufruf:  python3 video_to_clip.py <pose.json> <ausgabe.json> <name> [von_s] [bis_s] [glaettung_bilder]
+Aufruf:  python3 video_to_clip.py <pose.json> <ausgabe.json> <name> [von_s] [bis_s] [glaettung_bilder] [blick_glaettung_s]
 
 MediaPipe liefert je Bild 33 Punkte in Metern (um die Huefte). Daraus wird je Spielgelenk eine
 Weltdrehung gebaut:
@@ -8,8 +8,9 @@ Weltdrehung gebaut:
   - Arme und Beine: kuerzeste Drehung der Ruhe-Knochenrichtung auf die gemessene Richtung, dazu
     eine Drehung um den Oberarm/Oberschenkel, sodass Ellbogen und Knie in ihrer Ebene beugen,
   - Hand und Fuss: Richtung Handgelenk -> Finger bzw. Ferse -> Zehen.
-Die Blickrichtung wird langsam (gleitend ueber ~0,7 s) herausgerechnet: Die Kamera schwenkt im
-Video, schnelle Rumpfdrehungen (Schlag) bleiben erhalten. Die Punkte werden vorher zeitlich
+Die Blickrichtung wird langsam (Gauss, blick_glaettung_s, Standard 0,35 s) herausgerechnet: Die
+Kamera schwenkt im Video, schnelle Rumpfdrehungen (Schlag) bleiben erhalten. Bei Zeitlupe den
+Wert groesser waehlen, sonst wird auch die Rumpfdrehung des Schlags herausgerechnet. Die Punkte werden vorher zeitlich
 geglaettet (Gauss), danach auf 60 Bilder/s gebracht. Ausgabe wie cmu_to_clips.py.
 """
 import json
@@ -100,7 +101,7 @@ def smooth(P, sigma):
     return out
 
 
-def convert(path, t0=0.0, t1=1e9, sigma=1.5):
+def convert(path, t0=0.0, t1=1e9, sigma=1.5, yaw_s=0.35):
     d = json.load(open(path))
     F = [f for f in d["frames"] if "world" in f and t0 <= f["t"] <= t1]
     T = np.array([f["t"] for f in F])
@@ -110,7 +111,7 @@ def convert(path, t0=0.0, t1=1e9, sigma=1.5):
     # Blickrichtung je Bild (aus der Hueftlinie), langsam geglaettet
     lat = P[:, HIP["r"]] - P[:, HIP["l"]]
     yaw = np.unwrap(np.arctan2(-lat[:, 2], lat[:, 0]))  # Drehung der seitlichen Achse um y
-    yaw_s = smooth(yaw[:, None], 0.35 * d["fps"])[:, 0]
+    yaw_sm = smooth(yaw[:, None], yaw_s * d["fps"])[:, 0]
     frames = []
     n_out = int((T[-1] - T[0]) * FPS_OUT) + 1
     for k in range(n_out):
@@ -119,7 +120,7 @@ def convert(path, t0=0.0, t1=1e9, sigma=1.5):
         i = max(i, 0)
         w = (t - T[i]) / max(T[i + 1] - T[i], 1e-6)
         p = P[i] * (1 - w) + P[i + 1] * w
-        yw = yaw_s[i] * (1 - w) + yaw_s[i + 1] * w
+        yw = yaw_sm[i] * (1 - w) + yaw_sm[i + 1] * w
         Y = qaxis([0, 1, 0], -yw)
         p = np.array([qrot(Y, v) for v in p])
         mh = (p[HIP["l"]] + p[HIP["r"]]) / 2
@@ -169,6 +170,7 @@ if __name__ == "__main__":
     t0 = float(a[4]) if len(a) > 4 else 0.0
     t1 = float(a[5]) if len(a) > 5 else 1e9
     sg = float(a[6]) if len(a) > 6 else 1.5
-    c = convert(a[1], t0, t1, sg)
+    ys = float(a[7]) if len(a) > 7 else 0.35
+    c = convert(a[1], t0, t1, sg, ys)
     json.dump({a[3]: c}, open(a[2], "w"), separators=(",", ":"))
     print(a[3], len(c["frames"]), "Bilder")

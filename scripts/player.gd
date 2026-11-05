@@ -1899,7 +1899,9 @@ func _target_pose_main() -> Dictionary:
 				if vid.has(k):
 					core[k] = vid[k]
 			if vid.has("hips"):
-				core["hips"] = _qlerp(core.get("hips", Vector3.ZERO), vid["hips"], 0.5)
+				# In der Luft dreht der ganze Rumpf wie im Video (Schlagschulter weit zurueck),
+				# am Boden nur halb, damit der Anlauf geradeaus bleibt.
+				core["hips"] = _qlerp(core.get("hips", Vector3.ZERO), vid["hips"], 1.0 if airborne else 0.5)
 		var clip := _mirror(_style_attack(core, rel))
 		if not clip.is_empty() and rel > -1.1:
 			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
