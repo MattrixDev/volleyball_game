@@ -1028,7 +1028,11 @@ func _contact_ik() -> void:
 				hd = (thru - sh_r).normalized().slerp((cross - sh_r).normalized(), smoothstep(0.07, 0.18, rel))
 			hand = sh_r + hd * 0.45
 		tg = {hs: hand}
-		w = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.3, 0.45, rel))
+		# Mit dem Video-Angriff kommt das Ausholen (Bogenspannung) aus dem Clip; die Zielhilfe
+		# uebernimmt erst kurz vor dem Treffpunkt, damit der Ball sicher getroffen wird.
+		var vid := anim_kind == "attack" and not "video" in _off
+		var w0 := smoothstep(-0.16, -0.06, rel) if vid else smoothstep(-0.5, -0.3, rel)
+		w = w0 * (1.0 - smoothstep(0.3, 0.45, rel))
 		if not airborne:
 			w *= 0.6
 		# Linker Arm zeigt zum Ball, bis der Schlagarm durchzieht, dann zieht er seitlich am Koerper
@@ -1040,7 +1044,7 @@ func _contact_ik() -> void:
 			ld = ld.slerp((f * 0.3 - up * 0.85 - r * 0.05).normalized(), lt)
 			ld = (ld - r * 0.15 * sin(PI * lt)).normalized()
 		tg[os] = sh_l + ld * 0.6
-		wl = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.12, 0.3, rel))
+		wl = (smoothstep(-0.2, -0.08, rel) if vid else smoothstep(-0.5, -0.3, rel)) * (1.0 - smoothstep(0.12, 0.3, rel))
 		# Hand: beim Ausholen Handflaeche nach vorn, im Treffpunkt flach hinter dem Ball,
 		# danach klappt das Handgelenk ab (Finger ueber den Ball nach vorn unten).
 		var snap := smoothstep(0.0, 0.1, rel)
