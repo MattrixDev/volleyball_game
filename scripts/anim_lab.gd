@@ -230,9 +230,9 @@ func _check_player(p, tick: int, rally: bool) -> void:
 	cur["dive"] = p.dive_timer > 0.0
 	cur["air"] = p.airborne
 	if cur.dive and not pv.get("dive", false):
-		_contacts.append({"tick": tick, "kind": "dive", "player": id, "anim": p.anim_kind, "tech": p.anim_tech, "dist": 0.0, "part": ""})
+		_contacts.append({"tick": tick, "kind": "dive", "player": id, "anim": p.anim_kind, "tech": p.anim_tech, "style": str(p.get("anim_style")), "dist": 0.0, "part": ""})
 	if pv.get("air", false) and not cur.air:
-		_contacts.append({"tick": tick, "kind": "land", "player": id, "anim": p.anim_kind, "tech": p.anim_tech, "dist": 0.0, "part": ""})
+		_contacts.append({"tick": tick, "kind": "land", "player": id, "anim": p.anim_kind, "tech": p.anim_tech, "style": str(p.get("anim_style")), "dist": 0.0, "part": ""})
 	_prev[p] = cur
 	if _trace_id == id and tick >= _trace_f0 and tick <= _trace_f1:
 		var ft: Dictionary = p._feet
@@ -282,7 +282,7 @@ func _on_contact(kind: String, pos: Vector3, _strength: float) -> void:
 		if df < d:
 			d = df
 			part = "forearm_" + sd
-	var c := {"tick": tick, "kind": kind, "player": _pid(p), "anim": p.anim_kind, "tech": p.anim_tech, "dist": snappedf(d, 0.001), "part": part, "rel": snappedf(p.now - p.anim_t, 0.001), "pt": snappedf(pos.distance_to(p.contact_pt), 0.001)}
+	var c := {"tick": tick, "kind": kind, "player": _pid(p), "anim": p.anim_kind, "tech": p.anim_tech, "style": str(p.get("anim_style")), "dist": snappedf(d, 0.001), "part": part, "rel": snappedf(p.now - p.anim_t, 0.001), "pt": snappedf(pos.distance_to(p.contact_pt), 0.001)}
 	_contacts.append(c)
 	if d > T_HAND_BALL:
 		_events.append({"type": "contact_far", "player": _pid(p), "team": p.team, "num": p.number, "f0": tick, "f1": tick, "peak_f": tick, "peak": snappedf(d, 0.001), "anim": p.anim_kind, "tech": p.anim_tech, "joint": part, "ctx": kind})
