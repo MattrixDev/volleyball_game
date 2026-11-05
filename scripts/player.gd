@@ -864,7 +864,14 @@ func _contact_ik() -> void:
 	else:
 		_aim_s = _aim_s.lerp(aim_h, 0.12).normalized()
 	aim_h = _aim_s
-	if block_pose and airborne:
+	if _astyle() == "joust" and airborne and not block_pose and not "varianten" in _off:
+		# Netzkampf: beide Haende zusammen am Ball direkt ueber der Netzkante, drueckt zur Gegenseite.
+		var jt := Vector3(net_x - side * 0.05, block_top() - 0.12, position.z)
+		tg = {"l": jt - r * 0.09, "r": jt + r * 0.09}
+		w = smoothstep(0.05, 0.3, jump_h)
+		var push := -side * Vector3.RIGHT
+		hands = {"l": [up, push], "r": [up, push]}
+	elif block_pose and airborne:
 		# Haende ueber das Netz gedrueckt, Handflaechen zeigen zum Gegner, Finger gespreizt nach oben.
 		var net_side := -side
 		var bst := _astyle()
@@ -881,7 +888,8 @@ func _contact_ik() -> void:
 		var opp_dir := Vector3(net_side, 0.0, 0.0)
 		var palm := opp_dir if bst != "soft" else (opp_dir + up * 0.9).normalized()
 		hands = {"l": [up - r * 0.25 + opp_dir * 0.2, palm], "r": [up + r * 0.25 + opp_dir * 0.2, palm]}
-	elif not contact_on and anim_kind != "serve":
+	elif not contact_on and anim_kind != "serve" and not (anim_kind == "attack" and airborne and not "varianten" in _off):
+		# (Taeuscher im Sprung: Ausholen und angedeuteter Schlag laufen ueber den Angriffszweig unten.)
 		return
 	elif anim_kind in ["pass", "dig", "free", "set"] and _tech() != "over":
 		# Baggern: gestreckte Arme, Plattform aus beiden Unterarmen unter dem Ball.
@@ -996,6 +1004,9 @@ func _contact_ik() -> void:
 		ch.quaternion = ch.quaternion * Quaternion(Vector3.UP, twist * wt * mir) * Quaternion(Vector3.RIGHT, arch * wt)
 		fig._sync()
 		var hit := b - up * 0.07 - f * 0.17
+		if _attack_kind() == "decoy" and not "varianten" in _off:
+			# Taeuscher: kein Ball, der Arm zieht nur halb durch (vor dem Kopf, nicht ganz gestreckt).
+			hit = (fig.j["sh_" + hs] as Node3D).global_position + up * 0.42 + f * 0.25 + r * 0.06
 		# Treffen mit ganz gestrecktem Arm: liegt der Treffpunkt naeher an der Schulter als eine
 		# Armlaenge, sinkt der Koerper im Kontaktmoment etwas ab, liegt er weiter weg, streckt er sich.
 		if airborne:
@@ -1429,6 +1440,69 @@ func _p_set(rel := 0.0) -> Dictionary:
 
 ## Angriff in der Luft: rel = Zeit relativ zum Treffpunkt (negativ = davor).
 ## Ablauf: beide Arme hoch, Schlagarm hinter den Kopf ziehen (Bogenspannung), dann durchschlagen.
+var _pre_v := Vector3.ZERO
+
+
+## Art des Angriffs aus dem, was der Spieler gerade tut (ohne Felder aus dem Spiel):
+## "decoy" Taeuscher (Sprung ohne Ball), "slide" Anlauf parallel zum Netz, "pipe" Absprung hinter
+## der 3-m-Linie, "stand" ohne Anlauf (Overpass direkt am Netz), sonst "".
+func _attack_kind() -> String:
+	if anim_kind != "attack":
+		return ""
+	if not contact_on:
+		return "decoy"
+	var v := _pre_v
+	var along := absf(v.z)
+	var to_net := absf(v.x)
+	if along > 2.0 and along > 1.3 * to_net:
+		return "slide"
+	if (takeoff_x if airborne else absf(position.x - net_x)) > 3.0 or lane == "back":
+		return "pipe"
+	if v.length() < 1.2 and _run_amt < 0.25:
+		return "stand"
+	return ""
+
+
+## Beine und Rumpf je nach Angriffsart (auf der schon gespiegelten Haltung).
+func _attack_kind_pose(p: Dictionary, rel: float) -> void:
+	var kind := _attack_kind()
+	var hs := hit_side()
+	var tk := "r" if hs == "l" else "l"  # Sprungbein beim Slide: Gegenseite der Schlaghand
+	match kind:
+		"slide":
+			# Einbeiniger Absprung: das Sprungbein streckt sich nach unten, das Schlagseiten-Knie
+			# zieht hoch nach vorn (wie beim Korbleger), der Rumpf lehnt sich leicht in die Laufrichtung.
+			var air := smoothstep(-0.42, -0.3, rel) * (1.0 - smoothstep(0.1, 0.35, rel))
+			var pre := smoothstep(-0.6, -0.42, rel) * (1.0 - smoothstep(-0.4, -0.3, rel))
+			var a := maxf(air, pre * 0.6)
+			if airborne:
+				p["hip_" + tk] = _qlerp(p.get("hip_" + tk, Vector3.ZERO), Vector3(-0.1, 0.0, 0.0), a)
+				p["kn_" + tk] = _qlerp(p.get("kn_" + tk, Vector3.ZERO), Vector3(-0.35, 0.0, 0.0), a)
+				p["an_" + tk] = _qlerp(p.get("an_" + tk, Vector3.ZERO), Vector3(-0.5, 0.0, 0.0), a)
+				p["hip_" + hs] = _qlerp(p.get("hip_" + hs, Vector3.ZERO), Vector3(1.35, 0.0, 0.0), a)
+				p["kn_" + hs] = _qlerp(p.get("kn_" + hs, Vector3.ZERO), Vector3(-1.6, 0.0, 0.0), a)
+				p["an_" + hs] = _qlerp(p.get("an_" + hs, Vector3.ZERO), Vector3(-0.2, 0.0, 0.0), a)
+			var lean := -signf(_pre_v.z) * side * 0.12 * a
+			p["hips"] = (p.get("hips", Vector3.ZERO) as Vector3) + Vector3(0.0, 0.0, lean)
+		"pipe":
+			# Breiter Sprung aus dem Hinterfeld: Koerper weiter vorgeneigt, Beine schwingen nach hinten
+			# und kommen zur Landung nach vorn.
+			if airborne:
+				var a := smoothstep(-0.42, -0.25, rel) * (1.0 - smoothstep(0.0, 0.3, rel))
+				p["hips"] = (p.get("hips", Vector3.ZERO) as Vector3) + Vector3(-0.18 * a, 0.0, 0.0)
+				for sd in ["l", "r"]:
+					p["hip_" + sd] = (p.get("hip_" + sd, Vector3.ZERO) as Vector3) + Vector3(-0.25 * a, 0.0, 0.0)
+		"stand":
+			# Kurzer, schneller Sprung aus dem Stand: weniger Hohlkreuz, Beine bleiben unter dem Koerper.
+			if airborne:
+				for sd in ["l", "r"]:
+					p["kn_" + sd] = _qlerp(p.get("kn_" + sd, Vector3.ZERO), Vector3(-0.7, 0.0, 0.0), 0.5)
+		"decoy":
+			# Taeuscher: Sprung und Ausholen wie beim echten Angriff, der Schlag bleibt angedeutet
+			# (siehe _contact_ik), danach landet er locker.
+			pass
+
+
 func _p_spike(rel: float) -> Dictionary:
 	var p := {}
 	var cock := smoothstep(-0.45, -0.12, rel)
@@ -1959,9 +2033,12 @@ func _target_pose_main() -> Dictionary:
 				sp["hips"] = _qlerp(sp.get("hips", Vector3.ZERO), vs["hips"], 0.5)
 			_stiff = 32.0
 		return _mirror(sp)
-	if block_pose:
+	if block_pose or (_astyle() == "joust" and airborne):
+		# Netzkampf (joust): beide Haende oben am Ball ueber der Netzkante, wie ein Block mit Druck.
 		_stiff = 30.0
 		return _p_block()
+	if not airborne:
+		_pre_v = _loco_gv  # Laufrichtung kurz vor dem Absprung (fuer Slide und Pipe)
 	if anim_kind == "attack" and rel < 0.5:
 		var core := _clip_at("kern_angriff", _approach_rel(rel), SPIKE_KEYS)
 		if not "video" in _off and not core.is_empty():
@@ -1985,7 +2062,14 @@ func _target_pose_main() -> Dictionary:
 				var own := _mirror(_p_spike(rel))
 				for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
 					clip[k] = _qlerp(clip[k], own.get(k, Vector3.ZERO), 0.95)
+			if not "varianten" in _off:
+				_attack_kind_pose(clip, rel)
 			var wi := smoothstep(-1.1, -0.85, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
+			if not "varianten" in _off and _attack_kind() == "stand" and not airborne:
+				# Ohne Anlauf (Overpass direkt am Netz): keine Anlaufschritte, nur kurz in die Knie.
+				run0 = _mix(_p_ready(), _mirror(_p_approach()), smoothstep(-0.7, -0.45, rel) * 0.8)
+				for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+					clip[k] = run0.get(k, Vector3.ZERO)
 			return _mix(run0, clip, wi)
 		if airborne:
 			_stiff = 45.0
