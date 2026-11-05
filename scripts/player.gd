@@ -1619,6 +1619,13 @@ func _style_attack(p: Dictionary, rel: float) -> Dictionary:
 		"seam":  # Hart in die Luecke: Schulter dreht weit durch, Rumpf klappt kraeftig nach vorn
 			add.call("chest", Vector3(-0.15 * hitk, 0.32 * hitk, 0.0))
 			add.call("hips", Vector3(0.0, 0.14 * hitk, 0.0))
+		"rebound":  # Ball weich in den Block legen: kaum Ausholen, Arm gebeugt, flache Hand schiebt nach vorn
+			var push := smoothstep(-0.1, 0.08, rel) * (1.0 - smoothstep(0.25, 0.45, rel))
+			var pre := smoothstep(-0.5, -0.2, rel) * (1.0 - smoothstep(0.1, 0.3, rel))
+			add.call("el_r", Vector3(0.55 * pre, 0.0, 0.0))
+			add.call("sh_r", Vector3(-0.35 * pre, 0.0, 0.0))
+			add.call("wr_r", Vector3(-0.45 * push, 0.0, 0.0))
+			add.call("chest", Vector3(0.1 * pre, -0.15 * hitk, 0.0))
 		"quick":  # Schnellangriff: kurzer Anlauf, Schlagarm frueh oben
 			var early := smoothstep(-0.9, -0.6, rel) * (1.0 - smoothstep(-0.3, -0.12, rel))
 			var up := {}
