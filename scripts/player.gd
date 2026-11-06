@@ -2117,7 +2117,9 @@ func _target_pose_main() -> Dictionary:
 	if dive_timer > 0.0:
 		_stiff = 30.0
 		return _p_dive()
-	if celebrate_until > now:
+	if celebrate_until > now and anim_kind not in ["serve", "serve_hold"]:
+		# Jubel nie ueber den eigenen Aufschlag legen (sonst jubelt er mit ausgebreiteten Armen
+		# weiter, waehrend er den Ball wirft und schlaegt).
 		_stiff = 16.0
 		return _p_celebrate()
 	var rel := now - anim_t
