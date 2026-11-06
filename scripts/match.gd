@@ -1318,6 +1318,7 @@ func _physics_process(delta: float) -> void:
 						_easy_serve = true
 						_skyball = inp.get("trick", false) and _trick_ok(server(), "skyball")
 						if _skyball:
+							server().anim_style = "skyball"
 							y_used = true
 							stats["Move skyball"] = stats.get("Move skyball", 0) + 1
 							if trace or autoplay:
@@ -2802,6 +2803,7 @@ func _ai_serve_choice() -> void:
 	if rng.randf() < 0.04 * pls(server(), "taktiker"):
 		serve_kind = 0
 		_skyball = true  # KI-Star: Skyball
+		server().anim_style = "skyball"
 		stats["Move skyball"] = stats.get("Move skyball", 0) + 1
 	elif rng.randf() < 0.3 + 0.4 * cfg.unit("ai_block"):
 		# V-5: in die Luecke zwischen zwei Annahmespieler.
@@ -4863,10 +4865,14 @@ func _update_players(delta: float) -> void:
 		var srv0 := server()
 		var back := 11.4 if serve_kind == 1 else 10.0
 		srv0.target = Vector3(side_of(serving_team) * back, 0.0, srv0.position.z)
+		if _skyball:
+			srv0.anim_style = "skyball"
 	# Standaufschlag: der Aufschlaeger bleibt waehrend des Wurfs stehen (sonst lief er zur Formationsposition).
 	if phase == Phase.TOSS and serve_kind == 0 and not serve_done:
 		var srv_stand := server()
 		srv_stand.target = srv_stand.position
+		if _skyball:
+			srv_stand.anim_style = "skyball"  # Ausholen von unten schon waehrend des Wurfs
 	# Sprungaufschlag: Anlauf unter den Ball und Absprung hinter der Grundlinie.
 	if phase == Phase.TOSS and serve_kind == 1 and not serve_done:
 		var srv := server()
