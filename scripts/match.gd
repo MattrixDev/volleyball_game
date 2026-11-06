@@ -1320,6 +1320,8 @@ func _physics_process(delta: float) -> void:
 						if _skyball:
 							y_used = true
 							stats["Move skyball"] = stats.get("Move skyball", 0) + 1
+							if trace or autoplay:
+								print("MOVE skyball tick=%d" % Engine.get_physics_frames())
 						_do_toss()
 					elif clock > serve_deadline and not autopress:
 						_end_rally(1 - serving_team, "Aufschlagzeit überschritten")
@@ -1523,7 +1525,11 @@ func _auto_input() -> Dictionary:
 				_auto_rs = Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.2, 0.8))
 				serve_kind = rng.randi() % 2
 				d.rs = _auto_rs
-				d.hit_down = true
+				if skilled and human_serves() and _trick_ok(server(), "skyball") and rng.randf() < 0.35:
+					d.bump = true  # Koenner-Bot: Skyball (Y + A)
+					d.trick = true
+				else:
+					d.hit_down = true
 		Phase.TOSS:
 			if charging and _due(serve_ideal):
 				d.hit_up = true
