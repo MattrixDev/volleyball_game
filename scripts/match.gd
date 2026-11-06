@@ -400,6 +400,12 @@ func ptrait(pl: VPlayer, t: String) -> bool:
 	return d != null and d.has_trait(t)
 
 
+## PlayStyle-Stufe eines Spielers (0 = keiner, 1 = PlayStyle, 2 = PlayStyle+), siehe play_styles.gd.
+func pls(pl: VPlayer, id: String) -> float:
+	var d := pdata(pl)
+	return float(d.style(id)) if d != null else 0.0
+
+
 ## Zeit vom Absprung bis zum hoechsten Punkt (haengt von der Sprungkraft ab).
 func rise(pl: VPlayer) -> float:
 	return pl.jump_v0 / G if pl else JUMP_RISE
@@ -1682,7 +1688,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 			clear = NET_H + 0.8
 	# Aufschlagstaerke: schnellere Aufschlaege (Aufschlagkanone beim Sprung-Topspin noch mehr).
 	# V-3: Spezialisten unterscheiden sich deutlich (Aufschlagwert und Kanone beim Sprungaufschlag).
-	umax *= 1.0 + 0.1 * pf(srv, "serve") + (0.1 if jump and style == "topspin" and ptrait(srv, "kanone") else 0.0)
+	umax *= 1.0 + 0.1 * pf(srv, "serve") + (0.08 * pls(srv, "kanone") if jump and style == "topspin" else 0.0)
 	var u := lerpf(10.0, umax, power)
 	# Super-Zone beim Aufschlag: perfekt getroffen und genau dort losgelassen.
 	var sup := false
@@ -1690,19 +1696,20 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 		if human_serves():
 			sup = c >= SUPER_LO and c <= SUPER_HI
 		else:
-			sup = jump and rng.randf() < 0.12 * (1.0 + pf(srv, "serve") + (0.5 if ptrait(srv, "kanone") else 0.0))
+			sup = jump and rng.randf() < 0.12 * (1.0 + pf(srv, "serve") + 0.4 * pls(srv, "kanone"))
 	if sup:
 		u = 32.0 if (jump and style == "topspin") else umax * 1.12
+	var tak := 1.0 - 0.3 * pls(srv, "taktiker")  # PlayStyle Aufschlagtaktiker: trifft genauer
 	if q == Q.GOOD:
 		clear += 0.3
 		u = minf(u, umax * 0.85)
-		d += rng.randf_range(-0.6, 0.6)
-		l += rng.randf_range(-0.6, 0.6)
+		d += rng.randf_range(-0.6, 0.6) * tak
+		l += rng.randf_range(-0.6, 0.6) * tak
 	elif q == Q.WEAK:
 		clear += 1.1
 		u = minf(u, umax * 0.6)
-		d += rng.randf_range(-1.2, 1.2)
-		l += rng.randf_range(-1.2, 1.2)
+		d += rng.randf_range(-1.2, 1.2) * tak
+		l += rng.randf_range(-1.2, 1.2) * tak
 	# Ueberzogen: Ball wird zu lang.
 	if c > OVERCHARGE:
 		d += rng.randf_range(0.0, (c - OVERCHARGE) * 6.0)
@@ -1718,7 +1725,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	ball_vel = Ballistics.launch_over_net(ball.position, target, clear, 8.0, u, g)
 	flutter = 0.0
 	if style == "float" and q <= Q.GOOD:
-		flutter = (0.32 if jump else 0.26) * (1.0 + 0.35 * pf(srv, "serve")) * (1.5 if ptrait(srv, "flatter") else 1.0)
+		flutter = (0.32 if jump else 0.26) * (1.0 + 0.35 * pf(srv, "serve")) * (1.0 + 0.35 * pls(srv, "flatter"))
 	if trace:
 		print("AUFSCHLAG T%d %s q=%s e=%.3f p=%.2f target=%s vel=%s" % [serving_team, style, Q_TEXT[q], e, power, target, ball_vel])
 	last_action = "serve"
@@ -1881,18 +1888,24 @@ func _try_team(team: int) -> bool:
 	o.speed = Vector3(ball_vel.x, ball_vel.y - ball_g * tc, ball_vel.z).length()
 	o.human = team == human_team and (drill == null or drill.human_does(kind))
 	# Ein Flatterball ist schwer zu lesen: kleineres Timing-Fenster bei der Annahme.
+	var calm := 1.0 - 0.4 * pls(pl, "ruhepol") if kind == "pass" else 1.0  # PlayStyle Ruhepol
 	if flutter > 0.0 and last_action == "serve":
-		o.win_scale = 0.88
+		o.win_scale = 1.0 - 0.12 * calm
 	if kind == "dig" or (kind == "pass" and last_action == "serve"):
-		o.win_scale *= 1.0 - 0.22 * hard_ball(o.speed)
+		o.win_scale *= 1.0 - 0.22 * hard_ball(o.speed) * calm
 	var serve_k := 1.0  # V-3: wie schwer die Annahme wird (fuer die KI: groesserer Fehler)
+	# PlayStyles Trickser (Dump) und Leger (Leger, Gefuehlsschlag): die Abwehr ist ueberrascht.
+	if idx == 0 and last_touch_team != team and last_toucher != null and (last_action == "tip" or last_shot_style in ["roll", "corner", "seam"]):
+		var sneaky := pls(last_toucher, "trickser") if set_tempo[last_touch_team] == "dump" else pls(last_toucher, "leger")
+		serve_k *= 1.0 + 0.15 * sneaky
 	if kind == "pass" and last_action == "serve":
 		if last_super:
 			serve_k *= 1.35  # perfekter, voller Aufschlag: echte Ass-Chance
 			stats["Aufschlag perfekt"] = stats.get("Aufschlag perfekt", 0) + 1
 		if _serve_seam(team, p, pl):
-			serve_k *= 1.25  # zwischen zwei Annahmespieler: beide zoegern
+			serve_k *= 1.25 + 0.1 * pls(last_toucher, "taktiker")  # zwischen zwei Annahmespieler: beide zoegern
 			stats["Aufschlag in die Luecke"] = stats.get("Aufschlag in die Luecke", 0) + 1
+		serve_k = 1.0 + (serve_k - 1.0) * calm
 		o.win_scale /= serve_k
 	if o.human and (kind == "pass" or kind == "dig" or kind == "free"):
 		o.win_scale *= cfg.get_v("receive_help") / 100.0
@@ -1965,7 +1978,7 @@ func _serve_seam(team: int, p: Vector3, taker: VPlayer) -> bool:
 
 ## Lauftempo nach Schnelligkeit: 40 -> 8 % langsamer, 99 -> 8 % schneller.
 func _speed_k(pl: VPlayer) -> float:
-	return 1.0 + 0.08 * pf(pl, "speed")
+	return 1.0 + 0.08 * pf(pl, "speed") + 0.035 * pls(pl, "blitzstart")
 
 
 ## Staerke fuer eine Ballberuehrung (-1 .. +1).
@@ -1974,7 +1987,7 @@ func _touch_skill(pl: VPlayer, kind: String) -> float:
 		"pass", "free":
 			return pf(pl, "receive")
 		"dig":
-			return pf(pl, "defense") + (0.3 if ptrait(pl, "katze") else 0.0)
+			return pf(pl, "defense") + 0.25 * pls(pl, "katze")
 		"set":
 			return pf(pl, "setting")
 		"attack":
@@ -1993,7 +2006,7 @@ func _ai_dig_limits(o: Opp, tc: float) -> void:
 	var skill := cfg.unit("ai_defense")
 	var react := lerpf(0.42, 0.2, skill)
 	var run := lerpf(3.2, 5.5, skill) * (1.0 + 0.1 * pf(o.player, "speed"))
-	var reach := lerpf(1.05, 1.6, skill) * (1.0 + 0.15 * pf(o.player, "defense") + (0.15 if ptrait(o.player, "katze") else 0.0))
+	var reach := lerpf(1.05, 1.6, skill) * (1.0 + 0.15 * pf(o.player, "defense") + 0.12 * pls(o.player, "katze"))
 	o.start_pos = o.player.position
 	o.max_run = maxf(0.0, tc - react) * run
 	if flat_dist(o.player.position, o.point) > o.max_run + reach:
@@ -2155,8 +2168,7 @@ func _assign_block(def: int, p: Vector3, t_contact: float) -> void:
 	var guess_bonus := 0
 	if not commit_block[def] and not info.is_empty() and (info.quick_z != null or info.set_quick) and mb != null and is_front_row(mb):
 		var read_p := lerpf(0.15, 0.45, cfg.unit("ai_block")) if def != human_team else 0.3
-		if ptrait(mb, "blockleser"):
-			read_p += 0.15
+		read_p += 0.12 * pls(mb, "blockleser")
 		var guess_quick: bool = rng.randf() < 0.5
 		if rng.randf() < read_p:
 			guess_quick = info.set_quick  # richtig gelesen
@@ -2912,7 +2924,7 @@ static var _dive_trace := OS.get_cmdline_user_args().has("--dive-trace")  # Test
 
 
 func dive_arm(o: Opp) -> float:
-	return DIVE_ARM + 0.12 * pf(o.player, "defense") + (0.1 if ptrait(o.player, "katze") else 0.0)
+	return DIVE_ARM + 0.12 * pf(o.player, "defense") + 0.08 * pls(o.player, "katze") + 0.18 * pls(o.player, "hecht")
 
 
 ## Weitester Hechtflug der Technik (m), gute Abwehrspieler fliegen weiter.
@@ -3280,6 +3292,8 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 		"quick":
 			T = maxf(T * 0.62, 0.5)
 			tempo_spread = 0.5
+	if tempo in ["fast", "quick"]:
+		T *= 1.0 - 0.06 * pls(setter, "sprungzuspiel")  # PlayStyle Sprungzuspieler: Ball kommt frueher
 	if bump_set:
 		T = maxf(T, 0.9)  # gebaggert gibt es keinen schnellen Ball
 	set_tempo[o.team] = tempo
@@ -3295,7 +3309,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 		l += dl.y * k
 	l += excess(e, "set") * 10.0
 	var spread: float = [0.15, 0.45, 1.2][q] + tempo_spread
-	spread *= clampf(1.0 - 0.3 * pf(o.player, "setting"), 0.6, 1.45) * (0.75 if ptrait(o.player, "spielmacher") else 1.0)
+	spread *= clampf(1.0 - 0.3 * pf(o.player, "setting"), 0.6, 1.45) * (1.0 - 0.2 * pls(o.player, "spielmacher"))
 	if bump_set:
 		spread = spread * 1.8 + 0.2
 	if safe:
@@ -3391,7 +3405,7 @@ func _do_dump(o: Opp, q: int, lane_choice: String) -> void:
 			d = rng.randf_range(2.0, 3.0)
 		_:
 			l = rng.randf_range(-3.0, 3.0)
-	var spread := 0.4 if q == Q.PERFECT else (0.9 if q == Q.GOOD else 1.6)
+	var spread := (0.4 if q == Q.PERFECT else (0.9 if q == Q.GOOD else 1.6)) * (1.0 - 0.25 * pls(setter, "trickser"))
 	l = clampf(l + rng.randf_range(-spread, spread), -4.4, 4.4)
 	d += rng.randf_range(-spread * 0.5, spread * 0.5)
 	var target := court_pos(o.team, Vector2(-d, l))
@@ -3864,7 +3878,7 @@ func _along_run(o: Opp, l: float) -> int:
 func _angle_shape(o: Opp, q: int, hl: float, d: float, l: float, manual: bool) -> Dictionary:
 	var res := {"d": d, "l": l, "key": "clean" if q == Q.PERFECT else ""}
 	var along := _along_run(o, l)
-	var open := q == Q.PERFECT or (q == Q.GOOD and along > 0)
+	var open := q == Q.PERFECT or (q == Q.GOOD and (along > 0 or pls(o.player, "winkel") > 0.0))  # PlayStyle Winkelkuenstler
 	var sx := absf(o.rs.x)
 	var cross := absf(hl) <= 1.5 or signf(l) != signf(hl)
 	if open:
@@ -4035,13 +4049,13 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	# das bei guten Zuspielen gelegentlich auch.
 	var sup := false
 	if q == Q.PERFECT and not o.emergency and (info.style == "spike" or info.style == "topspin"):
-		var wide := 0.03 if ptrait(o.player, "kraftpaket") else 0.0
+		var wide := 0.025 * pls(o.player, "kraftpaket")
 		if o.human:
 			sup = o.over >= SUPER_LO - wide and o.over <= SUPER_HI + wide
 		else:
 			sup = o.power > 0.85 and rng.randf() < lerpf(0.1, 0.3, cfg.unit("ai_block")) * (1.0 + 0.6 * pf(o.player, "power") + wide * 10.0)
 	# Schlagkraft: harte Angreifer schlagen schneller (Kraftpaket noch etwas mehr).
-	var pk := 1.0 + 0.07 * pf(o.player, "power") + (0.04 if ptrait(o.player, "kraftpaket") else 0.0)
+	var pk := 1.0 + 0.07 * pf(o.player, "power") + 0.035 * pls(o.player, "kraftpaket")
 	u *= pk
 	if sup:
 		u = SUPER_SPIKE_U * (1.0 + 0.5 * (pk - 1.0))
@@ -4317,11 +4331,13 @@ func _try_block(c: Vector3, prev: Vector3) -> bool:
 	# Blockstaerke des Blockers (Blockleser etwas mehr); ein Linkshaender von der rechten Seite
 	# schlaegt aus ungewohntem Winkel und ist schwerer zu blocken.
 	stuff_p *= 1.0 + 0.35 * pf(pl, "block")
-	if ptrait(pl, "blockleser"):
-		stuff_p += 0.06
+	stuff_p += 0.05 * pls(pl, "blockleser")
+	stuff_p *= 1.0 + 0.12 * pls(pl, "mauer")  # PlayStyle Mauer
 	var att: VPlayer = last_toucher
 	if att and ptrait(att, "linkshaender") and team_local(att.team, att.position).y > 1.5:
 		stuff_p *= 0.85
+	elif att and pls(att, "beidhaender") > 0.0 and absf(team_local(att.team, att.position).y) > 1.5:
+		stuff_p *= 1.0 - 0.08 * pls(att, "beidhaender")  # PlayStyle Beidhaender: von beiden Seiten unbequem
 	if read_hit[def]:
 		stuff_p += 0.2  # richtig gelesen
 	elif commit_miss[def]:

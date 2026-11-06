@@ -121,7 +121,7 @@ func reach(o, base: float) -> float:
 		var early := clampf(-o.dive_e / DIVE_EARLY, 0.0, 1.0)
 		var late := clampf(o.dive_e / 0.15, 0.0, 1.0)
 		var r := Technique.reach(o.style) + 0.35 * early - 0.3 * late
-		r += 0.12 * m.pf(o.player, "defense") + (0.1 if m.ptrait(o.player, "katze") else 0.0)
+		r += 0.12 * m.pf(o.player, "defense") + 0.08 * m.pls(o.player, "katze") + 0.15 * m.pls(o.player, "hecht")
 		return maxf(r, 0.75)
 	return base
 
