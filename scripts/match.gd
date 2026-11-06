@@ -1277,8 +1277,8 @@ func _physics_process(delta: float) -> void:
 						_do_toss()
 					elif clock > serve_deadline and not autopress:
 						_end_rally(1 - serving_team, "Aufschlagzeit überschritten")
-			elif whistle_done:
-				_do_toss()
+			elif whistle_done and (server()._vel.length() < 0.3 or clock > pause_until + 2.0):
+				_do_toss()  # KI wirft erst, wenn der Aufschlaeger steht (sonst laeuft er vom Ball weg)
 		Phase.TOSS:
 			_play_call_input(inp)
 			if human_serves():
@@ -1611,7 +1611,14 @@ func _do_toss() -> void:
 	if serve_kind == 1:
 		# Sprungaufschlag: hoher Wurf nach vorn, der Aufschlaeger laeuft an und springt.
 		ball_vel = Vector3(-side_of(serving_team) * 0.6, 7.4, 0.0)
-		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, 3.2)
+		# Treffhoehe nach Reichweite und Sprungkraft des Aufschlaegers (wie beim Angriff), sonst
+		# kommt ein kleiner oder sprungschwacher Spieler nicht an den Ball.
+		var srv := server()
+		var hj := 3.2
+		if srv != null:
+			var jh := srv.jump_v0 * srv.jump_v0 / (2.0 * G)
+			hj += clampf(srv.reach_add + jh - PlayerData.REF_JUMP_H, -0.45, 0.35)
+		serve_ideal = clock + Ballistics.time_to_height(ball.position, ball_vel, hj)
 	else:
 		ball_vel = Vector3(0.0, 5.0, 0.0)
 		# 2,32 m: so hoch reicht der gestreckte Arm auf den Zehenspitzen.
@@ -4645,7 +4652,8 @@ func _update_players(delta: float) -> void:
 		var goal := Vector3(bx, 0.0, ball.position.z)
 		# Anlauf aus dem Stand: der Aufschlaeger startet so, dass er genau zum Absprung ankommt.
 		var run_dur := flat_dist(srv.position, goal) / 5.0
-		if clock < serve_ideal - rise(srv) - run_dur - 0.1:
+		# 0,35 s Vorlauf zum Beschleunigen (Laufen beginnt nicht mit voller Geschwindigkeit).
+		if clock < serve_ideal - rise(srv) - run_dur - 0.35:
 			goal = srv.position
 		srv.target = goal
 		srv.run_speed = 5.0 * _speed_k(srv)
