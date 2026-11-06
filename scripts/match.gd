@@ -194,6 +194,7 @@ var play_call := ["", ""]  # angesagter Spielzug je Team ("" = keiner)
 var _decoys: Array = [[], []]  # je Team: Taeuscher {pl, goal, jump_at, until, jumped}
 var _net_joust := {}  # V-2: geplanter Netzkampf bei einem flachen Ball uebers Netz {a, b}
 var _play_info := [{}, {}]  # letztes Zuspiel je Team: call, geo, quick_z (Taeuscher Mitte) fuer den Block
+var y_used := false  # Y gehalten und Spielzug angesagt (trainer.gd oeffnet dann nicht)
 var _dpad_y := false  # Steuerkreuz gehoert gerade zur Spielzug-Ansage (Y gehalten)  # A beim Aufschlag: sicherer Aufschlag, das Spiel trifft selbst
 var _human_stuff := false  # dein voller Block in diesem Ballwechsel: immer Wiederholung
 var _block_auto_style := {}  # B1: Block-Technik vor dem weichen Block (L2)
@@ -1175,8 +1176,11 @@ func _read_input() -> Dictionary:
 	var dd_now := Vector2(
 		float(Input.is_action_just_pressed("set_dir_right")) - float(Input.is_action_just_pressed("set_dir_left")),
 		float(Input.is_action_just_pressed("set_dir_up")) - float(Input.is_action_just_pressed("set_dir_down")))
+	if Input.is_action_just_pressed("trainer"):
+		y_used = false
 	if Input.is_action_pressed("trainer") and dd_now.length() > 0.5:
 		_dpad_y = true
+		y_used = true  # Y war fuer eine Ansage: beim Loslassen keine Trainerbank
 		d.play_dd = dd_now
 	if _dpad_y:
 		if d.dpad.length() < 0.2:
@@ -1248,6 +1252,8 @@ func _physics_process(delta: float) -> void:
 				new_match()
 		Phase.PRE_SERVE:
 			_hold_ball_at_server()
+			# Spielzug schon vor dem Aufschlag ansagen (wie das Handzeichen hinter dem Ruecken).
+			_play_call_input(inp)
 			if trainer_wanted and not whistle_done:
 				trainer_wanted = false
 				if hud:

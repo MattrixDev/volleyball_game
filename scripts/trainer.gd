@@ -33,7 +33,11 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not Input.is_action_just_pressed("trainer") or match_node.attract or match_node.drill != null:
+	# Y oeffnet beim Loslassen: Y + Steuerkreuz ist eine Spielzug-Ansage, dann keine Trainerbank.
+	if not Input.is_action_just_released("trainer") or match_node.attract or match_node.drill != null:
+		return
+	if match_node.y_used and not visible:
+		match_node.y_used = false
 		return
 	if visible:
 		close()
