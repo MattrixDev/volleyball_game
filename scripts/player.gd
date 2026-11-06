@@ -1497,20 +1497,27 @@ func _attack_kind_pose(p: Dictionary, rel: float) -> void:
 	var tk := "r" if hs == "l" else "l"  # Sprungbein beim Slide: Gegenseite der Schlaghand
 	match kind:
 		"slide":
-			# Einbeiniger Absprung: das Sprungbein streckt sich nach unten, das Schlagseiten-Knie
-			# zieht hoch nach vorn (wie beim Korbleger), der Rumpf lehnt sich leicht in die Laufrichtung.
-			var air := smoothstep(-0.42, -0.3, rel) * (1.0 - smoothstep(0.1, 0.35, rel))
-			var pre := smoothstep(-0.6, -0.42, rel) * (1.0 - smoothstep(-0.4, -0.3, rel))
-			var a := maxf(air, pre * 0.6)
+			# Einbeiniger Absprung: kurz vor dem Absprung hebt das Schlagseiten-Bein schon ab (der
+			# Spieler springt nur vom Gegenbein ab), in der Luft zieht das Knie hoch nach vorn wie beim
+			# Korbleger, das Sprungbein haengt gestreckt nach unten. Huefte und Rumpf zeigen erst in die
+			# Laufrichtung und drehen kurz vor dem Schlag zum Feld zurueck.
+			var air := smoothstep(-0.44, -0.32, rel) * (1.0 - smoothstep(0.05, 0.35, rel))
+			var pre := smoothstep(-0.62, -0.46, rel)
+			var dz := signf(_pre_v.z) if absf(_pre_v.z) > 0.1 else 1.0
 			if airborne:
-				p["hip_" + tk] = _qlerp(p.get("hip_" + tk, Vector3.ZERO), Vector3(-0.1, 0.0, 0.0), a)
-				p["kn_" + tk] = _qlerp(p.get("kn_" + tk, Vector3.ZERO), Vector3(-0.35, 0.0, 0.0), a)
-				p["an_" + tk] = _qlerp(p.get("an_" + tk, Vector3.ZERO), Vector3(-0.5, 0.0, 0.0), a)
-				p["hip_" + hs] = _qlerp(p.get("hip_" + hs, Vector3.ZERO), Vector3(1.35, 0.0, 0.0), a)
-				p["kn_" + hs] = _qlerp(p.get("kn_" + hs, Vector3.ZERO), Vector3(-1.6, 0.0, 0.0), a)
-				p["an_" + hs] = _qlerp(p.get("an_" + hs, Vector3.ZERO), Vector3(-0.2, 0.0, 0.0), a)
-			var lean := -signf(_pre_v.z) * side * 0.12 * a
-			p["hips"] = (p.get("hips", Vector3.ZERO) as Vector3) + Vector3(0.0, 0.0, lean)
+				p["hip_" + tk] = _qlerp(p.get("hip_" + tk, Vector3.ZERO), Vector3(-0.2, 0.0, 0.0), air)
+				p["kn_" + tk] = _qlerp(p.get("kn_" + tk, Vector3.ZERO), Vector3(-0.25, 0.0, 0.0), air)
+				p["an_" + tk] = _qlerp(p.get("an_" + tk, Vector3.ZERO), Vector3(-0.7, 0.0, 0.0), air)
+				p["hip_" + hs] = _qlerp(p.get("hip_" + hs, Vector3.ZERO), Vector3(1.55, 0.0, 0.0), air)
+				p["kn_" + hs] = _qlerp(p.get("kn_" + hs, Vector3.ZERO), Vector3(-1.8, 0.0, 0.0), air)
+				p["an_" + hs] = _qlerp(p.get("an_" + hs, Vector3.ZERO), Vector3(-0.1, 0.0, 0.0), air)
+			elif rel > -0.62:
+				# Letzter Schritt: nur das Sprungbein steht, das andere Knie schwingt schon hoch.
+				p["hip_" + hs] = _qlerp(p.get("hip_" + hs, Vector3.ZERO), Vector3(1.0, 0.0, 0.0), pre * 0.8)
+				p["kn_" + hs] = _qlerp(p.get("kn_" + hs, Vector3.ZERO), Vector3(-1.3, 0.0, 0.0), pre * 0.8)
+			var turn := maxf(air, pre * 0.5) * (1.0 - smoothstep(-0.2, 0.0, rel))
+			var hp := p.get("hips", Vector3.ZERO) as Vector3
+			p["hips"] = hp + Vector3(0.0, SLIDE_TURN * dz * side * turn, -dz * side * 0.2 * maxf(air, pre * 0.5))
 		"pipe":
 			# Breiter Sprung aus dem Hinterfeld: Koerper weiter vorgeneigt, Beine schwingen nach hinten
 			# und kommen zur Landung nach vorn.
@@ -1974,6 +1981,8 @@ const VSERVE_KEYS := [[-0.9, 0.1674], [-0.74, 0.2009], [-0.6, 0.2812], [-0.4, 0.
 const VSERVE_HOLD_U := 0.1
 const SERVE_EARLY := -0.1  # Aufschlag: ab hier liegt die Schlaghand am Ball (frueher Treffer)
 const SERVE_HOLD := 0.1  # so lange bleibt die Schlaghand nach dem geplanten Treffpunkt am Ball
+## Hueftdrehung in die Laufrichtung beim Slide (Vorzeichen im Labor geprueft)
+const SLIDE_TURN := 0.6
 const VSPIKE_UPPER := ["chest", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r"]
 const SET_KEYS := [[-0.7, 0.17], [-0.15, 0.42], [0.0, 0.47], [0.35, 0.56]]
 const BUMP_KEYS := [[-0.6, 0.3], [0.0, 0.58], [0.35, 0.7]]
