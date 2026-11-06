@@ -3227,7 +3227,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	d += sed * spread * 0.75
 	if q != Q.WEAK:
 		l = clampf(l, -4.1, 4.1)
-	if d < 0.45 and _joust(o, hitter, l):
+	if d < 0.6 and _joust(o, hitter, l):
 		return
 	var target := court_pos(o.team, Vector2(maxf(d, 0.3), l))
 	target.y = H_ATTACK + 0.1
@@ -4116,10 +4116,10 @@ func _watch_net_fight(prev: Vector3) -> void:
 	if absf(ball_vel.x) < 1.0 or signf(ball_vel.x) == signf(prev.x) or absf(prev.x) < 0.05:
 		return
 	var t := absf(prev.x) / absf(ball_vel.x)
-	if t > 0.34:
+	if t > 0.4:
 		return
 	var c := Ballistics.pos_at(prev, ball_vel, t, ball_g)
-	if c.y < NET_H + R + 0.02 or c.y > NET_H + 0.6 or absf(c.z) > HALF_W - 0.3:
+	if c.y < NET_H + R + 0.02 or c.y > NET_H + 0.85 or absf(c.z) > HALF_W - 0.3:
 		return
 	var own := team_at_x(prev.x)
 	var a := _net_player(own, c.z)
@@ -4138,7 +4138,7 @@ func _net_player(team: int, z: float) -> VPlayer:
 	for pl in players[team]:
 		if pl.role == "L" or not is_front_row(pl) or is_down(pl) or pl.airborne:
 			continue
-		if absf(pl.position.x) > 1.6 or absf(pl.position.z - z) > 1.7:
+		if absf(pl.position.x) > 2.2 or absf(pl.position.z - z) > 2.2:
 			continue
 		if best == null or absf(pl.position.z - z) < absf(best.position.z - z):
 			best = pl
