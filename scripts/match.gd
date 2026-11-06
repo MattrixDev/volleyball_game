@@ -3025,7 +3025,7 @@ func launch_dive(o: Opp) -> void:
 	if o.launched or pl.dive_timer > 0.0 or pl.airborne:
 		return  # in der Luft (Block) kein Abdruck moeglich: dann wie frueher ohne Flug
 	pl.anim_t = o.t
-	pl.anim_style = o.style
+	pl.anim_style = o.trick if o.trick != "" else o.style
 	pl.start_dive(Vector3(o.point.x, 0.0, o.point.z), dive_arm(o) * 0.95, dive_max(o))
 	o.launched = true
 	if _dive_trace:
@@ -3058,6 +3058,8 @@ func _plan_dive() -> void:
 func execute_touch(o: Opp, e: float, choice: String) -> void:
 	o.done = true
 	last_trick = o.trick
+	if o.trick != "" and (trace or autoplay):
+		print("MOVE-KONTAKT %s style=%s tick=%d" % [o.trick, str(o.player.anim_style), Engine.get_physics_frames()])
 	var pl := o.player
 	if o.human and o.kind in ["pass", "dig", "free"]:
 		recv.before_touch(o)
@@ -3084,7 +3086,7 @@ func execute_touch(o: Opp, e: float, choice: String) -> void:
 		if o.launched:
 			# Echter Hecht: der Koerper ist hingeflogen, es zaehlt der Abstand der gestreckten Arme.
 			reach = dive_arm(o)
-		pl.anim_style = o.style
+		pl.anim_style = o.trick if o.trick != "" else o.style
 	if o.no_reach and pl.dive_timer <= 0.0:
 		pl.dive()
 	if o.launched and _dive_trace:
@@ -3423,7 +3425,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	# Rueckwaerts-Zuspiel: Ziel liegt hinter dem Zuspieler (er schaut zur linken Seite).
 	var behind_setter := team_local(o.team, target).y > sl.y + 1.0
 	var sst := "bump" if bump_set else ("back" if behind_setter else o.style)
-	setter.anim_style = sst
+	setter.anim_style = o.trick if o.trick != "" else sst
 	stats["Zuspiel-Technik " + (sst if sst != "" else "stand")] = stats.get("Zuspiel-Technik " + (sst if sst != "" else "stand"), 0) + 1
 
 
@@ -4043,7 +4045,7 @@ func _do_finesse(o: Opp, q: int, e: float, info: Dictionary, bp: Vector3) -> voi
 	last_super = false
 	_slow_tail_until = clock + 0.12
 	o.tech_key = style
-	o.player.anim_style = style  # roll, corner, seam (Visual Overhaul; unbekannt = normale Bewegung)
+	o.player.anim_style = o.trick if o.trick != "" else style  # roll, corner, seam (Visual Overhaul; unbekannt = normale Bewegung)
 	stats["Schlag " + style] = stats.get("Schlag " + style, 0) + 1
 	if o.human:
 		big_hit.emit(0.3)
@@ -4220,7 +4222,7 @@ func _do_attack(o: Opp, q: int, e: float) -> void:
 	_slow_tail_until = clock + 0.12
 	stats["Schlag " + info.style] = stats.get("Schlag " + info.style, 0) + 1
 	var ast := _attack_style(o)
-	o.player.anim_style = ast
+	o.player.anim_style = o.trick if o.trick != "" else ast
 	stats["Angriff " + ast] = stats.get("Angriff " + ast, 0) + 1
 	if sup:
 		stats["Wuchtschlag"] = stats.get("Wuchtschlag", 0) + 1
@@ -4927,7 +4929,7 @@ func _update_players(delta: float) -> void:
 				opp.style = Technique.set_style(opp.player.role == "S", pass_quality, opp.slack, over_ok)
 			if opp.t - clock < 0.3 and opp.kind != "attack":
 				opp.style_locked = true
-		opp.player.anim_style = opp.style
+		opp.player.anim_style = opp.trick if opp.trick != "" else opp.style  # 5-Sterne-Move behaelt seine Bewegung
 		# Zuspiel, bevor gedrueckt ist: der Zuspieler geht schon in die Pritschhaltung, wenn der
 		# Ball pritschbar ist (wie im Spiel: die Haende sind frueh oben). Gebaggert wird nur, wenn es so gedrueckt wird.
 		# (Auch kurz nach dem geplanten Treffpunkt noch, sonst springen die Haende fuer ein, zwei Takte in
