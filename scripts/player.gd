@@ -998,8 +998,9 @@ func _contact_ik() -> void:
 		if anim_kind in ["attack", "serve"] and not "video" in _off:
 			# Kraeftiger ausholen (Mattis): Schlagschulter weiter zurueck, staerkeres Hohlkreuz, dann
 			# schnelles Durchdrehen kurz vor dem Treffpunkt.
-			twist = lerpf(-0.9, 0.45, smoothstep(-0.1, 0.06, rel))
-			arch = 0.38 * (1.0 - smoothstep(-0.08, 0.0, rel)) - 0.35 * smoothstep(0.0, 0.15, rel)
+			var ts := SERVE_EARLY if anim_kind == "serve" and not "glatt" in _off else 0.0
+			twist = lerpf(-0.9, 0.45, smoothstep(-0.1 + ts, 0.06 + ts, rel))
+			arch = 0.38 * (1.0 - smoothstep(-0.08 + ts, ts, rel)) - 0.35 * smoothstep(ts, 0.15 + ts, rel)
 		var ch: Node3D = fig.j["chest"]
 		ch.quaternion = ch.quaternion * Quaternion(Vector3.UP, twist * wt * mir) * Quaternion(Vector3.RIGHT, arch * wt)
 		fig._sync()
@@ -1017,7 +1018,7 @@ func _contact_ik() -> void:
 		elif anim_kind == "serve" and not "video" in _off:
 			# Standaufschlag: liegt der Ball hoeher, als der gestreckte Arm im Stand reicht, macht der
 			# Aufschlaeger einen kleinen Hopser (wie beim Flatteraufschlag im Video), statt daneben zu greifen.
-			var hop := smoothstep(-0.22, -0.04, rel) * (1.0 - smoothstep(SERVE_HOLD, SERVE_HOLD + 0.2, rel))
+			var hop := smoothstep(-0.3, -0.12, rel) * (1.0 - smoothstep(SERVE_HOLD, SERVE_HOLD + 0.2, rel))
 			var shp := (fig.j["sh_" + hs] as Node3D).global_position
 			var need := (hit.y - shp.y) - sqrt(maxf(pow(ARM_HIT_LEN * fig.root_node.scale.x / 1.075, 2.0) - pow(Vector2(hit.x - shp.x, hit.z - shp.z).length(), 2.0), 0.0))
 			fig.root_node.position.y += clampf(need, 0.0, 0.32) * hop
@@ -1045,6 +1046,8 @@ func _contact_ik() -> void:
 		# Mit Video-Bewegung bleibt die Bogenspannung bis kurz vor dem Treffpunkt, dann peitscht der
 		# Arm in gut 0,1 s durch (wie im Video), statt lange ueber dem Kopf nach vorn zu wandern.
 		var sw0 := -0.12 if anim_kind in ["attack", "serve"] and not "video" in _off else -0.2
+		if anim_kind == "serve" and not "video" in _off and not "glatt" in _off:
+			sw0 = SERVE_EARLY - 0.12
 		var smooth_whip := anim_kind in ["attack", "serve"] and not "glatt" in _off
 		if rel >= sw0 and rel < 0.0:
 			var sw := smoothstep(sw0, -0.01, rel)
@@ -1053,7 +1056,10 @@ func _contact_ik() -> void:
 			if smooth_whip:
 				# Schneller werdend bis in den Treffpunkt (kein Abbremsen vor dem Ball): der Arm
 				# kommt mit voller Geschwindigkeit durch den Kontakt, das vermeidet den Ruck danach.
-				var lin := clampf((rel - sw0) / -sw0, 0.0, 1.0)
+				# Aufschlag: der Ball wird oft etwas frueher getroffen (Zeitfehler bis etwa -0,1 s),
+				# daher ist die Hand schon bei SERVE_EARLY am Ball und folgt ihm bis zum Schlag.
+				var t_end := SERVE_EARLY if anim_kind == "serve" else 0.0
+				var lin := clampf((rel - sw0) / (t_end - sw0), 0.0, 1.0)
 				t = lin * lin * (1.6 - 0.6 * lin)
 			hand = cock * (1.0 - t) * (1.0 - t) + over * 2.0 * (1.0 - t) * t + hit * t * t
 			poles[hs] = cock_el.lerp(lead_el, smoothstep(0.0, 0.55, sw))
@@ -1096,7 +1102,8 @@ func _contact_ik() -> void:
 		# uebernimmt erst kurz vor dem Treffpunkt, damit der Ball sicher getroffen wird.
 		var vid := anim_kind in ["attack", "serve"] and not "video" in _off
 		# Ausholen kraeftiger (Mattis): die Hand wird zusaetzlich weit hinter den Kopf gezogen.
-		var w0 := smoothstep(-0.36, -0.22, rel) if vid else smoothstep(-0.5, -0.3, rel)
+		var sh0 := SERVE_EARLY if anim_kind == "serve" and not "glatt" in _off else 0.0
+		var w0 := smoothstep(-0.36 + sh0, -0.22 + sh0, rel) if vid else smoothstep(-0.5, -0.3, rel)
 		w = w0 * (1.0 - smoothstep(0.3, 0.45, rel))
 		if not airborne and anim_kind != "serve":
 			w *= 0.6
@@ -1965,6 +1972,7 @@ const VJSERVE_KEYS := [[-1.2, 0.0412], [-1.16, 0.0755], [-1.05, 0.1374], [-0.9, 
 const VSERVE_KEYS := [[-0.9, 0.1674], [-0.74, 0.2009], [-0.6, 0.2812], [-0.4, 0.4821], [-0.25, 0.6027],
 	[-0.1, 0.7098], [0.0, 0.7875], [0.2, 0.8839], [0.45, 0.9709]]
 const VSERVE_HOLD_U := 0.1
+const SERVE_EARLY := -0.1  # Aufschlag: ab hier liegt die Schlaghand am Ball (frueher Treffer)
 const SERVE_HOLD := 0.1  # so lange bleibt die Schlaghand nach dem geplanten Treffpunkt am Ball
 const VSPIKE_UPPER := ["chest", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r"]
 const SET_KEYS := [[-0.7, 0.17], [-0.15, 0.42], [0.0, 0.47], [0.35, 0.56]]
