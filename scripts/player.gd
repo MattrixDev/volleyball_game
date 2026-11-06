@@ -1014,6 +1014,14 @@ func _contact_ik() -> void:
 			var need := (hit - (fig.j["sh_" + hs] as Node3D).global_position).length() - ARM_HIT_LEN * fig.root_node.scale.x / 1.075
 			fig.root_node.position.y += clampf(need, -0.2, 0.14) * ext
 			fig._sync()
+		elif anim_kind == "serve" and not "video" in _off:
+			# Standaufschlag: liegt der Ball hoeher, als der gestreckte Arm im Stand reicht, macht der
+			# Aufschlaeger einen kleinen Hopser (wie beim Flatteraufschlag im Video), statt daneben zu greifen.
+			var hop := smoothstep(-0.22, -0.04, rel) * (1.0 - smoothstep(SERVE_HOLD, SERVE_HOLD + 0.2, rel))
+			var shp := (fig.j["sh_" + hs] as Node3D).global_position
+			var need := (hit.y - shp.y) - sqrt(maxf(pow(ARM_HIT_LEN * fig.root_node.scale.x / 1.075, 2.0) - pow(Vector2(hit.x - shp.x, hit.z - shp.z).length(), 2.0), 0.0))
+			fig.root_node.position.y += clampf(need, 0.0, 0.32) * hop
+			fig._sync()
 		var sh_r: Vector3 = fig.j["sh_" + hs].global_position
 		var sh_l: Vector3 = fig.j["sh_" + os].global_position
 		var chest: Vector3 = fig.j["chest"].global_position
@@ -1055,17 +1063,29 @@ func _contact_ik() -> void:
 			# Richtung um die Schulter drehen (Bogen auf Armlaenge), nicht quer durch den Raum mischen
 			var hd := (hit - sh_r).normalized()
 			var rad := 0.45
-			if smooth_whip and anim_kind == "attack":
-				# (Aufschlag: der Treffpunkt kann sich durch den Zeitfehler verspaeten, dort bleibt
-				# die Hand kurz am Ball wie bisher.)
+			# Aufschlag: der Ball wird oft etwas spaeter getroffen (Zeitfehler), die Hand bleibt dann
+			# noch am Ball (contact_pt folgt dem fallenden Ball), erst danach kommt der Nachschwung.
+			var rr := rel
+			if smooth_whip and anim_kind == "serve":
+				rr = maxf(rel - SERVE_HOLD, 0.0)
+			if smooth_whip and anim_kind == "serve" and rel < SERVE_HOLD:
+				hd = (hit - sh_r).normalized()
+				rad = (hit - sh_r).length()
+			elif smooth_whip:
 				# Nachschwung startet mit Schwung (ohne Halt im Treffpunkt) und auf der Armlaenge des
 				# Treffpunkts, die erst allmaehlich auf 0,45 m zurueckgeht (sonst springt das Ziel).
+				var rel0 := rel
+				rel = rr
 				var k := clampf(rel / 0.18, 0.0, 1.0)
 				k = 1.0 - (1.0 - k) * (1.0 - k)
+				if anim_kind == "serve":
+					# Nach dem Halten am Ball weich anlaufen (die Hand stand still).
+					k = smoothstep(0.0, 1.0, clampf(rel / 0.24, 0.0, 1.0))
 				var td := (thru - sh_r).normalized()
 				var cd := (cross - sh_r).normalized()
 				hd = hd.slerp(td, clampf(k / 0.45, 0.0, 1.0)) if k < 0.45 else td.slerp(cd, (k - 0.45) / 0.55)
 				rad = lerpf((hit - sh_r).length(), 0.45, smoothstep(0.0, 0.12, rel))
+				rel = rel0
 			elif rel < 0.07:
 				hd = hd.slerp((thru - sh_r).normalized(), smoothstep(0.0, 0.07, rel))
 			else:
@@ -1945,6 +1965,7 @@ const VJSERVE_KEYS := [[-1.2, 0.0412], [-1.16, 0.0755], [-1.05, 0.1374], [-0.9, 
 const VSERVE_KEYS := [[-0.9, 0.1674], [-0.74, 0.2009], [-0.6, 0.2812], [-0.4, 0.4821], [-0.25, 0.6027],
 	[-0.1, 0.7098], [0.0, 0.7875], [0.2, 0.8839], [0.45, 0.9709]]
 const VSERVE_HOLD_U := 0.1
+const SERVE_HOLD := 0.1  # so lange bleibt die Schlaghand nach dem geplanten Treffpunkt am Ball
 const VSPIKE_UPPER := ["chest", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r"]
 const SET_KEYS := [[-0.7, 0.17], [-0.15, 0.42], [0.0, 0.47], [0.35, 0.56]]
 const BUMP_KEYS := [[-0.6, 0.3], [0.0, 0.58], [0.35, 0.7]]
