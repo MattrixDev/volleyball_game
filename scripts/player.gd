@@ -867,6 +867,14 @@ func _contact_ik() -> void:
 	if _astyle() == "joust" and airborne and not block_pose and not "varianten" in _off:
 		# Netzkampf: beide Haende zusammen am Ball direkt ueber der Netzkante, drueckt zur Gegenseite.
 		var jt := Vector3(net_x - side * 0.05, block_top() - 0.12, position.z)
+		if ball_node != null and is_instance_valid(ball_node) and ball_node.global_position.distance_to(jt) < 1.2:
+			jt = jt.lerp(ball_node.global_position, 0.6)  # zum Ball greifen, solange er noch umkaempft ist
+		# Steht er weiter weg vom Netz, gehen die Arme nach oben statt waagerecht nach vorn.
+		var sc := ((fig.j["sh_l"] as Node3D).global_position + (fig.j["sh_r"] as Node3D).global_position) * 0.5
+		var hz := Vector3(jt.x - sc.x, 0.0, jt.z - sc.z)
+		if hz.length() > 0.35:
+			jt = Vector3(sc.x, jt.y, sc.z) + hz.normalized() * 0.35
+		jt.y = maxf(jt.y, sc.y + 0.5)
 		tg = {"l": jt - r * 0.09, "r": jt + r * 0.09}
 		w = smoothstep(0.05, 0.3, jump_h)
 		var push := -side * Vector3.RIGHT
