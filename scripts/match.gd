@@ -1681,7 +1681,8 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 			umax = 9.0
 			clear = NET_H + 0.8
 	# Aufschlagstaerke: schnellere Aufschlaege (Aufschlagkanone beim Sprung-Topspin noch mehr).
-	umax *= 1.0 + 0.06 * pf(srv, "serve") + (0.06 if jump and style == "topspin" and ptrait(srv, "kanone") else 0.0)
+	# V-3: Spezialisten unterscheiden sich deutlich (Aufschlagwert und Kanone beim Sprungaufschlag).
+	umax *= 1.0 + 0.1 * pf(srv, "serve") + (0.1 if jump and style == "topspin" and ptrait(srv, "kanone") else 0.0)
 	var u := lerpf(10.0, umax, power)
 	# Super-Zone beim Aufschlag: perfekt getroffen und genau dort losgelassen.
 	var sup := false
@@ -1717,7 +1718,7 @@ func _serve_hit(e: float, power: float, contact: Vector2, c: float) -> void:
 	ball_vel = Ballistics.launch_over_net(ball.position, target, clear, 8.0, u, g)
 	flutter = 0.0
 	if style == "float" and q <= Q.GOOD:
-		flutter = (0.32 if jump else 0.26) * (1.0 + 0.15 * pf(srv, "serve")) * (1.3 if ptrait(srv, "flatter") else 1.0)
+		flutter = (0.32 if jump else 0.26) * (1.0 + 0.35 * pf(srv, "serve")) * (1.5 if ptrait(srv, "flatter") else 1.0)
 	if trace:
 		print("AUFSCHLAG T%d %s q=%s e=%.3f p=%.2f target=%s vel=%s" % [serving_team, style, Q_TEXT[q], e, power, target, ball_vel])
 	last_action = "serve"
@@ -1884,6 +1885,15 @@ func _try_team(team: int) -> bool:
 		o.win_scale = 0.88
 	if kind == "dig" or (kind == "pass" and last_action == "serve"):
 		o.win_scale *= 1.0 - 0.22 * hard_ball(o.speed)
+	var serve_k := 1.0  # V-3: wie schwer die Annahme wird (fuer die KI: groesserer Fehler)
+	if kind == "pass" and last_action == "serve":
+		if last_super:
+			serve_k *= 1.35  # perfekter, voller Aufschlag: echte Ass-Chance
+			stats["Aufschlag perfekt"] = stats.get("Aufschlag perfekt", 0) + 1
+		if _serve_seam(team, p, pl):
+			serve_k *= 1.25  # zwischen zwei Annahmespieler: beide zoegern
+			stats["Aufschlag in die Luecke"] = stats.get("Aufschlag in die Luecke", 0) + 1
+		o.win_scale /= serve_k
 	if o.human and (kind == "pass" or kind == "dig" or kind == "free"):
 		o.win_scale *= cfg.get_v("receive_help") / 100.0
 	if o.human and idx == 0 and last_action == "block_touch":
@@ -1896,10 +1906,11 @@ func _try_team(team: int) -> bool:
 	# Staerken: wer gut annimmt, abwehrt, zuspielt oder schlaegt, hat als Mensch etwas mehr Zeit
 	# (groesseres Timing-Fenster) und trifft als KI genauer.
 	var sk := _touch_skill(pl, kind)
+	var sk_w := 0.2 if (kind == "pass" and last_action == "serve") else 0.12  # schwacher Annehmer zaehlt mehr
 	if o.human:
-		o.win_scale *= 1.0 + 0.12 * sk
+		o.win_scale *= 1.0 + sk_w * sk
 	if not o.human:
-		o.ai_e = ai_e(kind) * clampf(1.0 - 0.3 * sk, 0.55, 1.45)
+		o.ai_e = ai_e(kind) * clampf(1.0 - 2.5 * sk_w * sk, 0.5, 1.5) * serve_k
 		if team == human_team and idx == 0 and last_action == "block_touch" and last_touch_team == team:
 			o.ai_e *= 0.55  # nach deiner Blockberuehrung ist der Ball gebremst: deine Abwehr hat es leichter
 		if kind == "dig":
@@ -1938,6 +1949,18 @@ func _overpass_hitter(team: int, idx: int, apex: float) -> VPlayer:
 			bd = d
 			best = pl
 	return best
+
+
+## V-3: Landet der Aufschlag genau zwischen zwei Annahmespielern (aehnlich weit weg, beide nah),
+## zoegern beide kurz: die Annahme wird schwerer. Folgt allein aus dem Zielpunkt.
+func _serve_seam(team: int, p: Vector3, taker: VPlayer) -> bool:
+	var d1 := flat_dist(taker.position, p)
+	var d2 := 1e9
+	for pl in players[team]:
+		if pl == taker or pl.role == "S" or not _rcv_cache[team].get("passers", []).has(pl.slot):
+			continue
+		d2 = minf(d2, flat_dist(pl.position, p))
+	return d1 > 0.9 and d2 < 2.6 and absf(d2 - d1) < 0.6
 
 
 ## Lauftempo nach Schnelligkeit: 40 -> 8 % langsamer, 99 -> 8 % schneller.
@@ -2677,6 +2700,52 @@ func _ai_serve_choice() -> void:
 			var tl := team_local(serving_team, wk.target)
 			serve_aim = Vector2(clampf(-tl.x + rng.randf_range(-0.7, 0.7), 3.5, 8.2), clampf(tl.y + rng.randf_range(-0.6, 0.6), -3.9, 3.9))
 			stats["KI-Aufschlag auf Schwaechsten"] = stats.get("KI-Aufschlag auf Schwaechsten", 0) + 1
+	elif rng.randf() < 0.3 + 0.4 * cfg.unit("ai_block"):
+		# V-5: in die Luecke zwischen zwei Annahmespieler.
+		var gap := _ai_serve_gap(rt)
+		if gap != Vector2.INF:
+			serve_aim = gap
+			stats["KI-Aufschlag in Luecke"] = stats.get("KI-Aufschlag in Luecke", 0) + 1
+	# V-5: steht die Annahme weit hinten, kommt oefter ein kurzer Aufschlag.
+	if serve_kind == 0 and serve_contact.y > -0.5 and _rcv_depth(rt) > 6.3 and rng.randf() < 0.25:
+		serve_contact = Vector2(0.0, -0.7)
+		stats["KI-Aufschlag kurz (Annahme tief)"] = stats.get("KI-Aufschlag kurz (Annahme tief)", 0) + 1
+
+
+## Mitte zwischen zwei benachbarten Annahmespielern (als Aufschlagziel des Gegners), sonst INF.
+func _ai_serve_gap(rt: int) -> Vector2:
+	var ps: Array = []
+	for pl in players[rt]:
+		if pl.role != "S" and _rcv_cache[rt].get("passers", []).has(pl.slot):
+			ps.append(team_local(rt, pl.target))
+	if ps.size() < 2:
+		return Vector2.INF
+	var best := Vector2.INF
+	var bd := 1e9
+	for i in ps.size():
+		for j in range(i + 1, ps.size()):
+			var a: Vector2 = ps[i]
+			var b: Vector2 = ps[j]
+			var dd := a.distance_to(b)
+			if dd < 1.8 or dd > 4.5:
+				continue
+			var m := (a + b) * 0.5
+			var sc := absf(dd - 3.0) + rng.randf_range(0.0, 1.0)
+			if sc < bd:
+				bd = sc
+				best = Vector2(clampf(m.x, 3.5, 8.2), clampf(m.y, -3.9, 3.9))
+	return best
+
+
+## Mittlere Tiefe der Annahmespieler (Abstand zum Netz).
+func _rcv_depth(rt: int) -> float:
+	var s := 0.0
+	var n := 0
+	for pl in players[rt]:
+		if pl.role != "S" and _rcv_cache[rt].get("passers", []).has(pl.slot):
+			s += team_local(rt, pl.target).x
+			n += 1
+	return s / n if n > 0 else 0.0
 
 
 ## Schwaechster Annahmespieler (kein Libero, kein Zuspieler): Annahmewert, und wer in diesem
@@ -2795,19 +2864,23 @@ func _observe_touch(o: Opp, q: int, tgt: Vector3) -> void:
 			var key := last_shot_style if o.tech_key == "" or o.tech_key == "clean" else o.tech_key
 			var dir := AiPlan.attack_dir(key, team_local(o.team, o.point).y, team_local(o.team, tgt).y)
 			plan(other).observe_attack(o.player.lane, dir)
-			_last_attack = {"team": o.team, "lane": o.player.lane, "dir": dir}
+			_last_attack = {"team": o.team, "lane": o.player.lane, "dir": dir, "call": _play_info[o.team].get("call", "")}
 			_rally_pattern.append("%s-%s-%s" % [set_tempo[o.team], o.player.lane, dir])
 		"pass":
 			plan(other).observe_reception(str(o.player.get_instance_id()), q)
 		"dig":
 			if not _last_attack.is_empty() and _last_attack.team != o.team and q <= Q.GOOD:
 				plan(_last_attack.team).observe_own(_last_attack.lane, _last_attack.dir, true)
+				if _last_attack.get("call", "") != "":
+					plan(_last_attack.team).observe_own("play", _last_attack.call, true)
 				_last_attack = {}
 
 
 func _observe_rally_end(winner: int, reason: String) -> void:
 	if not _last_attack.is_empty():
 		plan(_last_attack.team).observe_own(_last_attack.lane, _last_attack.dir, winner != _last_attack.team)
+		if _last_attack.get("call", "") != "":
+			plan(_last_attack.team).observe_own("play", _last_attack.call, winner != _last_attack.team)
 	_last_attack = {}
 	# Messung gegen "Schema F": Ablauf des Ballwechsels (erster Angriff und Zahl der Angriffe).
 	if autoplay or trace:
@@ -3145,7 +3218,7 @@ func _do_set(o: Opp, q: int, e: float, choice: String) -> void:
 	var in_sys: bool = not out_of_system and not bump_set and q != Q.WEAK and pass_quality != Q.WEAK
 	if call == "" and not o.human and in_sys and tempo in ["high", "fast", "quick"] \
 			and rng.randf() < 0.25 + 0.4 * plan(o.team).tempo_fast:
-		call = PLAY_KEYS[rng.randi() % PLAY_KEYS.size()]
+		call = _ai_pick_play(o.team)
 	if not in_sys:
 		call = ""
 	var play: Dictionary = PLAYS.get(call, {})
@@ -3382,6 +3455,23 @@ func _do_setter_attack(o: Opp, q: int, e: float, lane_choice: String) -> void:
 		_fx("block", ball.position, 1.0)
 		return
 	_do_attack(o, q, e)
+
+
+## V-5: KI waehlt einen Spielzug; was zuletzt gelesen (geblockt, abgewehrt) wurde, kommt seltener.
+func _ai_pick_play(team: int) -> String:
+	var pp := plan(team)
+	var ws: Array = []
+	var tot := 0.0
+	for k in PLAY_KEYS:
+		var w := 1.0 - pp.avoid("play", k)
+		ws.append(w)
+		tot += w
+	var r := rng.randf() * tot
+	for i in PLAY_KEYS.size():
+		r -= ws[i]
+		if r <= 0.0:
+			return PLAY_KEYS[i]
+	return PLAY_KEYS[0]
 
 
 ## Spielzug: Richtung vom Steuerkreuz -> Position im Spielzug. Ohne Richtung (A) waehlt der
