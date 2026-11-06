@@ -51,12 +51,12 @@ func input(o, inp: Dictionary) -> bool:
 	o.aim = a if o.kind != "free" else Vector2.ZERO
 	o.player.platform_tilt = o.aim if o.aim.length() >= STICK_MIN else Vector2.ZERO
 	if inp.get("fast", false):
-		return _start_dive(o)
+		return _start_dive(o, inp.get("trick", false))
 	return false
 
 
 ## B: Hechten. Der Druck ist zugleich der Ballkontakt (Timing wie beim Baggern).
-func _start_dive(o) -> bool:
+func _start_dive(o, trick := false) -> bool:
 	var e: float = m.human_clock() - o.t
 	if e < -0.6:
 		return false  # viel zu frueh: zaehlt nicht
@@ -74,6 +74,10 @@ func _start_dive(o) -> bool:
 	o.style_locked = true
 	o.tech = "bump"
 	o.win_scale *= 1.3  # der Hecht ueberbrueckt Raum: das Timing ist etwas gnaediger
+	if trick and m._trick_ok(pl, "one_arm"):
+		# Y + B (Hechtkoenig): einarmige Rettung, reicht deutlich weiter, Timing enger.
+		m._set_trick(o, "one_arm")
+		o.style = "one_arm"
 	m.launch_dive(o)
 	if e < 0.0:
 		o.pending = true
