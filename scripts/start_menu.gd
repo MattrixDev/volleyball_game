@@ -551,27 +551,27 @@ func _build_controls() -> void:
 	grid.add_theme_constant_override("v_separation", 6)
 	var rows := [
 		["", "Gamepad", "Tastatur"],
-		["Laufen, Zuspiel-Richtung, Aufschlagziel, Block", "linker Stick", "WASD / Pfeiltasten"],
-		["Baggern (halten, im richtigen Moment loslassen)", "A", "Leertaste"],
-		["Pritschen (halten, loslassen), Commit-Block", "X", "Q"],
-		["Zuspiel: Richtung halten, zum Zuspielen loslassen", "Steuerkreuz", "–"],
-		["Schlagen (halten, beim Treffpunkt loslassen), Blocksprung", "R2", "E"],
-		["Trefferpunkt am Ball, zweiter Blocker", "rechter Stick", "Maus oder I J K L"],
-		["Annahme lenken: flach ans Netz / hoch und sicher (halten)", "RB / LB", "V / 1"],
-		["Hechten bei der Annahme", "B", "R"],
-		["Gefühlsschlag (mit R2), weicher Block", "LT", "Umschalt"],
-		["Aufschlag Stand / Sprung", "LB / RB", "1 / 2"],
+		["Dein Spieler: laufen, Anlauf, Block verschieben, Aufschlagziel", "linker Stick", "WASD / Pfeiltasten"],
+		["Wohin der Ball geht: Richtung und Treffpunkt, zweiter Blocker", "rechter Stick", "Maus oder I J K L"],
+		["Ball spielen: annehmen, zuspielen, sicher rüber, einfacher Aufschlag", "A", "Leertaste"],
+		["Bewusst pritschen", "X", "Q"],
+		["Zuspiel in eine Richtung (halten, loslassen)", "Steuerkreuz", "Maus"],
+		["Springen und schlagen: Aufschlag, Angriff (auch 2. Ball), Block", "R2", "E"],
+		["Gefühl: Roll-Shot, Leger, Dump, Flatteraufschlag, weicher Block", "LT (mit R2)", "Umschalt"],
+		["Schnell und flach: Annahme ans Netz, schnelles Zuspiel", "RB", "V"],
+		["Hoch und sicher: Annahme und Zuspiel", "LB", "1"],
+		["Hechten", "B", "R"],
+		["Spieler wechseln", "rechten Stick drücken", "Tab"],
 		["Trainerbank (vor dem Aufschlag)", "Y", "T"],
 		["Pause und Einstellungen", "Start", "Esc"],
 		["Laufhilfe / Zeitlupe / Zoom an oder aus", "Select / – / –", "F1 / F2 / F3"],
-		["Wiederholung überspringen", "A", "Leertaste"],
 	]
 	for i in rows.size():
 		for j in 3:
 			var col := UiTheme.ACCENT if i == 0 else (UiTheme.TEXT if j == 0 else UiTheme.MUTED)
 			grid.add_child(UiTheme.label(rows[i][j], 19 if i > 0 else 17, col))
 	box.add_child(grid)
-	box.add_child(UiTheme.label("Taste früh halten und loslassen, wenn sich der schrumpfende Ring mit dem weißen Ring deckt.\nMit Laufhilfe wird der weiße Ring grün, wenn Pritschen sicher geht, und orange, wenn du besser baggerst.\nWuchtschlag: Lass R2 los, wenn der Kraftbalken im goldenen Streifen steht, und triff perfekt (Angriff und Aufschlag).", 17, UiTheme.MUTED))
+	box.add_child(UiTheme.label("Jede Taste bedeutet überall dasselbe. Taste früh halten und im richtigen Moment loslassen.\nPerfekt spürst du am kurzen, harten Rumble und am hellen Ton, zu früh oder zu spät am dumpfen Doppel-Rumble.\nWuchtschlag: Lass R2 los, wenn der Kraftbalken im goldenen Streifen steht, und triff perfekt (Angriff und Aufschlag).", 17, UiTheme.MUTED))
 	_back = Button.new()
 	_back.text = "Zurück"
 	_back.custom_minimum_size = Vector2(200, 48)

@@ -64,10 +64,11 @@ func _ready() -> void:
 	_pad.anchor_right = 1.0
 	_pad.anchor_top = 1.0
 	_pad.anchor_bottom = 1.0
-	_pad.offset_left = -330.0
-	_pad.offset_right = -30.0
-	_pad.offset_top = -360.0
-	_pad.offset_bottom = -110.0
+	_pad.offset_left = -250.0
+	_pad.offset_right = -40.0
+	_pad.offset_top = -220.0
+	_pad.offset_bottom = -40.0
+	_pad.scale = Vector2(0.7, 0.7)
 	_pad.visible = false
 
 
@@ -269,7 +270,7 @@ func _build_replay() -> void:
 			bar.offset_top = -54.0
 		_replay.add_child(bar)
 	var tag := Label.new()
-	tag.text = "●  WIEDERHOLUNG"
+	tag.text = "●"
 	tag.add_theme_font_size_override("font_size", 24)
 	tag.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3))
 	tag.position = Vector2(24, 12)
@@ -317,31 +318,28 @@ func show_sub(team: int, team_name: String, what: String, in_txt: String, out_tx
 	sb.shadow_size = 10
 	sb.shadow_color = Color(0, 0, 0, 0.2)
 	sb.shadow_offset = Vector2(0, 4)
-	sb.content_margin_left = 10
-	sb.content_margin_right = 18
-	sb.content_margin_top = 9
-	sb.content_margin_bottom = 9
+	# Klein wie bei FIFA: Trikotfarbe, Nummer raus, Nummer rein. Kein Teamname, kein Spielername.
+	sb.content_margin_left = 6
+	sb.content_margin_right = 12
+	sb.content_margin_top = 4
+	sb.content_margin_bottom = 4
 	p.add_theme_stylebox_override("panel", sb)
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 12)
+	h.add_theme_constant_override("separation", 8)
 	p.add_child(h)
 	var chip := Panel.new()
-	chip.custom_minimum_size = Vector2(34, 34)
+	chip.custom_minimum_size = Vector2(16, 16)
 	chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	chip.add_theme_stylebox_override("panel", _round(Teams.playing()[team].jersey, 10))
+	chip.add_theme_stylebox_override("panel", _round(Teams.playing()[team].jersey, 5))
 	h.add_child(chip)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 0)
-	h.add_child(box)
-	box.add_child(_txt("%s  ·  %s" % [what, team_name], 13, UiTheme.INK_MUTED, UiTheme.font_medium))
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	box.add_child(row)
-	row.add_child(_txt(out_txt, 17, UiTheme.INK_MUTED, UiTheme.font_medium))
-	row.add_child(_txt("→", 17, UiTheme.INK_MUTED, UiTheme.font_medium))
-	row.add_child(_txt(in_txt, 17, UiTheme.INK))
+	var out_n := out_txt.get_slice(" ", 0)
+	var in_n := in_txt.get_slice(" ", 0)
+	h.add_child(_txt(out_n, 14, Color(0.75, 0.25, 0.2), UiTheme.font_medium))
+	h.add_child(_txt("→", 14, UiTheme.INK_MUTED, UiTheme.font_medium))
+	h.add_child(_txt(in_n, 14, Color(0.2, 0.55, 0.25)))
+	secs = minf(secs, 2.5)
 	_subs.add_child(p)
-	while _subs.get_child_count() > 4:
+	while _subs.get_child_count() > 2:
 		var old := _subs.get_child(0)
 		_subs.remove_child(old)
 		old.queue_free()
@@ -400,18 +398,31 @@ func update_view(m) -> void:
 	for t in 2:
 		var ts: TeamStyle = Teams.playing()[t]
 		(_chip[t] as Panel).add_theme_stylebox_override("panel", _round(ts.jersey, 9))
-		(_name[t] as Label).text = String(ts.name.split(" ")[-1])
+		(_name[t] as Label).text = String(ts.name.split(" ")[-1]).substr(0, 3).to_upper()
 		(_num[t] as Label).text = str(m.score[t])
 		(_serve[t] as Panel).modulate.a = 1.0 if m.serving_team == t else 0.0
 		var ds: Array = _setdots[t]
 		for i in ds.size():
 			(ds[i] as Panel).visible = i < m.cfg.sets_to_win
 			(ds[i] as Panel).add_theme_stylebox_override("panel", _round(UiTheme.INK if i < m.sets_won[t] else Color(0.85, 0.84, 0.81), 4))
-	_notice.text = m.notice if m.clock < m.notice_until else ""
+	# Wie bei FIFA: im Ballwechsel nur Spielstand und Ring. Aufstellung, Schiedsrichter-Karte,
+	# Hinweise und Meldungen nur zwischen den Punkten.
+	var in_play: bool = (m.phase == m.Phase.RALLY or m.phase == m.Phase.TOSS) and m.drill == null
+	_notice.text = m.notice if m.clock < m.notice_until and not in_play else ""
 	_hint.text = m.hint()
 	if not _attract:
 		_notice.visible = _notice.text != ""
 		_hint.visible = _hint.text != ""
+		# Kein Text im Spiel (Mattis, 05.11.2026): Testkarte, Schiedsrichter-Karte, Hinweise und
+		# Meldungen sind ganz weg. Der Schiedsrichter zeigt seine Zeichen nur noch in der Halle (3D).
+		_dev.visible = false
+		_ref.modulate.a = 0.0
+		_notice.visible = false
+		_hint.visible = false
+		_setchip.visible = false
+		_subs.visible = not in_play
+		if in_play and _banner.visible:
+			_banner.visible = false  # Einblendungen (Gegner, Auszeit) enden mit dem Pfiff
 	_info.text = "Stufe %s  ·  Laufhilfe %s  ·  Zeitlupe %s  ·  Zoom %s" % [
 		GameSettings.PRESET_TEXT[m.cfg.preset], "an" if m.assist else "aus", "an" if m.slowmo_on else "aus", "an" if m.zoom_on else "aus"]
 	_lineup.text = _lineup_text(m)
@@ -421,13 +432,11 @@ func update_view(m) -> void:
 		if (m.phase == m.Phase.PRE_SERVE or m.phase == m.Phase.TOSS) and m.human_serves() and not m.serve_done:
 			show = true
 			_pad.mode = "serve"
-			_pad.title = "Aufschlag: " + m.serve_style_text(m.serve_kind, m.serve_contact)
-		elif m.phase == m.Phase.RALLY and m.opp != null and not m.opp.done and m.opp.human and m.opp.kind == "attack":
+			_pad.title = ""
+		elif m.phase == m.Phase.RALLY and m.opp != null and not m.opp.done and m.opp.human and (m.opp.kind == "attack" or (m.opp.kind == "set" and m.charging)):
 			show = true
 			_pad.mode = "attack"
-			var names := {"spike": "Angriff", "topspin": "Topspin", "tip": "Leger", "cut": "Cut Shot", "blockout": "Block-Out"}
-			var info: Dictionary = m.attack_shot(m.opp.team, m.opp.point, m.rs, 0.8, m.opp.finesse)
-			_pad.title = "Angriff: " + names.get(info.style, TechNames.text(info.style) if TechNames.text(info.style) != "" else "Angriff")
+			_pad.title = ""
 	_pad.visible = show
 	if show:
 		_pad.contact = m.rs

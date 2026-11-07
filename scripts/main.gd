@@ -76,7 +76,17 @@ func _ready() -> void:
 	match_node.contact.connect(_on_contact)
 	match_node.own_block.connect(_on_own_block)
 	match_node.point_won.connect(_on_point)
+	# Spielzug angesagt: kurzes Doppel-Tippen im Controller statt einer Einblendung.
+	match_node.play_called.connect(func(_t: int, call: String):
+		if call != "":
+			_rumble(0.25, 0.0, 0.05)
+			get_tree().create_timer(0.09, true, false, true).timeout.connect(func(): _rumble(0.25, 0.0, 0.05))
+		else:
+			_rumble(0.2, 0.0, 0.12))
 	add_child(match_node)
+	var feedback = preload("res://scripts/touch_feedback.gd").new()
+	add_child(feedback)
+	feedback.setup(match_node, sfx, camera, _rumble)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--flow="):
 			add_child(load("res://tools/flow_probe.gd").new())  # Test: Fluss messen
@@ -197,6 +207,8 @@ func _process(delta: float) -> void:
 	# Nahansicht kurz halten, damit die Kamera nicht zwischen Angriff, Block und Uebersicht
 	# hin- und herspringt.
 	var mode: String = match_node.cam_mode if match_node else ""
+	var after_block: bool = match_node != null and match_node.phase == match_node.Phase.RALLY \
+		and match_node.clock - match_node.block_at < 2.2 and match_node.clock >= match_node.block_at
 	if preview_mode != "" and match_node:
 		mode = "replay" if preview_mode == "replay" else ("" if preview_mode == "view" else preview_mode)
 		subj = _preview_subject(preview_mode)
@@ -207,10 +219,16 @@ func _process(delta: float) -> void:
 		mode = ""
 		subj = null
 		_hold_left = 0.0
-	elif mode == "attack":
+	elif mode == "attack" and not after_block:
 		_hold_mode = mode
 		_hold_subj = subj
 		_hold_left = 0.7
+	elif after_block:
+		# Nach einem Block (eigener oder gegnerischer): sofort raus aus der Nahansicht, damit man
+		# sieht, wer den Ball abwehren kann.
+		mode = ""
+		subj = null
+		_hold_left = 0.0
 	elif mode == "" and _hold_left > 0.0 and is_instance_valid(_hold_subj) and match_node.phase == match_node.Phase.RALLY:
 		_hold_left -= rd
 		mode = _hold_mode
@@ -250,6 +268,11 @@ func _process(delta: float) -> void:
 				want_pos = p + Vector3(-s * 3.2, 2.1, 4.6)
 				want_look = p + Vector3(0.0, 1.15 + 0.5 * subj.jump_h, 0.0)
 				want_fov = 50.0
+	if after_block and mode == "" and preview_mode == "":
+		# Weiter weg und etwas hoeher: das ganze eigene Feld mit allen Abwehrspielern im Bild.
+		var k := clampf(1.0 - (match_node.clock - match_node.block_at - 1.6) / 0.6, 0.0, 1.0)
+		want_pos += Vector3(cs * 1.6, 1.0, 0.0) * k
+		want_fov += 4.0 * k
 	if cfg and mode != "free":
 		var key := "view" if (mode == "" or subj == null and mode != "replay") else mode
 		var res := _cam_tune(key, want_pos, want_look, want_fov, cfg)
@@ -265,6 +288,9 @@ func _process(delta: float) -> void:
 		w = 4.0
 	elif mode == "attack":
 		w = 4.0  # zuegig, aber weich in die Angriffsansicht, damit sie zum Schlag steht
+	elif after_block:
+		w = 3.8  # nach dem Block zuegig in die Weite
+		_was_close = false
 	elif _was_close:
 		w = 2.2  # nach Angriff oder Aufschlag langsam zurueck in die Uebersicht gleiten
 	if mode in ["attack", "serve"]:
@@ -587,16 +613,20 @@ func _setup_input() -> void:
 	_action("aim_right", [KEY_L], [], [[JOY_AXIS_RIGHT_X, 1.0]])
 	_action("aim_up", [KEY_I], [], [[JOY_AXIS_RIGHT_Y, -1.0]])
 	_action("aim_down", [KEY_K], [], [[JOY_AXIS_RIGHT_Y, 1.0]])
+	# Tastenplan "aus einem Guss": jede Taste ist ein Verb und bedeutet ueberall dasselbe.
+	# A = Ball spielen (Technik waehlt das Spiel), X = bewusst pritschen, B = hechten,
+	# R2 = springen und schlagen, L2 = Gefuehl, R1 = schnell und flach, L1 = hoch und sicher,
+	# R3 = Spieler wechseln.
 	_action("bump", [KEY_SPACE, KEY_ENTER], [JOY_BUTTON_A])
 	_action("overhand", [KEY_Q], [JOY_BUTTON_X])
-	_action("set_dump", [KEY_V], [JOY_BUTTON_RIGHT_SHOULDER])
-	_action("set_fast", [KEY_R], [JOY_BUTTON_B])
-	_action("set_quick", [KEY_F], [JOY_BUTTON_Y])
+	_action("set_dump", [KEY_V], [JOY_BUTTON_RIGHT_SHOULDER])  # R1: schnell und flach
+	_action("set_fast", [KEY_R], [JOY_BUTTON_B])  # B: hechten
 	_action("hit", [KEY_E], [], [[JOY_AXIS_TRIGGER_RIGHT, 1.0]])
-	# L2 = Gefuehlstaste (Roll-Shot, tiefe Ecke, Luecke), Tastatur: Umschalt
+	# L2 = Gefuehlstaste (Roll-Shot, tiefe Ecke, Luecke, Dump, Flatteraufschlag), Tastatur: Umschalt
 	_action("finesse", [KEY_SHIFT], [], [[JOY_AXIS_TRIGGER_LEFT, 1.0]])
-	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])
-	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])
+	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])  # L1: hoch und sicher (Menues: Seite zurueck)
+	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])  # nur Menues: Seite vor
+	_action("switch_player", [KEY_TAB], [JOY_BUTTON_RIGHT_STICK])
 	_action("toggle_assist", [KEY_F1], [JOY_BUTTON_BACK])
 	_action("toggle_slowmo", [KEY_F2], [])
 	_action("toggle_zoom", [KEY_F3], [])

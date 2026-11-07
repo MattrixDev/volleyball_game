@@ -4,6 +4,9 @@
 class_name PlayerCard
 extends Button
 
+## Farben der PlayStyle-Gruppen: Aufschlag, Annahme, Zuspiel, Angriff, Block, Koerper.
+const STYLE_COL := [Color(0.85, 0.36, 0.3), Color(0.25, 0.6, 0.45), Color(0.3, 0.48, 0.8), Color(0.8, 0.45, 0.15), Color(0.45, 0.4, 0.75), Color(0.4, 0.42, 0.46)]
+
 const TIER_TOP := [Color(0.72, 0.52, 0.36), Color(0.82, 0.83, 0.85), Color(0.89, 0.76, 0.42)]
 const TIER_BOTTOM := [Color(0.55, 0.38, 0.25), Color(0.62, 0.64, 0.68), Color(0.7, 0.55, 0.22)]
 const TIER_INK := [Color(0.18, 0.1, 0.05), Color(0.12, 0.13, 0.16), Color(0.2, 0.13, 0.02)]
@@ -114,17 +117,32 @@ func _draw() -> void:
 		var v := int(pd.get(STATS[i][0]))
 		_text(str(v), Vector2(x, y), int(14 * k), lo, fd)
 		_text(STATS[i][1], Vector2(x + 26 * k, y), int(12 * k), Color(lo, 0.8), fm)
-	if pd.traits.size() > 0:
-		var tr: Array = []
-		for t in pd.traits:
-			if t != "linkshaender":
-				tr.append(PlayerData.TRAITS.get(t, t))
-		if not tr.is_empty():
-			var tt := " · ".join(tr)
-			var tfs := int(11 * k)
-			while tfs > 7 and fsb.get_string_size(tt, HORIZONTAL_ALIGNMENT_LEFT, -1, tfs).x > s.x - 12 * k:
-				tfs -= 1
-			_text(tt, Vector2(0, s.y - 10 * k), tfs, lo, fsb, HORIZONTAL_ALIGNMENT_CENTER, s.x)
+	# PlayStyles als kleine Plaketten (Farbe = Gruppe, Plus in Gold).
+	var st := pd.styles()
+	if not st.is_empty():
+		var tfs := int(10.5 * k)
+		var labels: Array = []
+		var wsum := 0.0
+		for id in st:
+			var tx := PlayStyles.short_of(id, st[id])
+			var tw := fsb.get_string_size(tx, HORIZONTAL_ALIGNMENT_LEFT, -1, tfs).x + 10 * k
+			labels.append([id, tx, tw])
+			wsum += tw + 4 * k
+		while tfs > 6 and wsum > s.x - 8 * k:
+			tfs -= 1
+			wsum = 0.0
+			for lb in labels:
+				lb[2] = fsb.get_string_size(lb[1], HORIZONTAL_ALIGNMENT_LEFT, -1, tfs).x + 10 * k
+				wsum += lb[2] + 4 * k
+		var x0 := (s.x - wsum + 4 * k) * 0.5
+		var ph := tfs + 6 * k
+		var py := s.y - ph - 5 * k
+		for lb in labels:
+			var plus: bool = int(st[lb[0]]) >= 2
+			var gc: Color = STYLE_COL[PlayStyles.group_of(lb[0])]
+			draw_style_box(_box(Color(0.95, 0.78, 0.3) if plus else Color(gc, 0.9), ph * 0.5), Rect2(Vector2(x0, py), Vector2(lb[2], ph)))
+			_text(lb[1], Vector2(x0, py + ph * 0.5 + tfs * 0.36), tfs, Color(0.08, 0.08, 0.1) if plus else Color(1, 1, 1), fsb, HORIZONTAL_ALIGNMENT_CENTER, lb[2])
+			x0 += lb[2] + 4 * k
 	if locked or dim:
 		draw_style_box(_box(Color(UiTheme.PAPER, 0.62 if locked else 0.5), r), Rect2(Vector2.ZERO, s))
 	if locked and note != "":

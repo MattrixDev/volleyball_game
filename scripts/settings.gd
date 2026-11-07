@@ -50,6 +50,7 @@ const ASSIST_AREAS := [
 	["dive", "Hechten", "Assistiert: das Spiel hechtet von selbst, wenn du sonst nicht hinkommst, B hechtet zusätzlich von Hand. Manuell: nur B hechtet, ohne B bleibst du stehen und bist schneller wieder im Spiel."],
 	["attack_aim", "Angriff zielen", "Assistiert: wer nur gut trifft, schlägt trotzdem in die Ecken, die der Stick zeigt. Manuell: nur ein sauber getroffener Ball (R2 genau am höchsten Punkt) erreicht die scharfen Winkel, dafür sind Linie und scharfe Diagonale noch etwas schärfer."],
 	["approach", "Anlauf", "Assistiert: der Angreifer läuft von selbst an. Manuell: der linke Stick steuert den Anlauf (außen, eng, verzögern)."],
+	["timing_bar", "Timing-Strich", "Assistiert: nach jedem Kontakt zeigt ein kleiner Strich unter deinem Spieler eine halbe Sekunde lang, ob du zu früh (links) oder zu spät (rechts) warst. Manuell: kein Strich, nur Rumble, Ton und Ballflug."],
 	["set_aim", "Zuspiel-Feinsteuerung", "Assistiert: das Zuspiel geht an die übliche Stelle. Manuell: der rechte Stick schiebt den Ball näher ans Netz oder weiter weg."],
 ]
 

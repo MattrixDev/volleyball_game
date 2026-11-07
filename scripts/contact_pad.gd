@@ -1,5 +1,6 @@
 extends Control
-## Zeigt den Ball gross mit dem Trefferpunkt (rechter Stick) und daneben die Kraftanzeige.
+## Zeigt den Ball mit dem Trefferpunkt (rechter Stick) und daneben die Kraftanzeige. Ohne Text
+## und ohne Kasten (wie die Schussanzeige bei FIFA).
 
 var contact := Vector2.ZERO  # y + = oben
 var charge := 0.0
@@ -23,10 +24,7 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
-	var font := ThemeDB.fallback_font
 	var c := Vector2(110, 130)
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.35))
-	draw_string(font, Vector2(12, 26), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1))
 
 	# Ball mit Zonen
 	draw_circle(c, RADIUS, Color(1.0, 0.92, 0.45))
@@ -35,12 +33,6 @@ func _draw() -> void:
 	draw_line(c + Vector2(-RADIUS * 0.94, -band), c + Vector2(RADIUS * 0.94, -band), Color(0, 0, 0, 0.35), 2.0)
 	draw_line(c + Vector2(-RADIUS * 0.94, band), c + Vector2(RADIUS * 0.94, band), Color(0, 0, 0, 0.35), 2.0)
 	draw_arc(c, RADIUS * 0.85, 0, TAU, 64, Color(0, 0, 0, 0.18), 2.0)
-	var top_txt := "Topspin"
-	var mid_txt := "flach" if mode == "attack" else "Flatter"
-	var low_txt := "Leger" if mode == "attack" else "kurz"
-	_label(font, c + Vector2(0, -RADIUS * 0.6), top_txt)
-	_label(font, c + Vector2(0, 5), mid_txt)
-	_label(font, c + Vector2(0, RADIUS * 0.68), low_txt)
 
 	# Trefferpunkt
 	var p := c + Vector2(contact.x, -contact.y) * RADIUS * 0.92
@@ -77,7 +69,6 @@ func _draw() -> void:
 	if charging or charge > 0.0:
 		draw_rect(Rect2(bx + 4 + wobble, by + bh - h, bw - 8, h), fill_col)
 	draw_rect(Rect2(bx, by, bw, bh), Color(1, 1, 1, 0.8), false, 2.0)
-	draw_string(font, Vector2(bx - 6, by + bh + 24), "Kraft", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1))
 
 
 func _label(font: Font, pos: Vector2, txt: String) -> void:

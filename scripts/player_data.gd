@@ -48,8 +48,30 @@ func full_name() -> String:
 	return "%s %s" % [first_name, last_name]
 
 
+## Eigenschaft oder PlayStyle (siehe play_styles.gd).
 func has_trait(t: String) -> bool:
-	return traits.has(t)
+	return traits.has(t) or style(t) > 0
+
+
+var _styles = null
+var extra_styles := {}  ## in "Mein Verein" dazugelernt: {id: Stufe} (spaeter aus dem Spielstand)
+
+
+## PlayStyles des Spielers: {id: Stufe 1 oder 2 (Plus)}.
+func styles() -> Dictionary:
+	if _styles == null:
+		_styles = PlayStyles.assign(self)
+	var res: Dictionary = _styles.duplicate()
+	for k in extra_styles:
+		res[k] = maxi(int(res.get(k, 0)), int(extra_styles[k]))
+	return res
+
+
+## Stufe eines PlayStyles: 0 = hat ihn nicht, 1 = PlayStyle, 2 = PlayStyle+.
+func style(id: String) -> int:
+	if _styles == null:
+		_styles = PlayStyles.assign(self)
+	return maxi(int(_styles.get(id, 0)), int(extra_styles.get(id, 0)))
 
 
 ## Abweichung einer Staerke vom normalen Spieler: 50 -> -1, 70 -> 0, 90 -> +1 (begrenzt auf -1,5 .. +1,4).
@@ -60,12 +82,12 @@ func f(key: String) -> float:
 ## So viel hoeher (m) als ein Spieler mit 1,95 m reicht er im Stand mit gestrecktem Arm.
 ## Die Reichweite im Stand ist bei Volleyballern etwa das 1,33-Fache der Koerpergroesse.
 func reach_add() -> float:
-	return (height_m - REF_HEIGHT) * 1.33 + (0.06 if has_trait("lange_arme") else 0.0)
+	return (height_m - REF_HEIGHT) * 1.33 + 0.06 * style("lange_arme")
 
 
 ## Sprunghoehe (m) beim Angriff und Block.
 func jump_h() -> float:
-	return REF_JUMP_H + 0.004 * float(jump - 70) + (0.05 if has_trait("sprungwunder") else 0.0)
+	return REF_JUMP_H + 0.004 * float(jump - 70) + 0.05 * style("sprungwunder")
 
 
 ## Absprunggeschwindigkeit (m/s) fuer diese Sprunghoehe.
@@ -93,6 +115,9 @@ func overall() -> int:
 ## Kurzbeschreibung fuer Listen: "2,04 m · Mittelblocker 78 · Lange Arme".
 func summary() -> String:
 	var t := "%s m · %d" % [("%.2f" % height_m).replace(".", ","), overall()]
-	for tr in traits:
-		t += " · " + str(TRAITS.get(tr, tr))
+	if has_trait("linkshaender"):
+		t += " · Linkshänder"
+	var st := styles()
+	for id in st:
+		t += " · " + PlayStyles.name_of(id, st[id])
 	return t
