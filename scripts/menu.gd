@@ -33,15 +33,17 @@ var _title_btn: Button
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	theme = UiTheme.get_theme()
+	theme = UiTheme.get_light_theme()
 	visible = false
 	var shade := ColorRect.new()
-	shade.color = Color(0.02, 0.03, 0.06, 0.72)
+	shade.color = Color(0.05, 0.06, 0.09, 0.55)
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(shade)
 
 	var panel := PanelContainer.new()
-	var sb := UiTheme.box(UiTheme.BG, 16, Color(1, 1, 1, 0.06), 1)
+	var sb := UiTheme.box(UiTheme.PAPER, 28)
+	sb.shadow_color = Color(0, 0, 0, 0.35)
+	sb.shadow_size = 24
 	sb.set_content_margin_all(26)
 	panel.add_theme_stylebox_override("panel", sb)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -59,9 +61,10 @@ func _ready() -> void:
 	head.add_theme_constant_override("separation", 14)
 	var tbox := VBoxContainer.new()
 	tbox.add_theme_constant_override("separation", 0)
-	_title = UiTheme.label("Pause", 38)
+	_title = UiTheme.label("Pause", 38, UiTheme.INK)
+	_title.add_theme_font_override("font", UiTheme.font_display)
 	tbox.add_child(_title)
-	_score = UiTheme.label("", 18, UiTheme.MUTED)
+	_score = UiTheme.label("", 18, UiTheme.INK_MUTED)
 	tbox.add_child(_score)
 	tbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(tbox)
@@ -80,13 +83,13 @@ func _ready() -> void:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 14)
 	box.add_child(top)
-	var diff := UiTheme.card()
+	var diff := UiTheme.card_light()
 	diff.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(diff)
 	var dbox := VBoxContainer.new()
 	dbox.add_theme_constant_override("separation", 10)
 	diff.add_child(dbox)
-	dbox.add_child(UiTheme.heading("Schwierigkeit"))
+	dbox.add_child(UiTheme.heading_light("Schwierigkeit"))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	for p in ["leicht", "normal", "profi"]:
@@ -95,7 +98,7 @@ func _ready() -> void:
 		row.add_child(b)
 		_preset_buttons[p] = b
 	dbox.add_child(row)
-	dbox.add_child(UiTheme.label("Wiederholung starker Punkte", 16, UiTheme.MUTED))
+	dbox.add_child(UiTheme.label("Wiederholung starker Punkte", 16, UiTheme.INK_MUTED))
 	var rrow := HBoxContainer.new()
 	rrow.add_theme_constant_override("separation", 10)
 	for v in [true, false]:
@@ -105,13 +108,13 @@ func _ready() -> void:
 		_replay_buttons[v] = b
 	dbox.add_child(rrow)
 
-	var rules := UiTheme.card()
+	var rules := UiTheme.card_light()
 	rules.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(rules)
 	var rbox := VBoxContainer.new()
 	rbox.add_theme_constant_override("separation", 10)
 	rules.add_child(rbox)
-	rbox.add_child(UiTheme.heading("Spiel (Länge gilt ab dem nächsten Spiel)"))
+	rbox.add_child(UiTheme.heading_light("Spiel (Länge gilt ab dem nächsten Spiel)"))
 	var rule_row := HBoxContainer.new()
 	rule_row.add_theme_constant_override("separation", 10)
 	for n in [1, 2, 3]:
@@ -120,7 +123,7 @@ func _ready() -> void:
 		rule_row.add_child(b)
 		_set_buttons[n] = b
 	rbox.add_child(rule_row)
-	rbox.add_child(UiTheme.label("Libero-Wechsel", 16, UiTheme.MUTED))
+	rbox.add_child(UiTheme.label("Libero-Wechsel", 16, UiTheme.INK_MUTED))
 	var lib_row := HBoxContainer.new()
 	lib_row.add_theme_constant_override("separation", 10)
 	for v in [false, true]:
@@ -135,14 +138,20 @@ func _ready() -> void:
 	cols.add_theme_constant_override("separation", 14)
 	box.add_child(cols)
 	for c in 2:
-		var cardc := UiTheme.card()
+		var cardc := UiTheme.card_light()
 		cardc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cols.add_child(cardc)
 		var cbox := VBoxContainer.new()
 		cbox.add_theme_constant_override("separation", 6)
 		cardc.add_child(cbox)
+		var first := true
 		for g in [GROUPS[c * 2], GROUPS[c * 2 + 1]]:
-			cbox.add_child(UiTheme.heading(g[0]))
+			if not first:
+				var sp := Control.new()
+				sp.custom_minimum_size = Vector2(0, 12)
+				cbox.add_child(sp)
+			first = false
+			cbox.add_child(UiTheme.heading_light(g[0]))
 			var grid := GridContainer.new()
 			grid.columns = 3
 			grid.add_theme_constant_override("h_separation", 14)
@@ -151,11 +160,11 @@ func _ready() -> void:
 				_add_slider(grid, _slider_def(key))
 			cbox.add_child(grid)
 
-	_help = UiTheme.label("", 18, UiTheme.ACCENT)
+	_help = UiTheme.label("", 18, UiTheme.NAVY)
 	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_help.custom_minimum_size = Vector2(0, 48)
 	box.add_child(_help)
-	box.add_child(UiTheme.label("Steuerkreuz / linker Stick / Pfeiltasten zum Wählen, A / Enter wählt aus, links/rechts verstellt Regler", 15, UiTheme.MUTED))
+	box.add_child(UiTheme.label("Steuerkreuz / linker Stick / Pfeiltasten zum Wählen, A / Enter wählt aus, links/rechts verstellt Regler", 15, UiTheme.INK_MUTED))
 
 
 func _slider_def(key: String) -> Array:
@@ -167,7 +176,7 @@ func _slider_def(key: String) -> Array:
 
 func _add_slider(grid: GridContainer, s: Array) -> void:
 	var key: String = s[0]
-	var l := UiTheme.label(s[1], 18)
+	var l := UiTheme.label(s[1], 18, UiTheme.INK)
 	l.custom_minimum_size = Vector2(270, 0)
 	grid.add_child(l)
 	var sl := HSlider.new()
@@ -180,7 +189,7 @@ func _add_slider(grid: GridContainer, s: Array) -> void:
 	sl.focus_entered.connect(_show_help.bind(s[6]))
 	grid.add_child(sl)
 	_sliders[key] = sl
-	var vl := UiTheme.label("", 18, UiTheme.MUTED)
+	var vl := UiTheme.label("", 18, UiTheme.INK_MUTED)
 	vl.custom_minimum_size = Vector2(150, 0)
 	grid.add_child(vl)
 	_value_labels[key] = vl
