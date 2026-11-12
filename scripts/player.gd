@@ -182,13 +182,19 @@ func _body_scale(h: int) -> float:
 
 ## Schlaghand: "r", bei Linkshaendern "l".
 func hit_side() -> String:
-	return "l" if left_handed else "r"
+	return "l" if _lefty() else "r"
+
+
+## Schlaegt dieser Spieler gerade mit links? Linkshaender, oder ein Rechtshaender beim Angriff mit
+## der Schwachhand (anim_style "offhand", 5-Sterne-Move) und umgekehrt.
+func _lefty() -> bool:
+	return left_handed != (anim_kind == "attack" and _astyle() == "offhand")
 
 
 ## Pose spiegeln (links und rechts tauschen, Drehung um Hoch- und Laengsachse umkehren):
 ## so schlaegt ein Linkshaender dieselbe Technik mit links.
 func _mirror(p: Dictionary) -> Dictionary:
-	if not left_handed:
+	if not _lefty():
 		return p
 	var out := {}
 	for k in p:
@@ -580,6 +586,8 @@ func _animate(delta: float) -> void:
 	if anim_kind == "serve" and anim_tech == "stand" and not airborne:
 		var rs := now - anim_t
 		_toe = TOE_RISE * smoothstep(-0.22, -0.03, rs) * (1.0 - smoothstep(0.06, 0.28, rs))
+		if _skyball():
+			_toe = TOE_RISE * 1.3 * smoothstep(-0.05, 0.12, rs) * (1.0 - smoothstep(0.3, 0.55, rs))
 		fig.root_node.position.y += _toe
 		fig._sync()
 	elif anim_kind in ["set", "pass", "free"] and _tech() == "over" and contact_on and not airborne:
@@ -980,7 +988,22 @@ func _contact_ik() -> void:
 	else:
 		_aim_s = _aim_s.lerp(aim_h, 0.12).normalized()
 	aim_h = _aim_s
-	if block_pose and airborne:
+	if _astyle() == "joust" and airborne and not block_pose and not "varianten" in _off:
+		# Netzkampf: beide Haende zusammen am Ball direkt ueber der Netzkante, drueckt zur Gegenseite.
+		var jt := Vector3(net_x - side * 0.05, block_top() - 0.12, position.z)
+		if ball_node != null and is_instance_valid(ball_node) and ball_node.global_position.distance_to(jt) < 1.2:
+			jt = jt.lerp(ball_node.global_position, 0.6)  # zum Ball greifen, solange er noch umkaempft ist
+		# Steht er weiter weg vom Netz, gehen die Arme nach oben statt waagerecht nach vorn.
+		var sc := ((fig.j["sh_l"] as Node3D).global_position + (fig.j["sh_r"] as Node3D).global_position) * 0.5
+		var hz := Vector3(jt.x - sc.x, 0.0, jt.z - sc.z)
+		if hz.length() > 0.35:
+			jt = Vector3(sc.x, jt.y, sc.z) + hz.normalized() * 0.35
+		jt.y = maxf(jt.y, sc.y + 0.5)
+		tg = {"l": jt - r * 0.09, "r": jt + r * 0.09}
+		w = smoothstep(0.05, 0.3, jump_h)
+		var push := -side * Vector3.RIGHT
+		hands = {"l": [up, push], "r": [up, push]}
+	elif block_pose and airborne:
 		# Haende ueber das Netz gedrueckt, Handflaechen zeigen zum Gegner, Finger gespreizt nach oben.
 		var net_side := -side
 		var bst := _astyle()
@@ -997,7 +1020,8 @@ func _contact_ik() -> void:
 		var opp_dir := Vector3(net_side, 0.0, 0.0)
 		var palm := opp_dir if bst != "soft" else (opp_dir + up * 0.9).normalized()
 		hands = {"l": [up - r * 0.25 + opp_dir * 0.2, palm], "r": [up + r * 0.25 + opp_dir * 0.2, palm]}
-	elif not contact_on and anim_kind != "serve":
+	elif not contact_on and anim_kind != "serve" and not (anim_kind == "attack" and airborne and not "varianten" in _off):
+		# (Taeuscher im Sprung: Ausholen und angedeuteter Schlag laufen ueber den Angriffszweig unten.)
 		return
 	elif anim_kind in ["pass", "dig", "free", "set"] and _tech() != "over":
 		# Baggern: gestreckte Arme, Plattform aus beiden Unterarmen unter dem Ball.
@@ -1087,7 +1111,9 @@ func _contact_ik() -> void:
 		var palm := palm0.lerp(push, smoothstep(0.0, 0.2, rel)).normalized()
 		var fing := (up - palm * up.dot(palm)).normalized()
 		hands = {"l": [fing - r * 0.08, palm], "r": [fing + r * 0.08, palm]}
-	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne):
+	elif (anim_kind == "attack" and (airborne or rel > -0.5)) or (anim_kind == "serve" and airborne) \
+			or (anim_kind == "serve" and anim_tech == "stand" and rel > -0.5 and not "video" in _off and not _skyball()):
+		# (Standaufschlag mit Video-Bewegung: dieselbe Bogenspannung und derselbe Armzug im Stand.)
 		# Angriff wie im Volleyball (Bogenspannung): der Ellbogen holt hoch und weit nach hinten aus,
 		# die Hand liegt hinter dem Kopf auf Ohrhoehe, die Schlagschulter dreht zurueck und der
 		# Oberkoerper spannt sich. Dann fuehrt der Ellbogen nach vorn oben, der Unterarm peitscht
@@ -1096,15 +1122,37 @@ func _contact_ik() -> void:
 		# Linkshaender: dieselbe Technik gespiegelt (Schlagseite hs, r zeigt zur Schlagseite).
 		var hs := hit_side()
 		var os := "r" if hs == "l" else "l"
-		var mir := -1.0 if left_handed else 1.0
+		var mir := -1.0 if _lefty() else 1.0
 		r *= mir
 		var wt := smoothstep(-0.55, -0.35, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
 		var twist := lerpf(-0.5, 0.35, smoothstep(-0.18, 0.1, rel))
 		var arch := 0.2 * (1.0 - smoothstep(-0.12, 0.0, rel)) - 0.3 * smoothstep(0.0, 0.15, rel)
+		if anim_kind in ["attack", "serve"] and not "video" in _off:
+			# Kraeftiger ausholen (Mattis): Schlagschulter weiter zurueck, staerkeres Hohlkreuz, dann
+			# schnelles Durchdrehen kurz vor dem Treffpunkt.
+			var ts := SERVE_EARLY if anim_kind == "serve" and not "glatt" in _off else 0.0
+			twist = lerpf(-0.9, 0.45, smoothstep(-0.1 + ts, 0.06 + ts, rel))
+			arch = 0.38 * (1.0 - smoothstep(-0.08 + ts, ts, rel)) - 0.35 * smoothstep(ts, 0.15 + ts, rel)
+		var st5 := _astyle() if anim_kind == "attack" and not "varianten" in _off else ""
+		if st5 == "offhand":
+			# Schwachhand: kleinere Bogenspannung und weniger Rumpfdrehung, der Schlag wirkt
+			# vorsichtiger (wie bei echten Spielern mit der schwaecheren Hand).
+			twist *= 0.6
+			arch *= 0.6
+		elif st5 == "cutback":
+			# Dreh-Schlag: der Rumpf dreht kaum durch, die Drehung kommt aus Arm und Handgelenk.
+			twist = lerpf(twist, -0.3, smoothstep(-0.02, 0.12, rel))
 		var ch: Node3D = fig.j["chest"]
 		ch.quaternion = ch.quaternion * Quaternion(Vector3.UP, twist * wt * mir) * Quaternion(Vector3.RIGHT, arch * wt)
 		fig._sync()
 		var hit := b - up * 0.07 - f * 0.17
+		# Dreh-Schlag: zur eigenen Anlaufseite (woher er kam, entlang des Netzes)
+		var aside := Vector3(0.0, 0.0, -signf(_pre_v.z)) if absf(_pre_v.z) > 0.3 else r
+		if st5 == "cutback":
+			hit -= aside * 0.07  # Hand trifft den Ball auf der anderen Seite und schneidet ihn zurueck
+		if _attack_kind() == "decoy" and not "varianten" in _off:
+			# Taeuscher: kein Ball, der Arm zieht nur halb durch (vor dem Kopf, nicht ganz gestreckt).
+			hit = (fig.j["sh_" + hs] as Node3D).global_position + up * 0.42 + f * 0.25 + r * 0.06
 		# Treffen mit ganz gestrecktem Arm: liegt der Treffpunkt naeher an der Schulter als eine
 		# Armlaenge, sinkt der Koerper im Kontaktmoment etwas ab, liegt er weiter weg, streckt er sich.
 		if airborne:
@@ -1112,25 +1160,58 @@ func _contact_ik() -> void:
 			var need := (hit - (fig.j["sh_" + hs] as Node3D).global_position).length() - ARM_HIT_LEN * fig.root_node.scale.x / 1.075
 			fig.root_node.position.y += clampf(need, -0.2, 0.14) * ext
 			fig._sync()
+		elif anim_kind == "serve" and not "video" in _off:
+			# Standaufschlag: liegt der Ball hoeher, als der gestreckte Arm im Stand reicht, macht der
+			# Aufschlaeger einen kleinen Hopser (wie beim Flatteraufschlag im Video), statt daneben zu greifen.
+			var hop := smoothstep(-0.3, -0.12, rel) * (1.0 - smoothstep(SERVE_HOLD, SERVE_HOLD + 0.2, rel))
+			var shp := (fig.j["sh_" + hs] as Node3D).global_position
+			var need := (hit.y - shp.y) - sqrt(maxf(pow(ARM_HIT_LEN * fig.root_node.scale.x / 1.075, 2.0) - pow(Vector2(hit.x - shp.x, hit.z - shp.z).length(), 2.0), 0.0))
+			fig.root_node.position.y += clampf(need, 0.0, 0.32) * hop
+			fig._sync()
 		var sh_r: Vector3 = fig.j["sh_" + hs].global_position
 		var sh_l: Vector3 = fig.j["sh_" + os].global_position
 		var chest: Vector3 = fig.j["chest"].global_position
 		# Ausholen: Oberarm seitlich und zurueck, Ellbogen etwa auf Schulterhoehe, Hand hinter dem Kopf.
 		var cock := sh_r + up * 0.3 - f * 0.1 + r * 0.08
 		var cock_el := sh_r + up * 0.12 + r * 0.45 - f * 0.25
+		if anim_kind in ["attack", "serve"] and not "video" in _off:
+			# Bogenspannung wie im Video: Hand hinter dem Kopf etwa auf Ohrhoehe, Ellbogen hoch und
+			# weit nach hinten aussen.
+			cock = sh_r + up * 0.12 - f * 0.34 + r * 0.14
+			cock_el = sh_r + up * 0.08 + r * 0.55 - f * 0.4
 		var lead_el := sh_r + up * 0.45 + r * 0.15 + f * 0.2
 		var over := sh_r + up * 0.32 + r * 0.06 + f * 0.04
 		# Nachschwung mit fast gestrecktem Arm: schraeg nach vorn unten in Schlagrichtung, dann tief
 		# quer vor den Koerper zur linken Huefte (Ziele auf Armlaenge, damit der Ellbogen nicht hochklappt).
 		var thru := sh_r + (aim_h * 0.6 + f * 0.2 - r * 0.1 - up * 0.8).normalized() * 0.45
 		var cross := sh_r + (f * 0.5 - r * 0.45 - up * 0.9).normalized() * 0.45
+		if st5 == "offhand":
+			cock = cock.lerp(sh_r + up * 0.3 - f * 0.12 + r * 0.06, 0.4)
+		elif st5 == "cutback":
+			# Der Arm zieht ueber den Kopf scharf zur Anlaufseite zurueck statt nach unten quer.
+			thru = sh_r + (up * 0.55 + f * 0.25 + aside * 0.6).normalized() * 0.45
+			cross = sh_r + (up * 0.15 + aside * 0.95 - f * 0.05).normalized() * 0.45
 		var hand := cock
 		pole_w = 1.0
 		poles[hs] = cock_el
-		if rel >= -0.2 and rel < 0.0:
-			var sw := smoothstep(-0.2, -0.01, rel)
+		# Mit Video-Bewegung bleibt die Bogenspannung bis kurz vor dem Treffpunkt, dann peitscht der
+		# Arm in gut 0,1 s durch (wie im Video), statt lange ueber dem Kopf nach vorn zu wandern.
+		var sw0 := -0.12 if anim_kind in ["attack", "serve"] and not "video" in _off else -0.2
+		if anim_kind == "serve" and not "video" in _off and not "glatt" in _off:
+			sw0 = SERVE_EARLY - 0.12
+		var smooth_whip := anim_kind in ["attack", "serve"] and not "glatt" in _off
+		if rel >= sw0 and rel < 0.0:
+			var sw := smoothstep(sw0, -0.01, rel)
 			# Hand bleibt zurueck (peitscht spaet), der Ellbogen fuehrt
 			var t := pow(sw, 1.5)
+			if smooth_whip:
+				# Schneller werdend bis in den Treffpunkt (kein Abbremsen vor dem Ball): der Arm
+				# kommt mit voller Geschwindigkeit durch den Kontakt, das vermeidet den Ruck danach.
+				# Aufschlag: der Ball wird oft etwas frueher getroffen (Zeitfehler bis etwa -0,1 s),
+				# daher ist die Hand schon bei SERVE_EARLY am Ball und folgt ihm bis zum Schlag.
+				var t_end := SERVE_EARLY if anim_kind == "serve" else 0.0
+				var lin := clampf((rel - sw0) / (t_end - sw0), 0.0, 1.0)
+				t = lin * lin * (1.6 - 0.6 * lin)
 			hand = cock * (1.0 - t) * (1.0 - t) + over * 2.0 * (1.0 - t) * t + hit * t * t
 			poles[hs] = cock_el.lerp(lead_el, smoothstep(0.0, 0.55, sw))
 		elif rel >= 0.0:
@@ -1138,14 +1219,44 @@ func _contact_ik() -> void:
 			poles[hs] = lead_el.lerp(sh_r + r * 0.4 - up * 0.25 + f * 0.1, smoothstep(0.0, 0.12, rel))
 			# Richtung um die Schulter drehen (Bogen auf Armlaenge), nicht quer durch den Raum mischen
 			var hd := (hit - sh_r).normalized()
-			if rel < 0.07:
+			var rad := 0.45
+			# Aufschlag: der Ball wird oft etwas spaeter getroffen (Zeitfehler), die Hand bleibt dann
+			# noch am Ball (contact_pt folgt dem fallenden Ball), erst danach kommt der Nachschwung.
+			var rr := rel
+			if smooth_whip and anim_kind == "serve":
+				rr = maxf(rel - SERVE_HOLD, 0.0)
+			if smooth_whip and anim_kind == "serve" and rel < SERVE_HOLD:
+				hd = (hit - sh_r).normalized()
+				rad = (hit - sh_r).length()
+			elif smooth_whip:
+				# Nachschwung startet mit Schwung (ohne Halt im Treffpunkt) und auf der Armlaenge des
+				# Treffpunkts, die erst allmaehlich auf 0,45 m zurueckgeht (sonst springt das Ziel).
+				var rel0 := rel
+				rel = rr
+				var k := clampf(rel / 0.18, 0.0, 1.0)
+				k = 1.0 - (1.0 - k) * (1.0 - k)
+				if anim_kind == "serve":
+					# Nach dem Halten am Ball weich anlaufen (die Hand stand still).
+					k = smoothstep(0.0, 1.0, clampf(rel / 0.24, 0.0, 1.0))
+				var td := (thru - sh_r).normalized()
+				var cd := (cross - sh_r).normalized()
+				hd = hd.slerp(td, clampf(k / 0.45, 0.0, 1.0)) if k < 0.45 else td.slerp(cd, (k - 0.45) / 0.55)
+				rad = lerpf((hit - sh_r).length(), 0.45, smoothstep(0.0, 0.12, rel))
+				rel = rel0
+			elif rel < 0.07:
 				hd = hd.slerp((thru - sh_r).normalized(), smoothstep(0.0, 0.07, rel))
 			else:
 				hd = (thru - sh_r).normalized().slerp((cross - sh_r).normalized(), smoothstep(0.07, 0.18, rel))
-			hand = sh_r + hd * 0.45
+			hand = sh_r + hd * rad
 		tg = {hs: hand}
-		w = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.3, 0.45, rel))
-		if not airborne:
+		# Mit dem Video-Angriff kommt das Ausholen (Bogenspannung) aus dem Clip; die Zielhilfe
+		# uebernimmt erst kurz vor dem Treffpunkt, damit der Ball sicher getroffen wird.
+		var vid := anim_kind in ["attack", "serve"] and not "video" in _off
+		# Ausholen kraeftiger (Mattis): die Hand wird zusaetzlich weit hinter den Kopf gezogen.
+		var sh0 := SERVE_EARLY if anim_kind == "serve" and not "glatt" in _off else 0.0
+		var w0 := smoothstep(-0.36 + sh0, -0.22 + sh0, rel) if vid else smoothstep(-0.5, -0.3, rel)
+		w = w0 * (1.0 - smoothstep(0.3, 0.45, rel))
+		if not airborne and anim_kind != "serve":
 			w *= 0.6
 		# Linker Arm zeigt zum Ball, bis der Schlagarm durchzieht, dann zieht er seitlich am Koerper
 		# nach unten (gibt dem Schlag Schwung).
@@ -1156,14 +1267,22 @@ func _contact_ik() -> void:
 			ld = ld.slerp((f * 0.3 - up * 0.85 - r * 0.05).normalized(), lt)
 			ld = (ld - r * 0.15 * sin(PI * lt)).normalized()
 		tg[os] = sh_l + ld * 0.6
-		wl = smoothstep(-0.5, -0.3, rel) * (1.0 - smoothstep(0.12, 0.3, rel))
+		wl = (smoothstep(-0.12, -0.05, rel) if vid else smoothstep(-0.5, -0.3, rel)) * (1.0 - smoothstep(0.12, 0.3, rel))
 		# Hand: beim Ausholen Handflaeche nach vorn, im Treffpunkt flach hinter dem Ball,
 		# danach klappt das Handgelenk ab (Finger ueber den Ball nach vorn unten).
 		var snap := smoothstep(0.0, 0.1, rel)
 		var fingers := up.lerp(aim_h - up * 0.9, snap)
 		var palm := (aim_h - up * 0.25).lerp(-up - aim_h * 0.9, snap)
+		if st5 == "cutback":
+			# Handgelenk klappt zur Seite: Handflaeche zeigt zur Anlaufseite, Finger ueber den Ball
+			palm = (aim_h * 0.4 + aside * 0.8).normalized().lerp(aside - up * 0.5, snap)
 		hands = {hs: [fingers, palm], os: [b - sh_l, -r]}
 		r *= mir
+	elif anim_kind == "serve" and _skyball():
+		# Sky-Ball von unten: die Faust trifft den Ball von unten hinten, Daumenseite oben.
+		w = smoothstep(-0.16, -0.03, rel) * (1.0 - smoothstep(0.04, 0.18, rel))
+		tg = {hit_side(): b - up * 0.1 - f * 0.05}
+		hands = {hit_side(): [f, up]}
 	elif anim_kind == "serve":
 		w = smoothstep(-0.12, -0.015, rel) * (1.0 - smoothstep(0.03, 0.16, rel))
 		# Standaufschlag (der Sprungaufschlag laeuft wie der Angriff, siehe oben)
@@ -1507,6 +1626,76 @@ func _p_set(rel := 0.0) -> Dictionary:
 
 ## Angriff in der Luft: rel = Zeit relativ zum Treffpunkt (negativ = davor).
 ## Ablauf: beide Arme hoch, Schlagarm hinter den Kopf ziehen (Bogenspannung), dann durchschlagen.
+var _pre_v := Vector3.ZERO
+
+
+## Art des Angriffs aus dem, was der Spieler gerade tut (ohne Felder aus dem Spiel):
+## "decoy" Taeuscher (Sprung ohne Ball), "slide" Anlauf parallel zum Netz, "pipe" Absprung hinter
+## der 3-m-Linie, "stand" ohne Anlauf (Overpass direkt am Netz), sonst "".
+func _attack_kind() -> String:
+	if anim_kind != "attack":
+		return ""
+	if not contact_on:
+		return "decoy"
+	var v := _pre_v
+	var along := absf(v.z)
+	var to_net := absf(v.x)
+	if along > 2.0 and along > 1.3 * to_net:
+		return "slide"
+	if (takeoff_x if airborne else absf(position.x - net_x)) > 3.0 or lane == "back":
+		return "pipe"
+	if v.length() < 1.2 and _run_amt < 0.25:
+		return "stand"
+	return ""
+
+
+## Beine und Rumpf je nach Angriffsart (auf der schon gespiegelten Haltung).
+func _attack_kind_pose(p: Dictionary, rel: float) -> void:
+	var kind := _attack_kind()
+	var hs := hit_side()
+	var tk := "r" if hs == "l" else "l"  # Sprungbein beim Slide: Gegenseite der Schlaghand
+	match kind:
+		"slide":
+			# Einbeiniger Absprung: kurz vor dem Absprung hebt das Schlagseiten-Bein schon ab (der
+			# Spieler springt nur vom Gegenbein ab), in der Luft zieht das Knie hoch nach vorn wie beim
+			# Korbleger, das Sprungbein haengt gestreckt nach unten. Huefte und Rumpf zeigen erst in die
+			# Laufrichtung und drehen kurz vor dem Schlag zum Feld zurueck.
+			var air := smoothstep(-0.44, -0.32, rel) * (1.0 - smoothstep(0.05, 0.35, rel))
+			var pre := smoothstep(-0.62, -0.46, rel)
+			var dz := signf(_pre_v.z) if absf(_pre_v.z) > 0.1 else 1.0
+			if airborne:
+				p["hip_" + tk] = _qlerp(p.get("hip_" + tk, Vector3.ZERO), Vector3(-0.2, 0.0, 0.0), air)
+				p["kn_" + tk] = _qlerp(p.get("kn_" + tk, Vector3.ZERO), Vector3(-0.25, 0.0, 0.0), air)
+				p["an_" + tk] = _qlerp(p.get("an_" + tk, Vector3.ZERO), Vector3(-0.7, 0.0, 0.0), air)
+				p["hip_" + hs] = _qlerp(p.get("hip_" + hs, Vector3.ZERO), Vector3(1.55, 0.0, 0.0), air)
+				p["kn_" + hs] = _qlerp(p.get("kn_" + hs, Vector3.ZERO), Vector3(-1.8, 0.0, 0.0), air)
+				p["an_" + hs] = _qlerp(p.get("an_" + hs, Vector3.ZERO), Vector3(-0.1, 0.0, 0.0), air)
+			elif rel > -0.62:
+				# Letzter Schritt: nur das Sprungbein steht, das andere Knie schwingt schon hoch.
+				p["hip_" + hs] = _qlerp(p.get("hip_" + hs, Vector3.ZERO), Vector3(1.0, 0.0, 0.0), pre * 0.8)
+				p["kn_" + hs] = _qlerp(p.get("kn_" + hs, Vector3.ZERO), Vector3(-1.3, 0.0, 0.0), pre * 0.8)
+			var turn := maxf(air, pre * 0.5) * (1.0 - smoothstep(-0.2, 0.0, rel))
+			var hp := p.get("hips", Vector3.ZERO) as Vector3
+			p["hips"] = hp + Vector3(0.0, SLIDE_TURN * dz * side * turn, -dz * side * 0.2 * maxf(air, pre * 0.5))
+		"pipe":
+			# Breiter Sprung aus dem Hinterfeld: Koerper weiter vorgeneigt, Beine schwingen nach hinten
+			# und kommen zur Landung nach vorn.
+			if airborne:
+				var a := smoothstep(-0.42, -0.25, rel) * (1.0 - smoothstep(0.0, 0.3, rel))
+				p["hips"] = (p.get("hips", Vector3.ZERO) as Vector3) + Vector3(-0.18 * a, 0.0, 0.0)
+				for sd in ["l", "r"]:
+					p["hip_" + sd] = (p.get("hip_" + sd, Vector3.ZERO) as Vector3) + Vector3(-0.25 * a, 0.0, 0.0)
+		"stand":
+			# Kurzer, schneller Sprung aus dem Stand: weniger Hohlkreuz, Beine bleiben unter dem Koerper.
+			if airborne:
+				for sd in ["l", "r"]:
+					p["kn_" + sd] = _qlerp(p.get("kn_" + sd, Vector3.ZERO), Vector3(-0.7, 0.0, 0.0), 0.5)
+		"decoy":
+			# Taeuscher: Sprung und Ausholen wie beim echten Angriff, der Schlag bleibt angedeutet
+			# (siehe _contact_ik), danach landet er locker.
+			pass
+
+
 func _p_spike(rel: float) -> Dictionary:
 	var p := {}
 	var cock := smoothstep(-0.45, -0.12, rel)
@@ -1811,7 +2000,7 @@ func _p_dive() -> Dictionary:
 ## pancake: ein Arm flach am Boden, Handruecken oben, der Ball springt vom Handruecken.
 func _style_dive(p: Dictionary, kd: float) -> void:
 	var st := _astyle()
-	if st != "dive_side" and st != "pancake":
+	if st != "dive_side" and st != "pancake" and st != "one_arm":
 		return
 	var s := _ball_side()
 	var lead := "r" if s > 0.0 else "l"
@@ -1821,6 +2010,13 @@ func _style_dive(p: Dictionary, kd: float) -> void:
 	if st == "pancake":
 		_arm(arm, lead, 2.75, 0.15, 0.0, -0.9)  # Hand flach, Handruecken nach oben
 		_arm(arm, trail, 0.1, 0.25, 0.3)        # liegt seitlich am Koerper
+	elif st == "one_arm":
+		# Einarmige Rettung: der Arm zur Ballseite streckt sich ganz nach vorn (Schulter schiebt mit),
+		# der andere Arm geht zum Boden und faengt den Koerper ab.
+		_arm(arm, lead, 2.85, 0.35, 0.0, -0.3)
+		_arm(arm, trail, 1.1, 0.35, 0.5)
+		var s3 := -1.0 if lead == "l" else 1.0
+		p["chest"] = _qlerp(p.get("chest", Vector3.ZERO), Vector3(0.05, -0.3 * s3, -0.15 * s3), reach)
 	else:
 		_arm(arm, lead, 2.2, 1.0, 0.05)
 		_arm(arm, trail, 1.0, 0.5, 1.1)
@@ -1863,9 +2059,41 @@ func _dive_roll() -> float:
 	return 0.0
 
 
+## Sky-Ball: Aufschlag von unten, der Ball fliegt sehr hoch (5-Sterne-Move).
+func _skyball() -> bool:
+	return anim_kind in ["serve", "serve_hold"] and _astyle() == "skyball" and not "varianten" in _off
+
+
+## Aufschlag von unten wie beim echten Sky-Ball: seitlich zum Netz, tief in den Knien, der
+## Schlagarm pendelt gestreckt weit nach hinten und kommt von unten durch, die Beine strecken sich
+## kraeftig nach oben, danach zeigt der Arm hoch dem Ball nach.
+func _p_skyball(rel: float) -> Dictionary:
+	var back := smoothstep(-0.9, -0.35, rel)             # Arm pendelt nach hinten
+	var swing := smoothstep(-0.3, 0.0, rel)               # und von unten nach vorn durch
+	var up_k := smoothstep(-0.05, 0.35, rel)              # Nachschwung nach oben
+	var drive := smoothstep(-0.25, 0.1, rel)              # Beine strecken sich
+	var p := {}
+	p["hips"] = Vector3(-0.15 * (1.0 - drive), -0.55 * (1.0 - swing) - 0.1, 0.0)
+	p["chest"] = Vector3(0.35 * back * (1.0 - swing) - 0.25 * up_k, -0.25 * (1.0 - swing), 0.0)
+	p["head"] = Vector3(0.35 - 0.6 * up_k, 0.3 * (1.0 - swing), 0.0)
+	# Schlagarm (rechts): hinten unten -> vorn durch -> hoch
+	var fwd := lerpf(0.1, -1.1, back)
+	fwd = lerpf(fwd, 0.7, swing)
+	fwd = lerpf(fwd, 2.4, up_k)
+	_arm(p, "r", fwd, 0.15, 0.15 * (1.0 - swing) + 0.25 * up_k)
+	# Wurfhand haelt den Ball tief vor der Huefte und zieht nach dem Loslassen zur Seite
+	_arm(p, "l", lerpf(0.8, 0.3, swing), lerpf(0.1, 0.35, swing), lerpf(0.9, 0.4, swing))
+	var dip := smoothstep(-0.9, -0.4, rel) * (1.0 - drive)
+	_leg(p, "l", 0.25 + 0.5 * dip, 0.2 + 1.0 * dip, 0.12)
+	_leg(p, "r", -0.05 + 0.4 * dip, 0.25 + 0.9 * dip, 0.12)
+	return p
+
+
 func _p_serve(rel: float, jump_serve: bool) -> Dictionary:
 	if airborne:
 		return _p_spike(rel)
+	if _skyball():
+		return _p_skyball(rel)
 	if jump_serve and rel < -0.25:
 		var hold := _mix(_p_serve_hold(), _p_run(maxf(_run_amt, 0.4)), clampf(_run_amt * 2.0, 0.0, 1.0))
 		return _mix(hold, _p_approach(), smoothstep(-0.85, -0.45, rel))
@@ -1932,6 +2160,28 @@ static func _clip_at(clip: String, rel: float, keys: Array) -> Dictionary:
 ## Zeitpunkte der Meshy-Volleyball-Animationen (aus den Bildfolgen abgelesen)
 ## kern_*: Meshy-Kernanimationen (Text-to-Motion, nach echter Technik beschrieben)
 const SPIKE_KEYS := [[-1.1, 0.18], [-0.404, 0.40], [0.0, 0.60], [0.4, 0.70], [0.6, 0.78]]
+## video_angriff (Pexels 6217265, Zeitlupe, Clip ab 0,6 s): Ball liegt in der rechten Hand 0,9 s,
+## Wurf mit einer Hand (Abwurf 1,15-1,6 s), Anlauf ab 2,1 s, Arme hinten 4,3 s, Absprung 5,75 s,
+## beide Arme oben 6,1 s, Hand hinter dem Kopf 6,45 s, weit gespannter Bogen 6,9 s, Schlag 7,18 s,
+## Ausschwingen 7,5 und 7,75 s; u = (t - 0,6) / 7,27. Die Zeitlupe wird so gestaucht, dass die
+## Bogenspannung im Spiel gut 0,2 s sichtbar bleibt.
+const VSPIKE_KEYS := [[-1.1, 0.5086], [-0.404, 0.7079], [-0.3, 0.756], [-0.2, 0.8042], [-0.08, 0.866],
+	[0.0, 0.9045], [0.4, 0.9485], [0.6, 0.9829]]
+## Sprungaufschlag = dasselbe Video von Anfang an: Wurf (Ball verlaesst die Hand bei rel -1,18),
+## Anlauf, Absprung, Schlag.
+const VJSERVE_KEYS := [[-1.2, 0.0412], [-1.16, 0.0755], [-1.05, 0.1374], [-0.9, 0.2061], [-0.6, 0.5086],
+	[-0.404, 0.7079], [-0.3, 0.756], [-0.2, 0.8042], [-0.08, 0.866], [0.0, 0.9045], [0.4, 0.9485]]
+## video_aufschlag (Pexels 6217332, Flatteraufschlag, Zeitlupe, Clip ab 2,0 s): Ball liegt vor der
+## Brust 2,75 s, Wurf mit einer Hand 3,5-4,1 s, beide Arme oben 5,6 s, Schritt und Bogen 6,5-7,3 s,
+## Schlag 7,88 s, Ausschwingen bis 9,25 s; u = (t - 2,0) / 7,47. Ball verlaesst die Hand bei rel -0,74.
+const VSERVE_KEYS := [[-0.9, 0.1674], [-0.74, 0.2009], [-0.6, 0.2812], [-0.4, 0.4821], [-0.25, 0.6027],
+	[-0.1, 0.7098], [0.0, 0.7875], [0.2, 0.8839], [0.45, 0.9709]]
+const VSERVE_HOLD_U := 0.1
+const SERVE_EARLY := -0.1  # Aufschlag: ab hier liegt die Schlaghand am Ball (frueher Treffer)
+const SERVE_HOLD := 0.1  # so lange bleibt die Schlaghand nach dem geplanten Treffpunkt am Ball
+## Hueftdrehung in die Laufrichtung beim Slide (Vorzeichen im Labor geprueft)
+const SLIDE_TURN := 0.6
+const VSPIKE_UPPER := ["chest", "sh_l", "el_l", "wr_l", "sh_r", "el_r", "wr_r"]
 const SET_KEYS := [[-0.7, 0.17], [-0.15, 0.42], [0.0, 0.47], [0.35, 0.56]]
 const BUMP_KEYS := [[-0.6, 0.3], [0.0, 0.58], [0.35, 0.7]]
 
@@ -1983,20 +2233,65 @@ func _target_pose_main() -> Dictionary:
 	if dive_timer > 0.0:
 		_stiff = 30.0
 		return _p_dive()
-	if celebrate_until > now:
+	if celebrate_until > now and anim_kind not in ["serve", "serve_hold"]:
+		# Jubel nie ueber den eigenen Aufschlag legen (sonst jubelt er mit ausgebreiteten Armen
+		# weiter, waehrend er den Ball wirft und schlaegt).
 		_stiff = 16.0
 		return _p_celebrate()
 	var rel := now - anim_t
 	if anim_kind == "serve_hold":
-		return _mix(_mirror(_p_serve_hold()), _p_run(_run_amt), clampf(_run_amt * 2.0, 0.0, 1.0))
+		var hp := _p_serve_hold()
+		if _skyball():
+			hp = _p_skyball(-1.0)  # seitlich zum Netz, Ball tief vor der Huefte
+		elif anim_tech == "stand" and not "video" in _off:
+			# Ball liegt in der Wurfhand vor der Brust, die Schlaghand ruht daneben (Video).
+			var vh := HumanFigure.clip_pose("video_aufschlag", VSERVE_HOLD_U, false)
+			for k in VSPIKE_UPPER:
+				if vh.has(k):
+					hp[k] = vh[k]
+		return _mix(_mirror(hp), _p_run(_run_amt), clampf(_run_amt * 2.0, 0.0, 1.0))
 	if anim_kind == "serve" and rel < 0.5:
 		_stiff = 42.0
-		return _mirror(_p_serve(rel, anim_tech == "jump"))
-	if block_pose:
+		var sp := _p_serve(rel, anim_tech == "jump")
+		if anim_tech == "jump" and not "video" in _off:
+			# Sprungaufschlag aus dem Video: Wurf mit einer Hand, Anlauf, Bogenspannung, Schlag.
+			# Beine kommen weiter aus Anlauf und Sprung des Spiels.
+			var vj := _clip_at("video_angriff", rel, VJSERVE_KEYS)
+			for k in VSPIKE_UPPER:
+				if vj.has(k):
+					sp[k] = vj[k]
+			if vj.has("hips"):
+				sp["hips"] = _qlerp(sp.get("hips", Vector3.ZERO), vj["hips"], 1.0 if airborne else 0.5)
+			_stiff = 45.0 if airborne else 30.0
+		elif anim_tech == "stand" and not "video" in _off and not _skyball():
+			# Standaufschlag aus dem Video: Wurf mit einer Hand, Bogenspannung, Schlag hoch vor der Schulter.
+			var vs := _clip_at("video_aufschlag", rel, VSERVE_KEYS)
+			for k in VSPIKE_UPPER:
+				if vs.has(k):
+					sp[k] = vs[k]
+			if vs.has("hips"):
+				sp["hips"] = _qlerp(sp.get("hips", Vector3.ZERO), vs["hips"], 0.5)
+			_stiff = 32.0
+		return _mirror(sp)
+	if block_pose or (_astyle() == "joust" and airborne):
+		# Netzkampf (joust): beide Haende oben am Ball ueber der Netzkante, wie ein Block mit Druck.
 		_stiff = 30.0
 		return _p_block()
+	if not airborne:
+		_pre_v = _loco_gv  # Laufrichtung kurz vor dem Absprung (fuer Slide und Pipe)
 	if anim_kind == "attack" and rel < 0.5:
-		var clip := _mirror(_style_attack(_clip_at("kern_angriff", _approach_rel(rel), SPIKE_KEYS), rel))
+		var core := _clip_at("kern_angriff", _approach_rel(rel), SPIKE_KEYS)
+		if not "video" in _off and not core.is_empty():
+			# Oberkoerper und Armzug aus dem echten Video, Beine und Anlauf aus dem Kern-Clip.
+			var vid := _clip_at("video_angriff", _approach_rel(rel), VSPIKE_KEYS)
+			for k in VSPIKE_UPPER:
+				if vid.has(k):
+					core[k] = vid[k]
+			if vid.has("hips"):
+				# In der Luft dreht der ganze Rumpf wie im Video (Schlagschulter weit zurueck),
+				# am Boden nur halb, damit der Anlauf geradeaus bleibt.
+				core["hips"] = _qlerp(core.get("hips", Vector3.ZERO), vid["hips"], 1.0 if airborne else 0.5)
+		var clip := _mirror(_style_attack(core, rel))
 		if not clip.is_empty() and rel > -1.1:
 			# Meshy-Angriff: Anlauf, Absprung, Schlag, Landung als eine Bewegung.
 			var run0 := _mix(_p_ready(), _p_run(maxf(_run_amt, 0.3)), clampf(_run_amt * 1.6, 0.0, 1.0))
@@ -2007,7 +2302,14 @@ func _target_pose_main() -> Dictionary:
 				var own := _mirror(_p_spike(rel))
 				for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
 					clip[k] = _qlerp(clip[k], own.get(k, Vector3.ZERO), 0.95)
+			if not "varianten" in _off:
+				_attack_kind_pose(clip, rel)
 			var wi := smoothstep(-1.1, -0.85, rel) * (1.0 - smoothstep(0.3, 0.5, rel))
+			if not "varianten" in _off and _attack_kind() == "stand" and not airborne:
+				# Ohne Anlauf (Overpass direkt am Netz): keine Anlaufschritte, nur kurz in die Knie.
+				run0 = _mix(_p_ready(), _mirror(_p_approach()), smoothstep(-0.7, -0.45, rel) * 0.8)
+				for k in ["hip_l", "kn_l", "an_l", "hip_r", "kn_r", "an_r"]:
+					clip[k] = run0.get(k, Vector3.ZERO)
 			return _mix(run0, clip, wi)
 		if airborne:
 			_stiff = 45.0
@@ -2049,8 +2351,22 @@ func _target_pose_main() -> Dictionary:
 		if _tech() != "over" and _astyle() != "":
 			_style_dig(tech, _astyle(), rel)
 		var w := smoothstep(-0.9, -0.35, rel) * (1.0 - smoothstep(0.25, 0.6, rel))
+		if _astyle() == "jumpset" and anim_kind == "set" and not "varianten" in _off:
+			# Sprungzuspiel: vor dem Absprung tiefer in die Knie, in der Luft haengen die Beine locker
+			# und leicht gebeugt unter dem Koerper, der Oberkoerper bleibt aufrecht unter dem Ball.
+			if airborne:
+				_leg(tech, "l", 0.3, 0.55, 0.1, 0.5)
+				_leg(tech, "r", 0.15, 0.45, 0.1, 0.5)
+				tech["hips"] = Vector3(0.05, 0.0, 0.0)
+				tech["chest"] = _qlerp(tech.get("chest", Vector3.ZERO), Vector3(0.05, 0.0, 0.0), 0.5)
+			elif rel < -0.1:
+				var dip := smoothstep(-0.9, -0.5, rel)
+				for sd in ["l", "r"]:
+					tech["hip_" + sd] = (tech.get("hip_" + sd, Vector3.ZERO) as Vector3) + Vector3(0.35 * dip, 0, 0)
+					tech["kn_" + sd] = (tech.get("kn_" + sd, Vector3.ZERO) as Vector3) + Vector3(-0.7 * dip, 0, 0)
+					tech["an_" + sd] = (tech.get("an_" + sd, Vector3.ZERO) as Vector3) + Vector3(0.35 * dip, 0, 0)
 		base = _mix(base, tech, w)
-		_stiff = 20.0
+		_stiff = 20.0 if not airborne else 34.0
 	_crouch_drop = lerpf(_crouch_drop, crouch_want, clampf(_dt_pose * 14.0, 0.0, 1.0))
 	if _crouch_drop > 0.005 and _astyle() != "low":
 		# Hocke: Oberschenkel nach vorn, Knie doppelt gebeugt, Fuss bleibt flach; Oberkoerper neigt sich

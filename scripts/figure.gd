@@ -492,6 +492,12 @@ static func clip_pose(clip: String, u: float, loop := true) -> Dictionary:
 	if _clips.is_empty():
 		var f := FileAccess.open("res://assets/models/player_clips.json", FileAccess.READ)
 		_clips = JSON.parse_string(f.get_as_text()) if f else {"_": {}}
+		# Aus Videos gelesene Bewegungen (tools/mocap/video_to_clip.py) kommen dazu.
+		var fv := FileAccess.open("res://assets/models/video_clips.json", FileAccess.READ)
+		if fv:
+			var vd = JSON.parse_string(fv.get_as_text())
+			if vd is Dictionary:
+				_clips.merge(vd, true)
 		for name in _clips:
 			var fr: Array = _clips[name].get("frames", [])
 			if fr.size() < 2:
