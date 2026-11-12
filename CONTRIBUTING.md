@@ -10,8 +10,6 @@ Danke, dass du mithilfst! Zum Einlesen: [docs/EINSTIEG.md](docs/EINSTIEG.md).
 
 ## Branches und Pull Requests
 
-> Übergangsphase: Solange der neueste Stand noch nicht in `main` ist, zweige vom Branch ab, den [docs/EINSTIEG.md](docs/EINSTIEG.md#5-wie-wir-arbeiten-wichtig) nennt.
-
 - Zweige von `main` ab, mit sprechendem Namen: `feature/<thema>`, `fix/<thema>`, `docs/<thema>`.
 - Ein Thema pro PR, möglichst klein. Keine gestapelten PRs ohne Absprache.
 - PR-Beschreibung: was sich für den Spieler ändert (in einfachen Worten), wie getestet, Vorher/Nachher-Zahlen aus den Simulationen.

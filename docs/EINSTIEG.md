@@ -13,7 +13,7 @@ Ein PC-Volleyballspiel (Halle, 6 gegen 6, FIVB-Regeln, Männer). Ziel ist ein Sp
 ## 2. Einrichten
 
 1. **Godot 4.4.1 stable** (Standard, nicht .NET): <https://github.com/godotengine/godot/releases/tag/4.4.1-stable>. Andere Versionen bitte nicht verwenden, sonst ändern sich `.import`- und `.uid`-Dateien massenhaft.
-2. Repository klonen. **Welcher Branch?** Siehe Abschnitt 5, denn `main` ist zurzeit nicht der neueste Stand.
+2. Repository klonen. `main` ist der neueste Stand.
 3. `project.godot` im Godot-Editor öffnen und den ersten Import abwarten.
 4. **F5** startet das Spiel. Renderer ist „GL Compatibility“, läuft also auch auf schwächeren Grafikkarten.
 
@@ -41,8 +41,8 @@ Optional, nur wenn du Assets neu bauen willst: Blender bzw. `pip install bpy` (F
 
 ## 5. Wie wir arbeiten (wichtig)
 
-- Bisher wurde jede Arbeit als eigener Branch `claude/…` gebaut, und die Branches bauen aufeinander auf („Stacked PRs“, offen sind #8–#11, #13–#20). **`main` ist dadurch weit zurück** (Stand 11.10.2026, rund 120 Commits hinter dem neuesten Stand).
-- Der neueste, vollständig zusammengeführte Stand ist der Branch **`claude/project-thread-xje4w7`** (bzw. dieser Doku-Branch obendrauf). Solange `main` nicht nachgezogen ist, starte von dort.
+- Bis 12.11.2026 wurde jede Arbeit als eigener Branch `claude/…` gebaut, und die Branches bauten aufeinander auf („Stacked PRs“ #8–#20). `main` lag dadurch weit zurück. Am 12.11. wurde der gesamte Stand mit PR #21 nach `main` gebracht und die alten PRs geschlossen.
+- **Ab jetzt zweigt jede Arbeit von `main` ab** (Regeln in [CONTRIBUTING.md](../CONTRIBUTING.md)).
 - Spielbare Windows-Builds bekommt Mattis als ZIP. Jeder Build hat einen Namen (z. B. `varianz-9`), die Liste steht in [HISTORIE.md](HISTORIE.md).
 - Vor jeder größeren Änderung fragen wir Mattis, *wie* sie umgesetzt werden soll, und bauen nur, was er freigegeben hat.
 

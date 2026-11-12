@@ -87,4 +87,4 @@ Die Mechaniken sind da, aber sie müssen **spürbar** werden. Der wichtigste Bef
 
 ## Ziel 3: Architektur
 
-Siehe [ARCHITEKTUR-PRUEFUNG.md](ARCHITEKTUR-PRUEFUNG.md). Kurz: erst den neuesten Stand nach `main` bringen und einen automatischen Test einrichten, dann `match.gd` schrittweise aufteilen. Das Animationssystem erst umbauen, wenn der Weg für Ziel 1 entschieden ist.
+Siehe [ARCHITEKTUR-PRUEFUNG.md](ARCHITEKTUR-PRUEFUNG.md). Kurz: Der neueste Stand ist seit 12.11. in `main`; als Nächstes einen automatischen Test einrichten, dann `match.gd` schrittweise aufteilen. Das Animationssystem erst umbauen, wenn der Weg für Ziel 1 entschieden ist.

@@ -17,7 +17,7 @@ Das Projekt startete am 09.10.2026. Jede Etappe endete mit einem spielbaren Wind
 - **Phase 2c–2p**: eigene Spielerfiguren aus Blender, Trikot-System pro Team, ganze Halle mit Linienrichtern, Zuspiel-Varianten (hoch, schnell, Schnellangriff, Dump), Block lesen, kraftvollere Angriffe, Kill-Block, Zuspielrichtung auf dem Steuerkreuz, Pritschen nach Lehrbildern.
 - **Meshy-Modelle** (`meshy-alles-1`, `meshy-animationen-1`, `kernanimationen-1`): Mattis' eigene Meshy-Figuren für Spieler, Schiedsrichter, Netz, Ball; Halten-und-Loslassen für alle Aktionen (`halten-loslassen-1/-2`); Timing-Spaß (`timing-spass-1`).
 
-Bis hierhin ist alles in `main` (PR #1–#7). Alles Folgende liegt nur in offenen, aufeinander aufbauenden PRs.
+Bis hierhin wurde alles direkt in `main` gemergt (PR #1–#7). Alles Folgende entstand in aufeinander aufbauenden PRs und kam am 12.11. gesammelt mit PR #21 nach `main`.
 
 ## Visual Overhaul: Animation (13.–15.10., läuft weiter)
 
@@ -61,7 +61,7 @@ Neuester Build: **`varianz-9`** (06.11.). Neuester Code-Stand: Branch `claude/pr
 - Mattis hat PlayStyles und 5-Sterne-Moves in `varianz-9` nicht bemerkt (wirken still). Vorschläge zu Feedback und Sichtbarkeit warten auf Entscheidung.
 - Der Look wirkt für Mattis noch „clunky“ und „zusammengewürfelt“. Drei Wege liegen auf dem Tisch, siehe [ZIELE.md](ZIELE.md).
 
-## Offene Pull Requests (Stapel)
+## Der frühere PR-Stapel (bis 12.11.)
 
 ```
 main (PR #1–#7)
@@ -77,4 +77,4 @@ main (PR #1–#7)
  └── #9  Zuspiel mit Steuerkreuz in main nachziehen (überholt)
 ```
 
-Alle diese Stände sind im Branch `claude/project-thread-xje4w7` zusammengeführt (geprüft am 12.11.: kein Commit fehlt außer einer doppelten `.uid`-Datei).
+Alle diese Stände wurden im Branch `claude/project-thread-xje4w7` zusammengeführt (geprüft am 12.11.: kein Commit fehlte außer einer doppelten `.uid`-Datei), mit PR #21 nach `main` gebracht und die PRs #8–#20 geschlossen.

@@ -1,6 +1,6 @@
 # Architekturprüfung: Code und Arbeitsweise
 
-Stand: 12.11.2026, geprüft am Branch `claude/project-thread-xje4w7`. Diese Seite ist eine ehrliche Bestandsaufnahme: Was trägt, was bremst, und wie weit sich Aufräumen jetzt lohnt. Am Ende stehen Empfehlungen in Reihenfolge und offene Fragen an Mattis.
+Stand: 12.11.2026, geprüft am Branch `claude/project-thread-xje4w7`. **Nachtrag:** Empfehlung 1 (neuester Stand nach `main`, gestapelte PRs schließen) ist mit Mattis' OK am 12.11. umgesetzt (PR #21). Diese Seite ist eine ehrliche Bestandsaufnahme: Was trägt, was bremst, und wie weit sich Aufräumen jetzt lohnt. Am Ende stehen Empfehlungen in Reihenfolge und offene Fragen an Mattis.
 
 ## Kurzfassung
 
@@ -91,7 +91,7 @@ Bisher: Jeder Arbeitsstrang baute einen eigenen Branch (`claude/project-thread-<
 | Kombinierte Builds lokal gemerged | schnell | nicht reproduzierbar: welcher Commit steckt in `varianz-9`? |
 
 **Empfehlung (trunk-basiert, einfach):**
-1. **Einmalig:** Den neuesten Stand per **einem** PR nach `main` bringen und die gestapelten PRs #8–#20 als „in main enthalten“ schließen. Die Stapel einzeln nacheinander zu mergen bringt nichts, weil der Gesamtstand schon geprüft zusammengeführt ist (siehe [HISTORIE.md](HISTORIE.md#offene-pull-requests-stapel)). **Braucht Mattis' ausdrückliches OK.**
+1. **Einmalig:** Den neuesten Stand per **einem** PR nach `main` bringen und die gestapelten PRs #8–#20 als „in main enthalten“ schließen. Die Stapel einzeln nacheinander zu mergen bringt nichts, weil der Gesamtstand schon geprüft zusammengeführt ist (siehe [HISTORIE.md](HISTORIE.md#der-frühere-pr-stapel-bis-1211)). (Umgesetzt am 12.11., PR #21.)
 2. **Danach:** Jede Arbeit zweigt von `main` ab, kurzlebig, mit sprechendem Namen (`feature/sichtbare-moves`, `fix/aufschlag-jubel`). Ein PR pro Thema, gemergt nach Mattis' Playtest-OK. Kein Stapeln mehr, außer kurzfristig und mit Absprache.
 3. **`main` ist immer spielbar.** CI muss grün sein.
 4. **Builds aus `main` oder einem PR**, mit Git-Tag pro Build (`varianz-9` → Tag `build/varianz-9`), ZIP als GitHub-Release. Damit ist jeder Build einem Commit zugeordnet und auch für Mitwirkende greifbar.
@@ -121,7 +121,7 @@ Das Repository ist **öffentlich**. Heute ist das unkritisch (eigene Meshy-Model
 
 | Wann | Was | Aufwand |
 | --- | --- | --- |
-| **Vor dem Start des Mitwirkenden** | Neuesten Stand nach `main` (nach Mattis' OK), gestapelte PRs schließen, Branch-Regeln aus [CONTRIBUTING.md](../CONTRIBUTING.md) | klein |
+| **Vor dem Start des Mitwirkenden** | ~~Neuesten Stand nach `main`, gestapelte PRs schließen~~ (erledigt), Branch-Regeln aus [CONTRIBUTING.md](../CONTRIBUTING.md) | klein |
 | | CI mit Smoke-Test (Autoplay + Regelprüfung) | klein |
 | **Bald** | Aufräum-PR (Namensschulden, Text-Reste) | klein |
 | | `match.gd` Schritte 1–3 (Bots, Wiederholung, Eingabe) mit Seed-Vergleich | mittel |
@@ -131,7 +131,7 @@ Das Repository ist **öffentlich**. Heute ist das unkritisch (eigene Meshy-Model
 
 ## Offene Fragen an Mattis
 
-1. Darf der neueste Stand (`claude/project-thread-xje4w7` plus diese Doku) nach `main`, und sollen die gestapelten PRs #8–#20 danach geschlossen werden?
+1. ~~Darf der neueste Stand nach `main`?~~ Ja, am 12.11. erledigt.
 2. Soll das Repo öffentlich bleiben (wichtig für gekaufte Assets und den späteren Verkauf)?
 3. Welche Bereiche soll der neue Mitwirkende übernehmen? Eine klare Aufteilung (z. B. er: Menüs/Verein/Hallen, Claude: Spiellogik/Animation) vermeidet Konflikte in `match.gd`, bis es aufgeteilt ist.
 4. Wer gibt Pull Requests frei: nur Mattis nach Playtest, oder darf der Mitwirkende selbst mergen, wenn die CI grün ist?
