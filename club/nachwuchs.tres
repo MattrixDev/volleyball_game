@@ -1,0 +1,319 @@
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "nachwuchs_07"
+first_name = "Florian"
+last_name = "Varga"
+number = 7
+role = "S"
+height_m = 1.88
+jump = 54
+power = 54
+serve = 57
+receive = 59
+defense = 51
+setting = 68
+block = 47
+speed = 66
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 1
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "nachwuchs_20"
+first_name = "Marten"
+last_name = "Wendt"
+number = 20
+role = "OH"
+height_m = 2
+jump = 73
+power = 61
+serve = 67
+receive = 61
+defense = 63
+setting = 49
+block = 55
+speed = 61
+traits = PackedStringArray("kraftpaket", "kanone")
+left_handed = false
+skin = 4
+hair = 1
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "nachwuchs_15"
+first_name = "Nils"
+last_name = "Kasper"
+number = 15
+role = "MB"
+height_m = 2.04
+jump = 66
+power = 64
+serve = 49
+receive = 30
+defense = 48
+setting = 50
+block = 66
+speed = 60
+traits = PackedStringArray("blockleser")
+left_handed = false
+skin = 3
+hair = 3
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "nachwuchs_16"
+first_name = "Felix"
+last_name = "Vahl"
+number = 16
+role = "OP"
+height_m = 1.99
+jump = 74
+power = 69
+serve = 68
+receive = 47
+defense = 56
+setting = 45
+block = 58
+speed = 69
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 3
+hair = 4
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "nachwuchs_01"
+first_name = "Yannick"
+last_name = "Hinrichs"
+number = 1
+role = "OH"
+height_m = 1.93
+jump = 69
+power = 72
+serve = 72
+receive = 65
+defense = 71
+setting = 64
+block = 65
+speed = 82
+traits = PackedStringArray("kraftpaket", "kanone")
+left_handed = false
+skin = 2
+hair = 0
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "nachwuchs_14"
+first_name = "Paul"
+last_name = "Hartung"
+number = 14
+role = "MB"
+height_m = 2.09
+jump = 69
+power = 74
+serve = 70
+receive = 44
+defense = 52
+setting = 42
+block = 75
+speed = 62
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 2
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "nachwuchs_18"
+first_name = "Max"
+last_name = "Olsen"
+number = 18
+role = "L"
+height_m = 1.8
+jump = 32
+power = 28
+serve = 25
+receive = 74
+defense = 70
+setting = 65
+block = 25
+speed = 80
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 2
+hair = 2
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "nachwuchs_17"
+first_name = "Moritz"
+last_name = "Krüger"
+number = 17
+role = "S"
+height_m = 1.95
+jump = 58
+power = 51
+serve = 54
+receive = 48
+defense = 57
+setting = 68
+block = 46
+speed = 66
+traits = PackedStringArray("flatter", "spielmacher")
+left_handed = false
+skin = 4
+hair = 0
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "nachwuchs_13"
+first_name = "Leon"
+last_name = "Böttcher"
+number = 13
+role = "OH"
+height_m = 1.93
+jump = 59
+power = 59
+serve = 56
+receive = 57
+defense = 57
+setting = 39
+block = 50
+speed = 55
+traits = PackedStringArray("linkshaender")
+left_handed = true
+skin = 4
+hair = 3
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "nachwuchs_10"
+first_name = "Emil"
+last_name = "Zander"
+number = 10
+role = "MB"
+height_m = 2.1
+jump = 58
+power = 54
+serve = 43
+receive = 25
+defense = 40
+setting = 39
+block = 74
+speed = 53
+traits = PackedStringArray("sprungwunder")
+left_handed = false
+skin = 3
+hair = 1
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "nachwuchs_04"
+first_name = "Janosch"
+last_name = "Mohr"
+number = 4
+role = "OP"
+height_m = 2.09
+jump = 67
+power = 61
+serve = 57
+receive = 34
+defense = 53
+setting = 37
+block = 63
+speed = 50
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 4
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "nachwuchs_09"
+first_name = "Moritz"
+last_name = "Gerber"
+number = 9
+role = "L"
+height_m = 1.84
+jump = 27
+power = 25
+serve = 25
+receive = 59
+defense = 61
+setting = 47
+block = 25
+speed = 62
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 2
+hair = 2
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "nachwuchs_19"
+first_name = "Carl"
+last_name = "Larsen"
+number = 19
+role = "OH"
+height_m = 2.02
+jump = 65
+power = 66
+serve = 60
+receive = 53
+defense = 55
+setting = 44
+block = 59
+speed = 64
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 3
+hair = 0
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "nachwuchs_11"
+first_name = "Jakob"
+last_name = "Wiegand"
+number = 11
+role = "OH"
+height_m = 1.93
+jump = 54
+power = 58
+serve = 61
+receive = 56
+defense = 53
+setting = 34
+block = 44
+speed = 58
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 0
+hair = 0
+
+[resource]
+script = ExtResource("1")
+id = "nachwuchs"
+name = "Nachwuchs"
+short_name = "NWS"
+play_style = "jung"
+jersey = Color(0.3, 0.3, 0.32, 1)
+panel = Color(0.9, 0.9, 0.88, 1)
+collar = Color(0.9, 0.9, 0.88, 1)
+logo = Color(0.9, 0.9, 0.88, 1)
+number = Color(0.95, 0.95, 0.93, 1)
+shorts = Color(0.3, 0.3, 0.32, 1)
+socks = Color(0.9, 0.9, 0.88, 1)
+shoes = Color(0.9, 0.9, 0.88, 1)
+accent = Color(0.3, 0.3, 0.32, 1)
+sole = Color(0.85, 0.85, 0.84, 1)
+libero_jersey = Color(0.79, 0.64, 0.26, 1)
+libero_panel = Color(0.3, 0.3, 0.32, 1)
+libero_number = Color(0.3, 0.3, 0.32, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])

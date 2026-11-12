@@ -20,8 +20,10 @@ var bench: Array = [[], []]  # sitzende Figuren je Team
 var line_judges: Array = []  # [Figur, Ecke (Vector3)]
 var ball_pos := Vector3.ZERO  # vom Spiel gesetzt: wo der Ball gerade ist
 var _meshes := {}  # Name -> MeshInstance3D aus arena.glb
+var net: ReactiveNet  # Netzanlage aus Mattis' Meshy-Modell
 const HALL := preload("res://assets/models/arena.glb")
 const FLAG := preload("res://assets/models/flag.glb")
+const STAND := preload("res://assets/models/referee_stand.glb")
 ## Gedaempfte Bandenfarben (wie die Stilvorlage)
 const AD_COLORS := [Color(0.17, 0.21, 0.33), Color(0.45, 0.19, 0.22), Color(0.36, 0.45, 0.4), Color(0.66, 0.53, 0.28),
 	Color(0.32, 0.36, 0.42), Color(0.6, 0.36, 0.27), Color(0.25, 0.37, 0.41), Color(0.5, 0.44, 0.38)]
@@ -109,6 +111,17 @@ func _hall() -> void:
 		if not String(m.name) in ["net_mesh", "net_bands", "antennas", "posts", "referee_stand", "scorer_table",
 				"benches", "bench_props", "adboard_frames"]:
 			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Netz, Pfosten und Antennen kommen aus Mattis' Meshy-Modell (reagiert auf den Ball);
+	# die alten Teile aus arena.glb bleiben im Modell, werden aber nicht gezeigt.
+	for n in ["net_mesh", "net_bands", "antennas", "posts", "referee_stand"]:
+		if _meshes.has(n):
+			_meshes[n].visible = false
+	net = ReactiveNet.new()
+	add_child(net)
+	# Schiedsrichterstuhl aus Mattis' Meshy-Modell (Plattform 1,46 m, Leiter hinten)
+	var stand: Node3D = STAND.instantiate()
+	stand.position = Vector3(0, 0, -6.3)
+	add_child(stand)
 
 
 ## Bandenwerbung und Anzeigetafeln: die Bildschirme im Modell bekommen Farbe und Schrift.
@@ -149,7 +162,7 @@ func set_scoreboard(text: String) -> void:
 # ---------------------------------------------------------------- Schiedsrichter und Bank
 
 func _officials() -> void:
-	# Schiedsrichter auf dem Stuhl am Netzpfosten (Stuhl ist Teil von arena.glb)
+	# Schiedsrichter auf dem Stuhl am Netzpfosten (Stuhl: referee_stand.glb)
 	referee = HumanFigure.new()
 	add_child(referee)
 	referee.build(OFFICIAL.merged({"skin": Color(0.86, 0.68, 0.55), "hair": Color(0.42, 0.42, 0.43)}), false, 1, true)

@@ -23,6 +23,12 @@ extends Resource
 @export var libero_jersey := Color(0.78, 0.64, 0.25)
 @export var libero_panel := Color(0.15, 0.19, 0.32)
 @export var libero_number := Color(0.15, 0.19, 0.32)
+@export_group("Kader")
+## Spielstil des Teams (ausgeglichen, blockstark, abwehrstark, aufschlagstark, schnell, jung).
+@export var play_style := "ausgeglichen"
+## 14 feste Spieler: die ersten sechs sind die Startsechs (Position 1 bis 6), dann der Libero,
+## dann die Bank. Erzeugt von tools/make_teams.py.
+@export var players: Array[PlayerData] = []
 
 
 ## Name fuer die Anzeigetafel: das letzte Wort in Grossbuchstaben ("SV Nordhafen" -> NORDHAFEN).

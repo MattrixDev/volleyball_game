@@ -32,6 +32,25 @@ func _ready() -> void:
 	_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_ring_mat.albedo_color = Color(1, 1, 1, 0.5)
+	call_deferred("_warmup")
+
+
+## Einmal alle Effekte unsichtbar zeichnen, damit die Grafikkarte ihre Shader schon beim Start
+## vorbereitet und nicht beim ersten Staub oder Blitz im Spiel kurz haengt.
+func _warmup() -> void:
+	var before := get_child_count()
+	dust(Vector3(0.0, 0.0, 0.0), 1.0)
+	flash(Vector3(0.0, 1.0, 0.0), 1.0)
+	for i in range(before, get_child_count()):
+		var n := get_child(i)
+		if n is CPUParticles3D:
+			var g := Gradient.new()
+			g.set_color(0, Color(1, 1, 1, 0.0))
+			g.set_color(1, Color(1, 1, 1, 0.0))
+			(n as CPUParticles3D).color_ramp = g
+		elif n is MeshInstance3D and (n as MeshInstance3D).material_override is StandardMaterial3D:
+			var m := (n as MeshInstance3D).material_override as StandardMaterial3D
+			m.albedo_color.a = 0.0
 
 
 ## Weicher runder Fleck (weiss in der Mitte, aussen durchsichtig) fuer Staub und Blitz.

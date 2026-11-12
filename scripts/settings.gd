@@ -14,35 +14,104 @@ const SLIDERS := [
 	["slow_attack", "Zeitlupe Angriff", 0, 90, 5, "%", "Solange dein Angreifer in der Luft ist"],
 	["slow_block", "Zeitlupe Block", 0, 90, 5, "%", "Solange dein Blocker oder der Angreifer in der Luft ist"],
 	["receive_help", "Annahme-Hilfe", 100, 220, 10, "%", "Wie groß das Timing-Fenster bei Annahme und Abwehr ist"],
+	["input_lag", "Timing-Ausgleich", 0, 200, 10, "ms", "Gleicht die Verzögerung von Bildschirm und Controller aus: so viel später darfst du drücken oder loslassen"],
 	["stick_hold", "Stick nachhalten", 0, 400, 25, "ms", "So lange gilt die Schlagrichtung noch, wenn du den rechten Stick loslässt"],
 	["ai_defense", "Gegner-Abwehr", 0, 100, 5, "", "Wie gut der Gegner deine Angriffe abwehrt"],
 	["ai_block", "Gegner-Block", 0, 100, 5, "", "Wie oft der Gegner dich blockt"],
 	["faults", "Fehler-Strenge", 0, 100, 5, "%", "Wie oft Netzfehler, Doppelberührung und Ball gehalten passieren"],
-	["whistle", "Lautstärke Pfiff", 0, 100, 5, "%", "Wie laut der Schiedsrichter pfeift (0 = aus)"],
-	["sfx", "Lautstärke Ball", 0, 100, 5, "%", "Baggern, Pritschen, Schlag, Block und Aufprall (0 = aus)"],
-	["crowd", "Lautstärke Publikum", 0, 100, 5, "%", "Gemurmel, Jubel und Raunen in der Halle (0 = aus)"],
+	["master", "Gesamtlautstärke", 0, 100, 5, "%", "Alles zusammen: Effekte und später die Musik (0 = stumm)"],
+	["fx_vol", "Effektlautstärke", 0, 100, 5, "%", "Alle Geräusche im Spiel: Ball, Pfiff, Schuhe und Publikum (0 = aus). Einzeln einstellbar unter Erweitert"],
+	["music", "Musiklautstärke", 0, 100, 5, "%", "Noch gibt es keine Musik im Spiel, der Regler ist schon da"],
+	["whistle", "Pfiff", 0, 100, 5, "%", "Wie laut der Schiedsrichter pfeift (0 = aus)"],
+	["sfx", "Ball (Baggern, Pritschen, Netz, Aufprall)", 0, 100, 5, "%", "Lautstärke dieser Ballgeräusche (0 = aus)"],
+	["snd_hit", "Schlag und Aufschlag", 0, 100, 5, "%", "Wie laut Angriff, Aufschlag und Leger knallen (0 = aus)"],
+	["snd_block", "Block", 0, 100, 5, "%", "Wie laut der Ball am Block klingt (0 = aus)"],
+	["snd_shoes", "Schuhquietschen", 0, 100, 5, "%", "Quietschen beim Absprung und Hechten (0 = aus)"],
+	["crowd", "Publikum Grundgeräusch", 0, 100, 5, "%", "Gemurmel in der Halle, das in langen Ballwechseln lauter wird (0 = aus)"],
+	["crowd_fx", "Publikum Jubel und Raunen", 0, 100, 5, "%", "Jubel, Applaus und Raunen nach Punkten (0 = aus)"],
 	["serve_time", "Zeit für den Aufschlag", 8, 30, 1, "s", "So lange hast du nach dem Pfiff Zeit zum Aufschlagen (Regel: 8 Sekunden)"],
 ]
 
 const PRESETS := {
-	"leicht": {"slow_serve": 60, "slow_receive": 45, "slow_set": 30, "slow_attack": 75, "slow_block": 75,
-		"receive_help": 180, "stick_hold": 300, "ai_defense": 25, "ai_block": 25, "faults": 15, "serve_time": 20},
-	"normal": {"slow_serve": 50, "slow_receive": 20, "slow_set": 0, "slow_attack": 60, "slow_block": 50,
-		"receive_help": 120, "stick_hold": 200, "ai_defense": 70, "ai_block": 70, "faults": 35, "serve_time": 12},
-	"profi": {"slow_serve": 30, "slow_receive": 0, "slow_set": 0, "slow_attack": 45, "slow_block": 45,
-		"receive_help": 100, "stick_hold": 150, "ai_defense": 80, "ai_block": 75, "faults": 100, "serve_time": 8},
+	"leicht": {"slow_serve": 40, "slow_receive": 35, "slow_set": 20, "slow_attack": 50, "slow_block": 50,
+		"receive_help": 180, "stick_hold": 300, "input_lag": 90, "ai_defense": 25, "ai_block": 25, "faults": 15, "serve_time": 20},
+	"normal": {"slow_serve": 25, "slow_receive": 10, "slow_set": 0, "slow_attack": 30, "slow_block": 30,
+		"receive_help": 120, "stick_hold": 200, "input_lag": 80, "ai_defense": 70, "ai_block": 70, "faults": 35, "serve_time": 12},
+	"profi": {"slow_serve": 10, "slow_receive": 0, "slow_set": 0, "slow_attack": 15, "slow_block": 15,
+		"receive_help": 100, "stick_hold": 150, "input_lag": 70, "ai_defense": 80, "ai_block": 75, "faults": 100, "serve_time": 8},
 }
 const PRESET_TEXT := {"leicht": "Leicht", "normal": "Normal", "profi": "Profi", "eigene": "Eigene"}
 
+## Hilfe je Bereich: assistiert (Standard, das Spiel nimmt dir den Bereich ab) oder manuell
+## (du steuerst selbst: genauer, aber fehleranfaelliger). [Schluessel, Anzeige, Erklaerung]
+const ASSIST_AREAS := [
+	["run", "Laufen zur Annahme", "Assistiert: dein Spieler läuft von selbst zum Ball. Manuell: du läufst mit dem linken Stick und kannst dich genau hinter den Ball stellen."],
+	["pass_aim", "Annahme zielen", "Ohne Eingabe geht die Annahme immer zum Zuspieler. R1 halten = flach ans Netz, L1 halten = hoch und sicher, linker Stick seitlich im Kontakt = Ball neben dem Körper ausgleichen. Assistiert: grobe Wahl. Manuell: der rechte Stick zielt zusätzlich stufenlos, falsch gegengehalten fliegt der Ball weg."],
+	["dive", "Hechten", "Assistiert: das Spiel hechtet von selbst, wenn du sonst nicht hinkommst, B hechtet zusätzlich von Hand. Manuell: nur B hechtet, ohne B bleibst du stehen und bist schneller wieder im Spiel."],
+	["attack_aim", "Angriff zielen", "Assistiert: wer nur gut trifft, schlägt trotzdem in die Ecken, die der Stick zeigt. Manuell: nur ein sauber getroffener Ball (R2 genau am höchsten Punkt) erreicht die scharfen Winkel, dafür sind Linie und scharfe Diagonale noch etwas schärfer."],
+	["approach", "Anlauf", "Assistiert: der Angreifer läuft von selbst an. Manuell: der linke Stick steuert den Anlauf (außen, eng, verzögern)."],
+	["timing_bar", "Timing-Strich", "Assistiert: nach jedem Kontakt zeigt ein kleiner Strich unter deinem Spieler eine halbe Sekunde lang, ob du zu früh (links) oder zu spät (rechts) warst. Manuell: kein Strich, nur Rumble, Ton und Ballflug."],
+	["set_aim", "Zuspiel-Feinsteuerung", "Assistiert: das Zuspiel geht an die übliche Stelle. Manuell: der rechte Stick schiebt den Ball näher ans Netz oder weiter weg."],
+]
+
 var preset := "normal"
 var values := {}
+var assists := {}  # Bereich -> true (assistiert) / false (manuell); fehlt = assistiert
 ## Spielregeln (gehoeren zu keiner Stufe): Gewinnsaetze und Libero-Wechsel.
 var sets_to_win := 2  # 1 = ein Satz, 2 = Best of 3, 3 = Best of 5
 var libero_auto := false
 var replays := true  # Wiederholung starker Punkte
 
-## Lautstaerken gehoeren zu keiner Stufe.
-const AUDIO := {"whistle": 35, "sfx": 70, "crowd": 60}
+## Lautstaerken gehoeren zu keiner Stufe. Die Einzelregler (Pfiff, Ball, ...) gelten relativ zur
+## Effektlautstaerke, die Effektlautstaerke relativ zur Gesamtlautstaerke.
+const AUDIO := {"master": 100, "fx_vol": 100, "music": 100, "whistle": 35, "sfx": 70, "snd_hit": 100,
+	"snd_block": 100, "snd_shoes": 100, "crowd": 60, "crowd_fx": 100}
+const AUDIO_SIMPLE := ["master", "fx_vol", "music"]
+const AUDIO_ADVANCED := ["whistle", "sfx", "snd_hit", "snd_block", "snd_shoes", "crowd", "crowd_fx"]
+
+## Kamera je Spielablauf. Entfernung und Hoehe in Prozent der Standardansicht, Neigung (Blick hoch
+## oder runter) und Sichtfeld in Grad dazu.
+const CAM_MODES := [["view", "Übersicht"], ["serve", "Aufschlag"], ["attack", "Angriff"], ["block", "Block"], ["replay", "Wiederholung"]]
+const CAM_PARAMS := [
+	["dist", "Entfernung", 50, 160, 5, "%", "Wie weit die Kamera vom Geschehen weg ist (100 = Standard)"],
+	["height", "Höhe", 40, 180, 5, "%", "Wie hoch die Kamera steht (100 = Standard)"],
+	["tilt", "Neigung", -20, 20, 1, "°", "Blick nach oben (+) oder unten (−), 0 = Standard"],
+	["fov", "Sichtfeld", -15, 20, 1, "°", "Weiter Blickwinkel (+) oder näher heranzoomen (−), 0 = Standard"],
+]
+const CAM_GLOBAL := [
+	["cam_follow", "Ball folgen", 0, 200, 10, "%", "Wie stark die Übersichtskamera mit dem Ball mitgeht (0 = steht fest)"],
+	["cam_smooth", "Reaktion", 40, 200, 10, "%", "Wie schnell die Kamera Bewegungen nachzieht (niedrig = weich und träge, hoch = direkt)"],
+	["cam_shake", "Kamerawackeln", 0, 200, 10, "%", "Wie stark die Kamera bei harten Schlägen wackelt (0 = aus)"],
+	["cam_punch", "Heranrücken beim Wuchtschlag", 0, 200, 10, "%", "Wie stark die Kamera bei einem Wuchtschlag kurz heranzoomt (0 = aus)"],
+]
+static var CAM_DEFAULTS := _cam_defaults()
+
+
+static func _cam_defaults() -> Dictionary:
+	var d := {}
+	for m in CAM_MODES:
+		for p in CAM_PARAMS:
+			d["cam_%s_%s" % [m[0], p[0]]] = 0.0 if p[5] == "°" else 100.0
+	for g in CAM_GLOBAL:
+		d[g[0]] = 100.0
+	return d
+
+
+## Alle Regler fuer das Menue, auch die der Kamera (je Ablauf: cam_<ablauf>_<art>).
+static func all_sliders() -> Array:
+	var list: Array = SLIDERS.duplicate()
+	for m in CAM_MODES:
+		for p in CAM_PARAMS:
+			list.append(["cam_%s_%s" % [m[0], p[0]], p[1], p[2], p[3], p[4], p[5], "%s: %s" % [m[1], p[6]]])
+	list.append_array(CAM_GLOBAL)
+	return list
+
+
+## Kamera einer Gruppe auf Standard.
+func reset_camera(prefix: String) -> void:
+	for k in CAM_DEFAULTS:
+		if k.begins_with(prefix):
+			values[k] = CAM_DEFAULTS[k]
 
 
 func _init() -> void:
@@ -54,6 +123,8 @@ func apply_preset(name: String) -> void:
 	var keep := {}
 	for k in AUDIO:
 		keep[k] = float(values.get(k, AUDIO[k]))
+	for k in CAM_DEFAULTS:
+		keep[k] = float(values.get(k, CAM_DEFAULTS[k]))
 	values = (PRESETS[name] as Dictionary).duplicate()
 	values.merge(keep)
 
@@ -76,7 +147,16 @@ func _detect_preset() -> void:
 
 
 func get_v(key: String) -> float:
-	return float(values.get(key, PRESETS["normal"].get(key, AUDIO.get(key, 35))))
+	return float(values.get(key, PRESETS["normal"].get(key, AUDIO.get(key, CAM_DEFAULTS.get(key, 35)))))
+
+
+## Ist dieser Bereich assistiert? (Standard: ja)
+func assisted(area: String) -> bool:
+	return bool(assists.get(area, true))
+
+
+func set_assisted(area: String, v: bool) -> void:
+	assists[area] = v
 
 
 ## Spieltempo in einer Phase (1 = normal, 0,1 = zehnmal langsamer).
@@ -95,8 +175,10 @@ func save() -> void:
 	cf.set_value("spiel", "gewinnsaetze", sets_to_win)
 	cf.set_value("spiel", "libero_auto", libero_auto)
 	cf.set_value("spiel", "wiederholungen", replays)
+	for a in ASSIST_AREAS:
+		cf.set_value("hilfen", a[0], assisted(a[0]))
 	for k in values:
-		cf.set_value("werte", k, values[k])
+		cf.set_value("kamera" if CAM_DEFAULTS.has(k) else "werte", k, values[k])
 	cf.save(PATH)
 
 
@@ -107,10 +189,14 @@ func load_file() -> void:
 	sets_to_win = clampi(int(cf.get_value("spiel", "gewinnsaetze", 2)), 1, 3)
 	libero_auto = bool(cf.get_value("spiel", "libero_auto", false))
 	replays = bool(cf.get_value("spiel", "wiederholungen", true))
+	for a in ASSIST_AREAS:
+		assists[a[0]] = bool(cf.get_value("hilfen", a[0], true))
 	var p: String = cf.get_value("spiel", "stufe", "normal")
 	apply_preset(p if PRESETS.has(p) else "normal")
 	for k in AUDIO:
 		values[k] = float(cf.get_value("werte", k, AUDIO[k]))
+	for k in CAM_DEFAULTS:
+		values[k] = float(cf.get_value("kamera", k, CAM_DEFAULTS[k]))
 	if p == "eigene":
 		for s in SLIDERS:
 			values[s[0]] = cf.get_value("werte", s[0], values[s[0]])

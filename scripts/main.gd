@@ -7,9 +7,21 @@ const HudScript := preload("res://scripts/hud.gd")
 var camera: Camera3D
 var match_node
 var _shake := 0.0
-var _cam_base := Vector3(-18.5, 9.5, 0.0)
-var _cam_pos := Vector3(-18.5, 9.5, 0.0)
+var _shake_t := 0.0
+var _want_pos_s := Vector3.INF  # weich nachgefuehrtes Kameraziel
+var _want_look_s := Vector3.INF
+var _was_close := false  # Kamera war gerade nah (Angriff, Aufschlag) und gleitet zurueck
+var _back_t := 0.0
+var _cam_base := Vector3(-22.0, 11.2, 0.0)
+var _cam_pos := Vector3(-22.0, 11.2, 0.0)
 var _cam_look := Vector3(1.5, 1.0, 0.0)
+var _cam_vel := Vector3.ZERO  # Federung: Kamera beschleunigt und bremst weich
+var _look_vel := Vector3.ZERO
+var _fov_vel := 0.0
+var _hold_mode := ""  # letzte Nahansicht (Angriff, Block), bleibt kurz stehen
+var _hold_subj = null
+var _hold_left := 0.0
+var _fov_kick := 0.0  # Grad: kurzes Heranruecken beim Wuchtschlag, klingt schnell ab
 var arena: Arena
 var fx: HitFx
 var _air := {}  # Spieler -> war in der Luft (fuer Schuhquietschen)
@@ -19,6 +31,12 @@ var hud
 var menu
 var start_menu
 var _shot_phase := ""
+var debug_menu
+## Einstellungsmenue, Seite Kamera: diese Ansicht (view, serve, attack, block, replay) wird zum
+## Ausprobieren gezeigt, auch waehrend das Spiel pausiert. Leer = normal.
+var preview_mode := ""
+var _prev_snd_t := -1.0
+var drill: DebugDrill
 var _shot_phase_t := 0.0
 
 
@@ -56,8 +74,35 @@ func _ready() -> void:
 	hud.whistled.connect(func(): arena.referee_whistle())
 	match_node.big_hit.connect(_on_big_hit)
 	match_node.contact.connect(_on_contact)
+	match_node.own_block.connect(_on_own_block)
 	match_node.point_won.connect(_on_point)
+	# Spielzug angesagt: kurzes Doppel-Tippen im Controller statt einer Einblendung.
+	match_node.play_called.connect(func(_t: int, call: String):
+		if call != "":
+			_rumble(0.25, 0.0, 0.05)
+			get_tree().create_timer(0.09, true, false, true).timeout.connect(func(): _rumble(0.25, 0.0, 0.05))
+		else:
+			_rumble(0.2, 0.0, 0.12))
 	add_child(match_node)
+	var feedback = preload("res://scripts/touch_feedback.gd").new()
+	add_child(feedback)
+	feedback.setup(match_node, sfx, camera, _rumble)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--flow="):
+			add_child(load("res://tools/flow_probe.gd").new())  # Test: Fluss messen
+		elif a.begins_with("--perf="):
+			add_child(load("res://tools/perf_probe.gd").new())  # Test: Bildzeiten messen
+		elif a.begins_with("--lab-"):
+			# Test: Animations-Labor (Fehler messen, Stellen filmen), siehe anim_lab.gd und tools/lab/
+			var lab := AnimLab.new()
+			lab.match_node = match_node
+			lab.main_cam = camera
+			add_child(lab)
+			break
+	# Technikname nach dem Kontakt und Tastenhinweise beim ersten Mal (Skill-Gap)
+	var tech_hints := preload("res://scripts/tech_hints.gd").new()
+	tech_hints.match_node = match_node
+	hud.add_child(tech_hints)
 	var trainer := preload("res://scripts/trainer.gd").new()
 	trainer.match_node = match_node
 	hud.add_child(trainer)
@@ -68,20 +113,61 @@ func _ready() -> void:
 	start_menu.settings.connect(func(): menu.open(true))
 	hud.add_child(start_menu)
 	start_menu.visible = false
+	if DebugMode.ENABLED:
+		debug_menu = preload("res://scripts/debug_menu.gd").new()
+		debug_menu.start.connect(_on_debug_start)
+		debug_menu.closed.connect(_on_debug_closed)
+		debug_menu.to_title.connect(_on_debug_title)
+		hud.add_child(debug_menu)
+		start_menu.debug.connect(func():
+			start_menu.visible = false
+			debug_menu.open(false))
 	menu = preload("res://scripts/menu.gd").new()
 	menu.cfg = match_node.cfg
 	menu.match_node = match_node
 	menu.closed.connect(_on_menu_closed)
 	menu.to_title.connect(_on_to_title)
+	menu.camera_preview.connect(func(m: String): preview_mode = m)
+	menu.setting_changed.connect(_on_setting_changed)
+	# Waehrend das Menue offen ist (Spiel pausiert) laeuft die Kamera und der Ton weiter.
+	var driver := preload("res://scripts/pause_driver.gd").new()
+	driver.target = self
+	add_child(driver)
 	hud.add_child(menu)
 	if match_node.attract:
 		hud.set_attract(true)
 		start_menu.call_deferred("open")
+	if OS.get_cmdline_user_args().has("--quick"):
+		Teams.quick = true  # Test: Schnellspiel
 	if OS.get_cmdline_user_args().has("--play") or Teams.autostart:
 		Teams.autostart = false
 		call_deferred("_on_play")  # Test: Startmenue ueberspringen; nach Teamwechsel direkt spielen
+	if DebugMode.pending != "":
+		call_deferred("_start_drill", DebugMode.pending)  # Debug: Uebung nach Teamwechsel
+		DebugMode.pending = ""
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--drill-opt="):  # Test: Einstellung der Uebungen, z.B. --drill-opt=start:serve
+			var v: String = a.get_slice("=", 1).get_slice(":", 1)
+			DebugMode.opts[a.get_slice("=", 1).get_slice(":", 0)] = int(v) if v.is_valid_int() else (v == "true" if v in ["true", "false"] else v)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--drill="):  # Test: Debug-Uebung direkt starten
+			call_deferred("_start_drill", a.get_slice("=", 1))
+		elif a.begins_with("--debug-menu"):  # Test: Debug-Menue oeffnen, --debug-menu=1 auf Seite 2
+			if a.contains("="):
+				debug_menu._tab = int(a.get_slice("=", 1))
+			call_deferred("_open_debug_menu")
 	if OS.get_cmdline_user_args().has("--menu"):
 		menu.call_deferred("open")
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--menu-tab="):  # Test: Menue auf Seite N (0 Spiel, 1 Ton, 2 Kamera[:Ansicht]) oeffnen
+			var v: String = a.get_slice("=", 1)
+			menu._cam_group = int(v.get_slice(":", 1)) if v.contains(":") else 0
+			menu.call_deferred("open")
+			menu.call_deferred("_show_tab", int(v.get_slice(":", 0)))
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--club-tab="):  # Test: Mein Verein auf Seite N oeffnen (0 Team, 1 Sammlung, 2 Aufgaben)
+			start_menu._club._tab = int(a.get_slice("=", 1))
+			start_menu.call_deferred("_open_club")
 	if OS.get_cmdline_user_args().has("--trainer"):
 		get_tree().create_timer(0.4).timeout.connect(trainer.open)  # Test: Trainerbank oeffnen
 
@@ -101,44 +187,150 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	# Kamera in Echtzeit bewegen, auch waehrend der Zeitlupe.
 	var rd := delta / maxf(Engine.time_scale, 0.01)
-	var bz: float = match_node.ball.position.z if match_node and match_node.ball else 0.0
+	# Sichtbare (weich zwischen den Physiktakten gerechnete) Lage, sonst zittert die Kamera leicht
+	# im Takt der Physik gegen das fluessig gezeichnete Bild.
+	var bpos: Vector3 = match_node.ball.get_global_transform_interpolated().origin if match_node and match_node.ball else Vector3.ZERO
+	var bz := bpos.z
 	# Die Kamera steht immer hinter dem eigenen Team, auch nach dem Seitenwechsel.
 	var cs: float = match_node.camera_side() if match_node else -1.0
-	var want_pos := Vector3(cs * absf(_cam_base.x), _cam_base.y, bz * 0.25)
-	var want_look := Vector3(-cs * 1.5, 1.0, bz * 0.2)
-	var want_fov := 52.0
+	# Lebendige Uebersicht: die Kamera geht etwas mit dem Ball mit (seitlich, zur Hoehe, und
+	# rueckt ein Stueck vor, wenn der Ball beim Gegner ist). Die Ausschlaege bleiben klein,
+	# damit immer das ganze Feld und alle eigenen Spieler im Bild sind.
+	var cfg: GameSettings = match_node.cfg if match_node else null
+	var follow: float = cfg.unit("cam_follow") if cfg else 1.0
+	bz *= follow
+	var far := clampf(-cs * bpos.x / 9.0 * follow, 0.0, 1.0)  # 0 = Ball bei uns, 1 = Ball tief beim Gegner
+	var want_pos := Vector3(cs * (absf(_cam_base.x) - 1.2 * far), _cam_base.y - 0.4 * far, bz * 0.35)
+	var want_look := Vector3(-cs * 1.5 + 0.15 * (bpos.x + cs * 1.5), 1.0 + clampf(bpos.y - 2.0, 0.0, 6.0) * 0.08, bz * 0.32)
+	var want_fov := 55.0
 	var subj = match_node.cam_subject if match_node else null
-	if match_node and match_node.cam_mode == "replay":
+	# Nahansicht kurz halten, damit die Kamera nicht zwischen Angriff, Block und Uebersicht
+	# hin- und herspringt.
+	var mode: String = match_node.cam_mode if match_node else ""
+	var after_block: bool = match_node != null and match_node.phase == match_node.Phase.RALLY \
+		and match_node.clock - match_node.block_at < 2.2 and match_node.clock >= match_node.block_at
+	if preview_mode != "" and match_node:
+		mode = "replay" if preview_mode == "replay" else ("" if preview_mode == "view" else preview_mode)
+		subj = _preview_subject(preview_mode)
+		_hold_left = 0.0
+	elif mode == "block":
+		# Kein eigener Blickwechsel beim Block: die Uebersicht zeigt Block und Angriff, ein
+		# Schnitt hin und zurueck reisst den Ballwechsel nur auseinander.
+		mode = ""
+		subj = null
+		_hold_left = 0.0
+	elif mode == "attack" and not after_block:
+		_hold_mode = mode
+		_hold_subj = subj
+		_hold_left = 0.7
+	elif after_block:
+		# Nach einem Block (eigener oder gegnerischer): sofort raus aus der Nahansicht, damit man
+		# sieht, wer den Ball abwehren kann.
+		mode = ""
+		subj = null
+		_hold_left = 0.0
+	elif mode == "" and _hold_left > 0.0 and is_instance_valid(_hold_subj) and match_node.phase == match_node.Phase.RALLY:
+		_hold_left -= rd
+		mode = _hold_mode
+		subj = _hold_subj
+	else:
+		_hold_left = 0.0
+	if match_node and mode == "replay":
 		# Fernsehkamera von der Seitenlinie, folgt dem Ball.
-		var b: Vector3 = match_node.ball.position
+		var b: Vector3 = bpos
 		want_pos = Vector3(b.x * 0.6, 5.2, -12.2)
 		want_look = Vector3(b.x * 0.9, maxf(b.y * 0.6, 0.8), b.z * 0.3)
 		want_fov = 44.0
 	elif subj != null:
 		var s: float = subj.side
-		var p: Vector3 = subj.position
-		match match_node.cam_mode:
+		var p: Vector3 = subj.get_global_transform_interpolated().origin
+		match mode:
 			"serve":
 				# Hinter der Schulter des Aufschlaegers.
 				want_pos = p + Vector3(s * 4.4, 3.3, 2.4)
 				want_look = Vector3(-s * 4.0, 2.6, p.z * 0.4)
 				want_fov = 55.0
 			"attack":
-				want_pos = Vector3(s * 5.2, 3.3, p.z * 0.75 + 0.6)
-				want_look = Vector3(-s * 2.0, 2.4, p.z * 0.6)
-				want_fov = 56.0
+				# Erhoeht hinter dem Angreifer: der Blick geht ueber die Netzkante auf den Schlag
+				# und ins gegnerische Feld, nicht durch das Netz.
+				# Hinterfeldangreifer stehen weit hinter der 3-m-Linie: Kamera rueckt hinter ihn und
+				# blickt weiter, damit man Anlauf und Ball sieht.
+				var back := clampf((absf(p.x) - 2.5) / 3.0, 0.0, 1.0)
+				want_pos = Vector3(s * maxf(5.0, absf(p.x) + 3.6), 5.8 + 1.0 * back, p.z * 0.8 + 1.2)
+				want_look = Vector3(-s * lerpf(1.2, 0.2, back), 2.0, p.z * 0.65)
+				want_fov = 56.0 + 6.0 * back
 			"block":
 				want_pos = Vector3(s * 5.6, 3.6, p.z * 0.7)
 				want_look = Vector3(-s * 3.0, 2.2, p.z * 0.6)
 				want_fov = 56.0
-	var k := clampf(rd * 4.0, 0.0, 1.0)
-	_cam_pos = _cam_pos.lerp(want_pos, k)
-	_cam_look = _cam_look.lerp(want_look, k)
-	camera.fov = lerpf(camera.fov, want_fov, k)
+			"free":
+				# Debug, freies Laufen: schraeg von vorn neben dem Spieler, ganzer Koerper im Bild.
+				want_pos = p + Vector3(-s * 3.2, 2.1, 4.6)
+				want_look = p + Vector3(0.0, 1.15 + 0.5 * subj.jump_h, 0.0)
+				want_fov = 50.0
+	if after_block and mode == "" and preview_mode == "":
+		# Weiter weg und etwas hoeher: das ganze eigene Feld mit allen Abwehrspielern im Bild.
+		var k := clampf(1.0 - (match_node.clock - match_node.block_at - 1.6) / 0.6, 0.0, 1.0)
+		want_pos += Vector3(cs * 1.6, 1.0, 0.0) * k
+		want_fov += 4.0 * k
+	if cfg and mode != "free":
+		var key := "view" if (mode == "" or subj == null and mode != "replay") else mode
+		var res := _cam_tune(key, want_pos, want_look, want_fov, cfg)
+		want_pos = res[0]
+		want_look = res[1]
+		want_fov = res[2]
+	if _fov_kick > 0.0:
+		want_fov -= _fov_kick * (cfg.unit("cam_punch") if cfg else 1.0)
+		_fov_kick = maxf(0.0, _fov_kick - rd * 9.0)
+	# Kritisch gedaempfte Feder statt hartem Nachziehen: kein Ruck beim Wechsel der Ansicht.
+	var w := 3.2
+	if mode == "replay":
+		w = 4.0
+	elif mode == "attack":
+		w = 4.0  # zuegig, aber weich in die Angriffsansicht, damit sie zum Schlag steht
+	elif after_block:
+		w = 3.8  # nach dem Block zuegig in die Weite
+		_was_close = false
+	elif _was_close:
+		w = 2.2  # nach Angriff oder Aufschlag langsam zurueck in die Uebersicht gleiten
+	if mode in ["attack", "serve"]:
+		_was_close = true
+		_back_t = 0.0
+	elif _was_close:
+		_back_t += rd
+		if _back_t > 1.6:
+			_was_close = false
+	if cfg:
+		w *= cfg.unit("cam_smooth")
+	var cdt := minf(rd, 0.1)
+	var steps := maxi(1, ceili(cdt / 0.008))
+	var h := cdt / steps
+	var goal_pos := want_pos
+	var goal_look := want_look
+	for i in steps:
+		# Ziel erst weich nachfuehren, dann die Feder: so beginnt jeder Schwenk sanft statt mit
+		# einem Ruck, wenn sich die Ansicht aendert.
+		var kp := 1.0 - exp(-h * w * 2.5)
+		_want_pos_s = goal_pos if _want_pos_s == Vector3.INF else _want_pos_s.lerp(goal_pos, kp)
+		_want_look_s = goal_look if _want_look_s == Vector3.INF else _want_look_s.lerp(goal_look, kp)
+		want_pos = _want_pos_s
+		want_look = _want_look_s
+		_cam_vel += ((want_pos - _cam_pos) * w * w - _cam_vel * 2.0 * w) * h
+		_cam_pos += _cam_vel * h
+		_look_vel += ((want_look - _cam_look) * w * w - _look_vel * 2.0 * w) * h
+		_cam_look += _look_vel * h
+		_fov_vel += ((want_fov - camera.fov) * w * w - _fov_vel * 2.0 * w) * h
+		camera.fov += _fov_vel * h
+	_shot_attack_check()
 	var off := Vector3.ZERO
 	if _shake > 0.0:
-		_shake = maxf(0.0, _shake - rd * 2.5)
-		off = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * _shake * 0.25
+		# Weiches Nachschwingen statt Zufallszittern in jedem Bild (das wirkte wie Ruckeln).
+		_shake = maxf(0.0, _shake - rd * 3.0)
+		_shake_t += rd
+		var a := _shake * _shake * 0.09 * (cfg.unit("cam_shake") if cfg else 1.0)
+		off = Vector3(sin(_shake_t * 31.0), sin(_shake_t * 23.0 + 1.3), sin(_shake_t * 27.0 + 2.1) * 0.5) * a
+	# Kameraseite im Menue: das Bild nach oben schieben, damit es nicht unter dem Menue liegt.
+	camera.v_offset = lerpf(camera.v_offset, -1.2 if preview_mode != "" else 0.0, minf(rd * 10.0, 1.0))
 	camera.position = _cam_pos + off
 	camera.look_at(_cam_look + off * 0.5)
 	if _shot_phase != "" and match_node:
@@ -153,12 +345,80 @@ func _process(delta: float) -> void:
 				get_tree().quit()
 	if match_node:
 		_update_hall()
-		sfx.sfx_volume = match_node.cfg.get_v("sfx")
-		sfx.crowd_volume = match_node.cfg.get_v("crowd") * (0.6 if match_node.attract else 1.0)
+		_apply_audio()
+
+
+## Kameraeinstellungen eines Ablaufs (key) auf Zielposition, Blickpunkt und Sichtfeld anwenden.
+func _cam_tune(key: String, pos: Vector3, look: Vector3, fov: float, cfg: GameSettings) -> Array:
+	var d := cfg.unit("cam_%s_dist" % key)
+	var hgt := cfg.unit("cam_%s_height" % key)
+	pos = Vector3(look.x + (pos.x - look.x) * d, pos.y * hgt, look.z + (pos.z - look.z) * d)
+	var flat := Vector2(pos.x - look.x, pos.z - look.z).length()
+	look.y += tan(deg_to_rad(cfg.get_v("cam_%s_tilt" % key))) * flat
+	return [pos, look, fov + cfg.get_v("cam_%s_fov" % key)]
+
+
+## Spieler fuer die Ansichtsvorschau im Einstellungsmenue (Aufschlaeger, Angreifer, Blocker).
+func _preview_subject(mode: String):
+	var t: int = maxi(match_node.human_team, 0)
+	match mode:
+		"serve":
+			return match_node.server()
+		"attack", "block":
+			for pl in match_node.players[t]:
+				if match_node.is_front_row(pl) and pl.role != "L":
+					return pl
+	return null
+
+
+## Lautstaerken aus den Einstellungen an Gesamtlautstaerke, Effekte und Publikum geben.
+func _apply_audio() -> void:
+	var c: GameSettings = match_node.cfg
+	var fx := c.unit("fx_vol")
+	AudioServer.set_bus_volume_db(0, -80.0 if c.get_v("master") <= 0.0 else linear_to_db(c.unit("master")))
+	sfx.sfx_volume = c.get_v("sfx") * fx
+	sfx.crowd_volume = c.get_v("crowd") * fx * (0.6 if match_node.attract else 1.0)
+	sfx.cheer_volume = c.get_v("crowd") * c.unit("crowd_fx") * fx
+	sfx.kind_gain = {"spike": c.unit("snd_hit"), "serve": c.unit("snd_hit"), "tip": c.unit("snd_hit"),
+		"block": c.unit("snd_block"), "squeak": c.unit("snd_shoes")}
+
+
+## Einstellungsmenue: beim Verstellen eines Tonreglers kurz Probe hoeren.
+func _on_setting_changed(key: String) -> void:
+	if not GameSettings.AUDIO.has(key):
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _prev_snd_t < 0.3:
+		return
+	_prev_snd_t = now
+	_apply_audio()
+	match key:
+		"whistle":
+			hud.whistle_preview(match_node.cfg.get_v("whistle") * match_node.cfg.unit("fx_vol"))
+		"crowd":
+			pass  # Grundgeraeusch laeuft ohnehin
+		"crowd_fx":
+			sfx.crowd("cheer", 0.8)
+		"snd_hit":
+			sfx.play("spike", 0.9)
+		"snd_block":
+			sfx.play("block", 0.9)
+		"snd_shoes":
+			sfx.play("squeak", 0.8)
+		_:
+			sfx.play("bump", 0.8)
 
 
 func _on_big_hit(strength: float) -> void:
 	_shake = maxf(_shake, strength)
+	if strength >= 0.8:
+		_rumble(0.35 * strength, 0.7 * strength, 0.16)
+
+
+## Controller kurz vibrieren lassen (alle angeschlossenen Controller).
+func _rumble(weak: float, strong: float, secs: float) -> void:
+	for dev in Input.get_connected_joypads():
+		Input.start_joy_vibration(dev, clampf(weak, 0.0, 1.0), clampf(strong, 0.0, 1.0), secs)
 
 
 func _on_play() -> void:
@@ -169,9 +429,74 @@ func _on_play() -> void:
 
 
 func _on_to_title() -> void:
+	_stop_drill()
 	match_node.back_to_title()
 	hud.set_attract(true)
 	start_menu.open()
+
+
+# ---------------------------------------------------------------- Debug-Modus
+
+## Uebung starten. Sind im Startmenue andere Teams gewaehlt, wird die Halle neu geladen.
+func _on_debug_start(id: String) -> void:
+	get_tree().paused = false
+	var pick: Array = start_menu._pick
+	if pick[0] == Club.ID and not Club.can_play():
+		pick[0] = Teams.home if Teams.home != Club.ID else Teams.next_id(Club.ID, pick[1])
+	if pick[0] != Teams.home or pick[1] != Teams.away or pick[0] == Club.ID:
+		Teams.home = pick[0]
+		Teams.away = pick[1]
+		Teams.picked = true
+		DebugMode.pending = id
+		get_tree().reload_current_scene()
+		return
+	_start_drill(id)
+
+
+func _start_drill(id: String) -> void:
+	_stop_drill()
+	start_menu.visible = false
+	debug_menu.visible = false
+	hud.set_attract(false)
+	sfx.stop_crowd()
+	Teams.quick = false
+	drill = DebugDrill.new()
+	drill.id = id
+	drill.match_node = match_node
+	drill.menu_wanted.connect(_open_debug_menu.bind(true))
+	add_child(drill)
+
+
+func _stop_drill() -> void:
+	if drill != null and is_instance_valid(drill):
+		drill.queue_free()
+		match_node.drill = null
+		match_node.ball.visible = true
+		match_node.ball_shadow.visible = true
+	drill = null
+
+
+func _open_debug_menu(in_game := false) -> void:
+	if in_game:
+		get_tree().paused = true
+	start_menu.visible = false
+	debug_menu.open(in_game)
+
+
+func _on_debug_closed() -> void:
+	if drill != null:
+		# Kurz warten, sonst oeffnet dieselbe Taste (Esc, Start) gleich das Pausenmenue.
+		get_tree().create_timer(0.25, true, false, true).timeout.connect(func():
+			if not debug_menu.visible:
+				get_tree().paused = false)
+		return
+	start_menu.refresh_after_debug()
+	start_menu.open()
+
+
+func _on_debug_title() -> void:
+	get_tree().paused = false
+	_on_to_title()
 
 
 func _on_menu_closed() -> void:
@@ -180,7 +505,36 @@ func _on_menu_closed() -> void:
 
 
 ## Ballkontakte: Geraeusch, Lichtblitz bei harten Schlaegen, Staub am Boden.
+## Dein Block: voller Block = harter Doppelknall, die Halle springt sofort auf, der Controller
+## rummst. Beruehrung = dumpfer Zusatzklang und nur ein kurzes Zucken.
+func _on_own_block(full: bool, pos: Vector3) -> void:
+	if full:
+		sfx.play("block", 1.0, 0.72)
+		fx.flash(pos, 1.0, Color(0.85, 0.92, 1.0))
+		sfx.crowd("cheer", 1.0)
+		crowd.cheer(match_node.human_team, 1.0)
+		_rumble(0.6, 1.0, 0.22)
+	else:
+		sfx.play("block", 0.45, 0.85)
+		_rumble(0.3, 0.0, 0.08)
+
+
 func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
+	if kind == "spike_super":
+		# Wuchtschlag: zwei tiefe Knalle, kraeftiger Ruck. Bewusst ohne Leuchtspur, bleibt echt.
+		sfx.play("spike", 1.0)
+		sfx.play("spike", 1.0, 0.7)
+		fx.flash(pos, 1.0)
+		_shake = maxf(_shake, 0.6)
+		_fov_kick = 3.5
+		return
+	if kind == "spike_perfect":
+		# Perfekter Angriff: zweiter, tieferer Knall unter dem normalen Schlag, heller Blitz.
+		sfx.play("spike", 1.0)
+		sfx.play("spike", 1.0, 0.78)
+		fx.flash(pos, 1.0)
+		_shake = maxf(_shake, 0.45)
+		return
 	sfx.play(kind, strength)
 	sfx.excitement = minf(1.0, match_node.rally_touches / 10.0)
 	match kind:
@@ -193,9 +547,19 @@ func _on_contact(kind: String, pos: Vector3, strength: float) -> void:
 				fx.flash(pos, strength * 0.8)
 		"block":
 			fx.flash(pos, strength, Color(0.85, 0.92, 1.0))
+		"net":
+			# Ball liegt schon wieder auf seiner Seite: das Netz beult zur anderen Seite aus.
+			arena.net.hit(pos, strength, -signf(match_node.ball.position.x))
 		"floor":
-			fx.dust(pos, strength)
-			if strength > 0.8:
+			var heavy: bool = match_node.last_super and match_node.last_action in ["attack", "serve"]
+			fx.dust(pos, 1.0 if heavy else strength)
+			if heavy:
+				# Wuchtschlag schlaegt ein: mehr Staub, tieferer Aufprall, Controller brummt.
+				fx.dust(pos, 1.0)
+				sfx.play("floor", 1.0, 0.75)
+				_shake = maxf(_shake, 0.45)
+				_rumble(0.5, 0.9, 0.22)
+			elif strength > 0.8:
 				_shake = maxf(_shake, 0.3)
 
 
@@ -234,6 +598,7 @@ func _screenshot_later(spec: String) -> void:
 # ---------------------------------------------------------------- Steuerung
 
 func _setup_input() -> void:
+	_setup_menu_pad()
 	_action("move_left", [KEY_A, KEY_LEFT], [], [[JOY_AXIS_LEFT_X, -1.0]])
 	_action("move_right", [KEY_D, KEY_RIGHT], [], [[JOY_AXIS_LEFT_X, 1.0]])
 	_action("move_up", [KEY_W, KEY_UP], [], [[JOY_AXIS_LEFT_Y, -1.0]])
@@ -248,19 +613,56 @@ func _setup_input() -> void:
 	_action("aim_right", [KEY_L], [], [[JOY_AXIS_RIGHT_X, 1.0]])
 	_action("aim_up", [KEY_I], [], [[JOY_AXIS_RIGHT_Y, -1.0]])
 	_action("aim_down", [KEY_K], [], [[JOY_AXIS_RIGHT_Y, 1.0]])
+	# Tastenplan "aus einem Guss": jede Taste ist ein Verb und bedeutet ueberall dasselbe.
+	# A = Ball spielen (Technik waehlt das Spiel), X = bewusst pritschen, B = hechten,
+	# R2 = springen und schlagen, L2 = Gefuehl, R1 = schnell und flach, L1 = hoch und sicher,
+	# R3 = Spieler wechseln.
 	_action("bump", [KEY_SPACE, KEY_ENTER], [JOY_BUTTON_A])
 	_action("overhand", [KEY_Q], [JOY_BUTTON_X])
-	_action("set_dump", [KEY_V], [JOY_BUTTON_RIGHT_SHOULDER])
-	_action("set_fast", [KEY_R], [JOY_BUTTON_B])
-	_action("set_quick", [KEY_F], [JOY_BUTTON_Y])
+	_action("set_dump", [KEY_V], [JOY_BUTTON_RIGHT_SHOULDER])  # R1: schnell und flach
+	_action("set_fast", [KEY_R], [JOY_BUTTON_B])  # B: hechten
 	_action("hit", [KEY_E], [], [[JOY_AXIS_TRIGGER_RIGHT, 1.0]])
-	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])
-	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])
+	# L2 = Gefuehlstaste (Roll-Shot, tiefe Ecke, Luecke, Dump, Flatteraufschlag), Tastatur: Umschalt
+	_action("finesse", [KEY_SHIFT], [], [[JOY_AXIS_TRIGGER_LEFT, 1.0]])
+	_action("serve_prev", [KEY_1], [JOY_BUTTON_LEFT_SHOULDER])  # L1: hoch und sicher (Menues: Seite zurueck)
+	_action("serve_next", [KEY_2], [JOY_BUTTON_RIGHT_SHOULDER])  # nur Menues: Seite vor
+	_action("switch_player", [KEY_TAB], [JOY_BUTTON_RIGHT_STICK])
 	_action("toggle_assist", [KEY_F1], [JOY_BUTTON_BACK])
 	_action("toggle_slowmo", [KEY_F2], [])
 	_action("toggle_zoom", [KEY_F3], [])
 	_action("menu", [KEY_ESCAPE], [JOY_BUTTON_START])
 	_action("trainer", [KEY_T], [JOY_BUTTON_Y])
+
+
+## Menues: A bestaetigt, B geht zurueck, Steuerkreuz und linker Stick bewegen die Auswahl.
+## Godot bringt das mit, aber nicht auf jedem Rechner mit Controller (Windows, andere Pads);
+## hier wird es ausdruecklich gesetzt, damit jedes Menue mit dem Controller geht.
+func _setup_menu_pad() -> void:
+	var map := {"ui_accept": [JOY_BUTTON_A], "ui_cancel": [JOY_BUTTON_B],
+		"ui_left": [JOY_BUTTON_DPAD_LEFT], "ui_right": [JOY_BUTTON_DPAD_RIGHT],
+		"ui_up": [JOY_BUTTON_DPAD_UP], "ui_down": [JOY_BUTTON_DPAD_DOWN]}
+	for name in map:
+		for b in map[name]:
+			var has := false
+			for ev in InputMap.action_get_events(name):
+				if ev is InputEventJoypadButton and ev.button_index == b:
+					has = true
+			if not has:
+				var jb := InputEventJoypadButton.new()
+				jb.button_index = b
+				InputMap.action_add_event(name, jb)
+	var axes := {"ui_left": [JOY_AXIS_LEFT_X, -1.0], "ui_right": [JOY_AXIS_LEFT_X, 1.0],
+		"ui_up": [JOY_AXIS_LEFT_Y, -1.0], "ui_down": [JOY_AXIS_LEFT_Y, 1.0]}
+	for name in axes:
+		var has := false
+		for ev in InputMap.action_get_events(name):
+			if ev is InputEventJoypadMotion and ev.axis == axes[name][0] and signf(ev.axis_value) == axes[name][1]:
+				has = true
+		if not has:
+			var jm := InputEventJoypadMotion.new()
+			jm.axis = axes[name][0]
+			jm.axis_value = axes[name][1]
+			InputMap.action_add_event(name, jm)
 
 
 func _action(name: String, keys: Array, buttons: Array, axes: Array = []) -> void:
@@ -302,3 +704,22 @@ func _update_hall() -> void:
 			if now_air != was and m.phase == m.Phase.RALLY and randf() < 0.55:
 				sfx.play("squeak", randf_range(0.3, 0.8))
 			_air[pl] = now_air
+
+
+## Testhilfe: --shot-attack=bild.png speichert ein Bild im Moment des eigenen Schlags
+## (zusammen mit --botplay).
+var _shot_attack_n := 0
+func _shot_attack_check() -> void:
+	if match_node == null or _shot_attack_n >= 3:
+		return
+	for a in OS.get_cmdline_user_args():
+		if not a.begins_with("--shot-attack="):
+			continue
+		var o = match_node.opp
+		if match_node.cam_mode == "attack" and o != null and not o.done and absf(o.t - match_node.clock) < 0.03:
+			_shot_attack_n += 1
+			var path: String = a.get_slice("=", 1).get_basename() + "_%d.png" % _shot_attack_n
+			get_viewport().get_texture().get_image().save_png(path)
+			print("Screenshot gespeichert: ", path)
+			if _shot_attack_n >= 3:
+				get_tree().quit()

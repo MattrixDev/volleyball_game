@@ -1,5 +1,6 @@
 extends Control
-## Zeigt den Ball gross mit dem Trefferpunkt (rechter Stick) und daneben die Kraftanzeige.
+## Zeigt den Ball mit dem Trefferpunkt (rechter Stick) und daneben die Kraftanzeige. Ohne Text
+## und ohne Kasten (wie die Schussanzeige bei FIFA).
 
 var contact := Vector2.ZERO  # y + = oben
 var charge := 0.0
@@ -9,6 +10,8 @@ var mode := "attack"  # attack oder serve
 
 const RADIUS := 78.0
 const OVERCHARGE := 1.25
+const SUPER_LO := 0.93  # wie in match.gd: schmale Zone fuer den Wuchtschlag
+const SUPER_HI := 1.07
 
 
 func _ready() -> void:
@@ -21,10 +24,7 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
-	var font := ThemeDB.fallback_font
 	var c := Vector2(110, 130)
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.35))
-	draw_string(font, Vector2(12, 26), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1))
 
 	# Ball mit Zonen
 	draw_circle(c, RADIUS, Color(1.0, 0.92, 0.45))
@@ -33,12 +33,6 @@ func _draw() -> void:
 	draw_line(c + Vector2(-RADIUS * 0.94, -band), c + Vector2(RADIUS * 0.94, -band), Color(0, 0, 0, 0.35), 2.0)
 	draw_line(c + Vector2(-RADIUS * 0.94, band), c + Vector2(RADIUS * 0.94, band), Color(0, 0, 0, 0.35), 2.0)
 	draw_arc(c, RADIUS * 0.85, 0, TAU, 64, Color(0, 0, 0, 0.18), 2.0)
-	var top_txt := "Topspin"
-	var mid_txt := "flach" if mode == "attack" else "Flatter"
-	var low_txt := "Leger" if mode == "attack" else "kurz"
-	_label(font, c + Vector2(0, -RADIUS * 0.6), top_txt)
-	_label(font, c + Vector2(0, 5), mid_txt)
-	_label(font, c + Vector2(0, RADIUS * 0.68), low_txt)
 
 	# Trefferpunkt
 	var p := c + Vector2(contact.x, -contact.y) * RADIUS * 0.92
@@ -57,8 +51,15 @@ func _draw() -> void:
 	var over_y := by + bh * (1.0 - OVERCHARGE / top_v)
 	draw_rect(Rect2(bx, sweet0, bw, sweet1 - sweet0), Color(0.2, 0.7, 0.3, 0.6))
 	draw_rect(Rect2(bx, by, bw, over_y - by), Color(0.8, 0.15, 0.15, 0.5))
+	# Wucht-Zone: schmal und golden; hier loslassen und perfekt treffen = Wuchtschlag
+	var sup0 := by + bh * (1.0 - SUPER_HI / top_v)
+	var sup1 := by + bh * (1.0 - SUPER_LO / top_v)
+	draw_rect(Rect2(bx - 3, sup0, bw + 6, sup1 - sup0), Color(1.0, 0.78, 0.2, 0.85))
+	draw_rect(Rect2(bx - 3, sup0, bw + 6, sup1 - sup0), Color(1, 1, 1, 0.9), false, 1.5)
 	var v := clampf(charge, 0.0, top_v)
 	var fill_col := Color(1.0, 0.85, 0.1)
+	if charge >= SUPER_LO and charge <= SUPER_HI:
+		fill_col = Color(1.0, 1.0, 0.85)  # gerade in der Wucht-Zone: Fuellung leuchtet hell
 	if charge > OVERCHARGE:
 		fill_col = Color(1.0, 0.3, 0.2)
 	var h := bh * v / top_v
@@ -68,7 +69,6 @@ func _draw() -> void:
 	if charging or charge > 0.0:
 		draw_rect(Rect2(bx + 4 + wobble, by + bh - h, bw - 8, h), fill_col)
 	draw_rect(Rect2(bx, by, bw, bh), Color(1, 1, 1, 0.8), false, 2.0)
-	draw_string(font, Vector2(bx - 6, by + bh + 24), "Kraft", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1))
 
 
 func _label(font: Font, pos: Vector2, txt: String) -> void:

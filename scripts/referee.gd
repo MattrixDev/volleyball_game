@@ -28,6 +28,8 @@ var _whistle_short: AudioStream
 var _whistle_long: AudioStream
 var _player: AudioStreamPlayer
 var _time := 0.0
+## Die 2D-Anzeige oben rechts ist aus: der 3D-Schiedsrichter zeigt die Zeichen. Pfiff und Ablauf laufen weiter.
+const SHOW_PANEL := false
 var volume := 35.0  # 0 bis 100, aus den Einstellungen
 
 
@@ -71,7 +73,7 @@ func _next() -> void:
 	_pose = s[0]
 	_caption.text = s[1]
 	_until = _time + float(s[2])
-	visible = true
+	visible = SHOW_PANEL
 	queue_redraw()
 
 

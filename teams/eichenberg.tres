@@ -1,12 +1,308 @@
-[gd_resource type="Resource" script_class="TeamStyle" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "eichenberg_16"
+first_name = "Jonathan"
+last_name = "Albers"
+number = 16
+role = "S"
+height_m = 1.89
+jump = 75
+power = 73
+serve = 80
+receive = 67
+defense = 80
+setting = 88
+block = 75
+speed = 83
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 2
+hair = 3
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "eichenberg_15"
+first_name = "Noah"
+last_name = "Ihlenfeld"
+number = 15
+role = "OH"
+height_m = 1.93
+jump = 86
+power = 79
+serve = 72
+receive = 77
+defense = 84
+setting = 67
+block = 84
+speed = 80
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 0
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "eichenberg_12"
+first_name = "Vincent"
+last_name = "Bauer"
+number = 12
+role = "MB"
+height_m = 2.13
+jump = 87
+power = 81
+serve = 72
+receive = 58
+defense = 70
+setting = 70
+block = 93
+speed = 76
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 5
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "eichenberg_02"
+first_name = "Rafael"
+last_name = "Jansen"
+number = 2
+role = "OP"
+height_m = 1.99
+jump = 86
+power = 92
+serve = 85
+receive = 65
+defense = 80
+setting = 64
+block = 78
+speed = 74
+traits = PackedStringArray("sprungwunder", "linkshaender")
+left_handed = true
+skin = 4
+hair = 2
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "eichenberg_10"
+first_name = "Philipp"
+last_name = "Seidel"
+number = 10
+role = "OH"
+height_m = 2.02
+jump = 78
+power = 83
+serve = 79
+receive = 83
+defense = 74
+setting = 65
+block = 82
+speed = 73
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 4
+hair = 5
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "eichenberg_05"
+first_name = "Anton"
+last_name = "Urban"
+number = 5
+role = "MB"
+height_m = 2.12
+jump = 85
+power = 85
+serve = 86
+receive = 53
+defense = 72
+setting = 64
+block = 97
+speed = 71
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 5
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "eichenberg_11"
+first_name = "Marten"
+last_name = "Ulbrich"
+number = 11
+role = "L"
+height_m = 1.88
+jump = 46
+power = 52
+serve = 38
+receive = 91
+defense = 91
+setting = 73
+block = 48
+speed = 84
+traits = PackedStringArray()
+left_handed = false
+skin = 3
+hair = 4
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "eichenberg_13"
+first_name = "Fabian"
+last_name = "Kühn"
+number = 13
+role = "S"
+height_m = 1.91
+jump = 67
+power = 63
+serve = 77
+receive = 76
+defense = 69
+setting = 84
+block = 67
+speed = 76
+traits = PackedStringArray()
+left_handed = false
+skin = 0
+hair = 0
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "eichenberg_01"
+first_name = "Jannik"
+last_name = "Yilmaz"
+number = 1
+role = "OH"
+height_m = 1.93
+jump = 79
+power = 86
+serve = 79
+receive = 85
+defense = 89
+setting = 63
+block = 79
+speed = 84
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 2
+hair = 1
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "eichenberg_07"
+first_name = "Paul"
+last_name = "Peters"
+number = 7
+role = "MB"
+height_m = 2.01
+jump = 74
+power = 73
+serve = 63
+receive = 46
+defense = 69
+setting = 56
+block = 87
+speed = 75
+traits = PackedStringArray("lange_arme", "blockleser")
+left_handed = false
+skin = 3
+hair = 2
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "eichenberg_20"
+first_name = "Lukas"
+last_name = "Böttcher"
+number = 20
+role = "OP"
+height_m = 2.05
+jump = 75
+power = 73
+serve = 73
+receive = 50
+defense = 63
+setting = 57
+block = 76
+speed = 66
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 2
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "eichenberg_18"
+first_name = "Julian"
+last_name = "Ebert"
+number = 18
+role = "L"
+height_m = 1.88
+jump = 45
+power = 28
+serve = 27
+receive = 85
+defense = 73
+setting = 62
+block = 30
+speed = 75
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 2
+hair = 5
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "eichenberg_06"
+first_name = "Jonathan"
+last_name = "Zander"
+number = 6
+role = "OH"
+height_m = 1.96
+jump = 74
+power = 65
+serve = 72
+receive = 67
+defense = 71
+setting = 52
+block = 67
+speed = 75
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 5
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "eichenberg_03"
+first_name = "Daniel"
+last_name = "Haas"
+number = 3
+role = "OH"
+height_m = 1.97
+jump = 73
+power = 70
+serve = 74
+receive = 83
+defense = 77
+setting = 57
+block = 67
+speed = 81
+traits = PackedStringArray("kraftpaket")
+left_handed = false
+skin = 2
+hair = 3
 
 [resource]
 script = ExtResource("1")
 id = "eichenberg"
 name = "TSV Eichenberg"
 short_name = "TSV"
+play_style = "blockstark"
 jersey = Color(0.46, 0.16, 0.2, 1)
 panel = Color(0.89, 0.85, 0.77, 1)
 collar = Color(0.89, 0.85, 0.77, 1)
@@ -20,3 +316,4 @@ sole = Color(0.82, 0.8, 0.76, 1)
 libero_jersey = Color(0.84, 0.84, 0.81, 1)
 libero_panel = Color(0.46, 0.16, 0.2, 1)
 libero_number = Color(0.46, 0.16, 0.2, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])

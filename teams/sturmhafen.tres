@@ -1,0 +1,319 @@
+[gd_resource type="Resource" script_class="TeamStyle" load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scripts/team_style.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player_data.gd" id="2"]
+
+[sub_resource type="Resource" id="p0"]
+script = ExtResource("2")
+id = "sturmhafen_01"
+first_name = "Jonas"
+last_name = "Uhlig"
+number = 1
+role = "S"
+height_m = 1.94
+jump = 85
+power = 72
+serve = 97
+receive = 76
+defense = 82
+setting = 92
+block = 80
+speed = 81
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 2
+
+[sub_resource type="Resource" id="p1"]
+script = ExtResource("2")
+id = "sturmhafen_09"
+first_name = "Daniel"
+last_name = "Lange"
+number = 9
+role = "OH"
+height_m = 2
+jump = 89
+power = 86
+serve = 87
+receive = 77
+defense = 78
+setting = 71
+block = 78
+speed = 84
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 3
+
+[sub_resource type="Resource" id="p2"]
+script = ExtResource("2")
+id = "sturmhafen_11"
+first_name = "Nils"
+last_name = "Fink"
+number = 11
+role = "MB"
+height_m = 2.12
+jump = 76
+power = 91
+serve = 87
+receive = 51
+defense = 61
+setting = 62
+block = 90
+speed = 72
+traits = PackedStringArray("lange_arme")
+left_handed = false
+skin = 0
+hair = 1
+
+[sub_resource type="Resource" id="p3"]
+script = ExtResource("2")
+id = "sturmhafen_18"
+first_name = "Mats"
+last_name = "Krüger"
+number = 18
+role = "OP"
+height_m = 2.05
+jump = 93
+power = 90
+serve = 97
+receive = 74
+defense = 87
+setting = 69
+block = 87
+speed = 76
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 0
+
+[sub_resource type="Resource" id="p4"]
+script = ExtResource("2")
+id = "sturmhafen_20"
+first_name = "Joris"
+last_name = "Otten"
+number = 20
+role = "OH"
+height_m = 1.95
+jump = 88
+power = 92
+serve = 91
+receive = 78
+defense = 81
+setting = 68
+block = 81
+speed = 83
+traits = PackedStringArray()
+left_handed = false
+skin = 1
+hair = 3
+
+[sub_resource type="Resource" id="p5"]
+script = ExtResource("2")
+id = "sturmhafen_10"
+first_name = "Joris"
+last_name = "Mohr"
+number = 10
+role = "MB"
+height_m = 2.09
+jump = 89
+power = 79
+serve = 85
+receive = 62
+defense = 80
+setting = 66
+block = 97
+speed = 77
+traits = PackedStringArray("blockleser")
+left_handed = false
+skin = 1
+hair = 2
+
+[sub_resource type="Resource" id="p6"]
+script = ExtResource("2")
+id = "sturmhafen_15"
+first_name = "Simon"
+last_name = "Ihlenfeld"
+number = 15
+role = "L"
+height_m = 1.86
+jump = 53
+power = 47
+serve = 45
+receive = 85
+defense = 86
+setting = 73
+block = 36
+speed = 91
+traits = PackedStringArray("katze")
+left_handed = false
+skin = 4
+hair = 0
+
+[sub_resource type="Resource" id="p7"]
+script = ExtResource("2")
+id = "sturmhafen_06"
+first_name = "Jannik"
+last_name = "Frost"
+number = 6
+role = "S"
+height_m = 1.88
+jump = 72
+power = 73
+serve = 83
+receive = 68
+defense = 76
+setting = 96
+block = 70
+speed = 80
+traits = PackedStringArray("spielmacher")
+left_handed = false
+skin = 1
+hair = 2
+
+[sub_resource type="Resource" id="p8"]
+script = ExtResource("2")
+id = "sturmhafen_17"
+first_name = "Henrik"
+last_name = "Asmussen"
+number = 17
+role = "OH"
+height_m = 1.98
+jump = 74
+power = 84
+serve = 89
+receive = 77
+defense = 70
+setting = 57
+block = 67
+speed = 72
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 0
+hair = 1
+
+[sub_resource type="Resource" id="p9"]
+script = ExtResource("2")
+id = "sturmhafen_03"
+first_name = "Bastian"
+last_name = "Steffens"
+number = 3
+role = "MB"
+height_m = 2.09
+jump = 74
+power = 79
+serve = 73
+receive = 44
+defense = 62
+setting = 62
+block = 90
+speed = 64
+traits = PackedStringArray()
+left_handed = false
+skin = 4
+hair = 1
+
+[sub_resource type="Resource" id="p10"]
+script = ExtResource("2")
+id = "sturmhafen_08"
+first_name = "Mika"
+last_name = "Zander"
+number = 8
+role = "OP"
+height_m = 1.98
+jump = 81
+power = 78
+serve = 79
+receive = 60
+defense = 65
+setting = 54
+block = 77
+speed = 78
+traits = PackedStringArray("linkshaender", "kanone")
+left_handed = true
+skin = 1
+hair = 1
+
+[sub_resource type="Resource" id="p11"]
+script = ExtResource("2")
+id = "sturmhafen_13"
+first_name = "Sören"
+last_name = "Kern"
+number = 13
+role = "L"
+height_m = 1.8
+jump = 44
+power = 46
+serve = 47
+receive = 90
+defense = 89
+setting = 74
+block = 25
+speed = 87
+traits = PackedStringArray()
+left_handed = false
+skin = 2
+hair = 5
+
+[sub_resource type="Resource" id="p12"]
+script = ExtResource("2")
+id = "sturmhafen_02"
+first_name = "Tobias"
+last_name = "Quast"
+number = 2
+role = "OH"
+height_m = 1.96
+jump = 77
+power = 77
+serve = 81
+receive = 72
+defense = 74
+setting = 54
+block = 71
+speed = 80
+traits = PackedStringArray("kanone")
+left_handed = false
+skin = 2
+hair = 1
+
+[sub_resource type="Resource" id="p13"]
+script = ExtResource("2")
+id = "sturmhafen_14"
+first_name = "Julian"
+last_name = "Engel"
+number = 14
+role = "OH"
+height_m = 1.98
+jump = 75
+power = 77
+serve = 87
+receive = 77
+defense = 76
+setting = 57
+block = 71
+speed = 71
+traits = PackedStringArray("flatter")
+left_handed = false
+skin = 3
+hair = 5
+
+[resource]
+script = ExtResource("1")
+id = "sturmhafen"
+name = "VC Sturmhafen"
+short_name = "VCS"
+play_style = "aufschlagstark"
+jersey = Color(0.08, 0.09, 0.1, 1)
+panel = Color(0.86, 0.72, 0.2, 1)
+collar = Color(0.86, 0.72, 0.2, 1)
+logo = Color(0.86, 0.72, 0.2, 1)
+number = Color(0.95, 0.82, 0.3, 1)
+shorts = Color(0.08, 0.09, 0.1, 1)
+socks = Color(0.08, 0.09, 0.1, 1)
+shoes = Color(0.12, 0.12, 0.13, 1)
+accent = Color(0.86, 0.72, 0.2, 1)
+sole = Color(0.8, 0.8, 0.78, 1)
+libero_jersey = Color(0.86, 0.72, 0.2, 1)
+libero_panel = Color(0.08, 0.09, 0.1, 1)
+libero_number = Color(0.08, 0.09, 0.1, 1)
+players = Array[ExtResource("2")]([SubResource("p0"), SubResource("p1"), SubResource("p2"), SubResource("p3"), SubResource("p4"), SubResource("p5"), SubResource("p6"), SubResource("p7"), SubResource("p8"), SubResource("p9"), SubResource("p10"), SubResource("p11"), SubResource("p12"), SubResource("p13")])
